@@ -7,10 +7,22 @@
         "dev": "vite"
     },
     "dependencies": {
+        "@fontsource/inconsolata": "^5.2.8",
         "@laravel/passkeys": "^0.2.0",
         "@tailwindcss/vite": "^4.1.11",
+        "@welshman/app": "^0.8.16",
+        "@welshman/content": "^0.8.16",
+        "@welshman/feeds": "^0.8.16",
+        "@welshman/lib": "^0.8.16",
+        "@welshman/net": "^0.8.16",
+        "@welshman/router": "^0.8.16",
+        "@welshman/signer": "^0.8.16",
+        "@welshman/store": "^0.8.16",
+        "@welshman/util": "^0.8.16",
         "concurrently": "^9.0.1",
         "laravel-vite-plugin": "^3.1",
+        "nostr-tools": "^2.23.9",
+        "svelte": "^5.56.4",
         "tailwindcss": "^4.0.7",
         "vite": "^8.0.0"
     },
