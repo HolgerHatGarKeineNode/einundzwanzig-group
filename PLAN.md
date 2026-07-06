@@ -25,6 +25,7 @@ Der Nostr-Client **Flotilla** (SvelteKit-SPA, Nostr-SDK `@welshman/*`) wird in e
 - **Auth = Nostr-Login** (npub/Signer). **Signing bleibt IMMER client-seitig** — der Private Key verlässt den Browser nie. Der Server sieht nur den (verifizierten) pubkey.
 - **Kein persistenter Realtime-Server.** welshman hält Live-Subscriptions bereits im Browser; separates Realtime/Polling ist eigener, späterer Meilenstein.
 - **Hybrid Web + Mobile aus EINER Codebasis.** Dasselbe Laravel-Projekt wird (a) als klassischer Web-Client gehostet **und** (b) via **NativePHP Mobile v3** zu einer iOS-/Android-App kompiliert. NativePHP bettet PHP+Laravel in eine WebView-Shell ein (kein Remote-Webserver, offline-first, nur SQLite/`database`-Queue, `.env` wird mitgeliefert). Die welshman-Nostr-Insel (JS + WebSockets) läuft im WebView unverändert weiter. Details, Konsequenzen und Mobile-Meilenstein: **§11**. App-ID `space.einundzwanzig.mobile` (fix).
+- **Eigenes Design — KEINE Flotilla-Optik.** Flotillas UI/Layout wird *nicht* übernommen. `flotilla-einundzwanzig` bekommt ein neues, eigenständiges AAA-Design aus der **einundzwanzig-Designfamilie**: das bereits ausgereifte Design-System aus `einundzwanzig-mobile-app` (Schrift **Inconsolata**, Bitcoin-Brand-Ramp, Token-/Motion-Skalen) wird als Grundlage übernommen — siehe **§12**. Das Komponenten-Mapping (§6) beschreibt nur **Funktion/Datenquelle**, nicht Aussehen.
 - **Ziel-Projekt existiert:** Laravel 13 / Livewire **v4** / Flux Pro v2.15 / Fortify + Passkeys / Laravel Boost / Tailwind v4 (via `@tailwindcss/vite`). *(Interop-Muster für Livewire **4** ggf. gegen die Doku verifizieren.)*
 
 ---
@@ -182,6 +183,8 @@ Keine Machbarkeitsfrage mehr (das ist Flotillas produktiver Stack). Nur bestäti
 
 ## 6. Komponenten-/Routen-Mapping
 
+> **Achtung — dies ist ein Funktions-/Datenmapping, KEIN Design.** Die Tabelle sagt nur, *welche Livewire-Komponente welche welshman-Daten mountet* — nicht, wie es aussieht. Layout, Optik, Dichte und Navigation kommen aus **§12** (kompaktes, mobile-first Discord-Paradigma im einundzwanzig-Design-System). Flotillas Aussehen wird **nicht** nachgebaut.
+
 | Flotilla-Route / -Komponente | Livewire-Komponente | Flux-Bausteine | Client-Insel (welshman) |
 |---|---|---|---|
 | `AppContainer` (Auth-Gate) | `AppShell` + `auth`-Gate | `flux:sidebar`, `flux:main` | `$pubkey`-Store, Login-Modal |
@@ -247,7 +250,7 @@ Der Signer bleibt in **allen** Fällen client-seitig im WebView — auch auf Mob
 
 ### M0 — Setup: Vite + welshman-Insel + Shell
 - **Ziel:** Build-Pipeline + welshman-Singletons + leere Flux-Shell.
-- **Schritte:** `npm i @welshman/app @welshman/store @welshman/net @welshman/util @welshman/lib @welshman/signer @welshman/router @welshman/content @welshman/feeds @welshman/editor svelte nostr-tools` (+ `@tiptap/core @tiptap/pm` falls Editor; Versionen aus Flotilla: welshman `^0.8.16`, svelte `^5`). **Nur `svelte/store` importieren — kein `@sveltejs/vite-plugin-svelte`, keine `.svelte`-Dateien.** `resources/js/app.js → app.ts`; Vite-Input auf `.ts`; `tsconfig.json`. **Alpine NICHT separat installieren** (Livewire v4 bringt es mit). `resources/js/nostr/core.ts` (repository, tracker, pool, storage-init) + `bridge.ts` (`alpineFromStore`). `Alpine.data(...)` **vor** `Livewire.start()` registrieren. `.env`-Defaults (Space-/Indexer-/Signer-Relays) aus Flotilla übernehmen. Fonts/Logo/Token-Semantik (`surface/content/primary/line`) übernehmen — **nicht** Flotillas Root-Var-Overrides (Kollision mit Flux `--color/--radius/--shadow`).
+- **Schritte:** `npm i @welshman/app @welshman/store @welshman/net @welshman/util @welshman/lib @welshman/signer @welshman/router @welshman/content @welshman/feeds @welshman/editor svelte nostr-tools` (+ `@tiptap/core @tiptap/pm` falls Editor; Versionen aus Flotilla: welshman `^0.8.16`, svelte `^5`). **Nur `svelte/store` importieren — kein `@sveltejs/vite-plugin-svelte`, keine `.svelte`-Dateien.** `resources/js/app.js → app.ts`; Vite-Input auf `.ts`; `tsconfig.json`. **Alpine NICHT separat installieren** (Livewire v4 bringt es mit). `resources/js/nostr/core.ts` (repository, tracker, pool, storage-init) + `bridge.ts` (`alpineFromStore`). `Alpine.data(...)` **vor** `Livewire.start()` registrieren. `.env`-Defaults (Space-/Indexer-/Signer-Relays) aus Flotilla übernehmen. **Design-System aus `einundzwanzig-mobile-app` übernehmen, NICHT aus Flotilla** (§12): `resources/css/app.css` (Inconsolata via `@fontsource/inconsolata`, brand/zinc-Ramp, Radius/Shadow/Motion-Tokens, `surface-card`/`pressable`/safe-area-Utilities, Motion-Bibliothek) als Basis kopieren. Flux `@fluxAppearance`/`@fluxScripts` im Layout; keine Root-Var-Overrides, die mit Flux `--color/--radius/--shadow` kollidieren.
 - **DoD:** Leere Livewire-Seite mit Flux-Layout lädt; `repository`/`pool` im Browser initialisiert; ein Test-`load/pull` gegen einen offenen Relay füllt das `repository` (Konsole); `alpineFromStore` rendert eine Test-Liste.
 
 ### M0.5 — Mobile-WebView-Smoke-Test (Machbarkeits-Gate, früh)
@@ -369,3 +372,34 @@ Shell ───────┤                                    ↑ function_e
 
 ### Was Mobile NICHT ändert
 Die client/server-Grenze aus §3 bleibt: Signing zu 100% im WebView-JS, Server (auch der lokale) nie im Signaturpfad. Mobile fügt nur **Shell + Signer-Transport + Persistenz-Ziel** hinzu — die welshman-Insel selbst ist plattformblind.
+
+---
+
+## 12. Design & UI-System (AAA, einundzwanzig-Familie)
+
+**Leitsatz:** Kein Flotilla-Look. `flotilla-einundzwanzig` erbt die **einundzwanzig-Designsprache** aus `einundzwanzig-mobile-app` — dasselbe Design-System, damit Web-Client und kompilierte App zur selben Marke gehören. Das System ist **schon gebaut und ausgereift**; wir **übernehmen es**, nicht neu erfinden. Source of Truth: `/home/user/Code/einundzwanzig-mobile-app/resources/css/app.css`.
+
+### Layout-Paradigma: kompaktes Discord, mobile-first
+Die Discord-artige Struktur (Space-Rail → Room-Liste → Chat) **bleibt** — sie ist für Gruppen-Chat funktional richtig. Aber **deutlich kompakter als Flotilla** und **mobile-first** entworfen:
+
+- **Mobile (Primärfall, = die kompilierte App):** *ein* Screen zur Zeit, Stack-Navigation statt Spalten. **Bottom-Nav** (`nav-pill`-Indikator aus dem System) als Primärnavigation, **FAB** (`fab-enter`) für Compose/Space anlegen, **Bottom-Sheets** (`--radius-sheet`) statt Desktop-Modals. Space-Wechsel über Sheet/Flyout, nicht über eine dauerhafte Icon-Rail. Safe-Area (`pt-safe`/`pb-safe`) überall. Kompakte Dichte (`density-compact`).
+- **Desktop/Web (Progressive Enhancement):** ab `md`/`lg` darf sich die Anatomie entfalten — schmale **Space-Rail** (Avatare) + **kompakte Room-Liste** + **Chat-Bühne**, optional Member-Panel. Dünnere Rails, dichtere Zeilen, mehr Ruhe als Flotilla. Kein 4-Spalten-Gedränge als Default.
+- **Ein responsives Blade**, das von Bottom-Nav (schmal) zu Rail+Spalten (breit) skaliert. Deckt sich mit den plattform-getrennten Shell-Layouts aus §11 (`mobile.blade` = Bottom-Nav/EDGE, `web.blade` = Rail).
+
+### Übernommene Design-Tokens (aus `app.css`)
+- **Schrift:** `Inconsolata` als `--font-sans` (Monospace-Charakter, technisch/Bitcoin), via `@fontsource/inconsolata` (400/500/600/700). **Das ist die prägende Design-Entscheidung** — die ganze UI ist monospaced.
+- **Farbe:** Bitcoin-Brand-Ramp (`--color-brand-50…950`, brand-500 = `#f7931a`) + `zinc`-Neutrals; `--color-accent = brand`. Light **und** Dark (`.dark`-Variant, Flux `@fluxAppearance`).
+- **Radius:** `--radius-tile` (Kacheln/Badges) < `--radius-card` (Cards) < `--radius-sheet` (Sheets).
+- **Elevation:** `--shadow-card` / `-pressed` / `-pop` / `-glow` (Brand-Glow). Im Dark trägt der Border die Abgrenzung.
+- **Motion:** `--ease-spring` / `--ease-emphasized` / `--duration-tap`.
+- **Utilities:** `surface-card`, `.pressable` (Tap-Haptik), `pt-safe/pb-safe/px-safe`.
+- **Motion-Bibliothek:** `list-stagger`, `page-enter`, `nav-pill`, `fab-enter`, `step-enter`, `.skeleton`-Shimmer, `.empty-state`-Stagger, `slide-down`.
+
+### AAA-Qualitäts-Floor (nicht verhandelbar, aus dem System gelebt)
+- **Motion mit Bedeutung:** Page-Enter bei `wire:navigate`, gestaffelte Listen (`list-stagger`), Press-Feedback (`.pressable`) — aber sparsam, nie Deko-Overkill.
+- **Zustände sind Design:** echte Empty-States (`.empty-state`, mit Handlungsaufforderung), Skeletons statt Spinner beim Laden, AUTH-/Fehler-Callouts mit Klartext (was ist los, was tun) — deckt Flotillas Race-/„No members"-Flackern (Fix A) sauber ab.
+- **`prefers-reduced-motion`** respektiert (im System bereits verdrahtet); sichtbarer Keyboard-Focus (`ring-accent`); Tap-Flächen groß genug trotz kompakter Dichte.
+- **Chat-Details:** Rollen-Badges mit HSL-Inline-Farbe (aus 33534), Autor-Gruppierung + Datum-Divider, „New Messages"-Pill, Mono-Zeilen bleiben lesbar (Zeilenhöhe/Truncation bewusst).
+
+### Vorgehen (frontend-design-Skill)
+Beim tatsächlichen Bauen (M2+) das `frontend-design`-Skill aktivieren. Kein Design von Null: die Token/Utilities aus `app.css` sind gesetzt — die Arbeit ist, die **Chat-spezifischen** Screens (Space-Rail, Room-Liste, Chat-Feed, Directory, Compose) in dieser Sprache **kompakt und mobile-first** zu komponieren, nicht Farben/Fonts neu zu würfeln.
