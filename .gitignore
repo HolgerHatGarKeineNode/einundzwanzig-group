@@ -24,3 +24,6 @@ yarn-error.log
 /.zed
 
 /.playwright-mcp
+
+# NativePHP build artifacts (ephemer, 400+ MB)
+/nativephp

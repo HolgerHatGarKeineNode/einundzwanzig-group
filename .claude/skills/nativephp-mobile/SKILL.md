@@ -12,7 +12,7 @@ Ergebnisse kommen **asynchron als Events** zurück.
 
 ## Projektfakten (dieses Repo)
 
-- App-ID: `space.einundzwanzig.mobile` — **niemals ändern** (Bundle-ID beider Stores).
+- App-ID (flotilla-einundzwanzig): `space.einundzwanzig.group` — **niemals ändern**. (Das Portal `einundzwanzig-mobile-app` nutzt separat `space.einundzwanzig.mobile`.)
 - Core ist frei (v3.0+); License Key (siehe Memory `nativephp-zugangsdaten`) nur für Premium-Plugins; Marketplace-Repo + Credentials sind in `composer.json`/`auth.json` konfiguriert.
 - `JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/android-studio/jbr`, `ANDROID_HOME=~/Android/Sdk`, AVD: `Pixel_10_Pro_XL`.
 - iOS-Builds nur auf macOS; unter Linux Android bauen und iOS via Jump auf dem iPhone testen.
