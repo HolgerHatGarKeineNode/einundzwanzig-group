@@ -6,11 +6,13 @@
  * `init`/`destroy` folgen dem Alpine-Lifecycle (kein Doppel-Alpine).
  */
 import type { Readable } from 'svelte/store'
-import { repository } from '@welshman/app'
+import { repository, pubkey } from '@welshman/app'
 import { load } from '@welshman/net'
 import { deriveEvents } from '@welshman/store'
 import type { TrustedEvent } from '@welshman/util'
+import * as nip19 from 'nostr-tools/nip19'
 import { DEFAULT_RELAYS } from './core'
+import { loginWithExtension, loginWithSecretKey, loginWithBunker, logout } from './session'
 
 /** Generischer Adapter (für M2+): spiegelt einen Store in `this.value`. */
 export function alpineFromStore<T>(store: Readable<T>) {
@@ -41,9 +43,77 @@ type SmokeState = {
     destroy(): void
 }
 
+type AuthState = {
+    pubkey: string | null
+    npub: string
+    hasExtension: boolean
+    method: 'nsec' | 'bunker'
+    keyInput: string
+    bunkerInput: string
+    busy: boolean
+    error: string
+    _unsub: null | (() => void)
+    init(): void
+    destroy(): void
+    run(fn: () => void | Promise<void>): Promise<void>
+    loginExtension(): Promise<void>
+    loginNsec(): Promise<void>
+    loginBunker(): Promise<void>
+    doLogout(): void
+}
+
 export function registerNostrComponents(Alpine: {
     data: (name: string, factory: () => unknown) => void
 }) {
+    // Nostr-Login: spiegelt den welshman-`pubkey`-Store nach Alpine und bietet
+    // die Signer-Pfade (Extension/nsec/Bunker). Signing bleibt im Browser.
+    Alpine.data('nostrAuth', (): AuthState => ({
+        pubkey: null,
+        npub: '',
+        hasExtension: false,
+        method: 'nsec',
+        keyInput: '',
+        bunkerInput: '',
+        busy: false,
+        error: '',
+        _unsub: null,
+        init() {
+            this.hasExtension = typeof (window as unknown as { nostr?: unknown }).nostr !== 'undefined'
+            this._unsub = pubkey.subscribe((pk: string | undefined) => {
+                this.pubkey = pk ?? null
+                this.npub = pk ? nip19.npubEncode(pk) : ''
+            })
+        },
+        async run(fn) {
+            this.busy = true
+            this.error = ''
+            try {
+                await fn()
+            } catch (e) {
+                this.error = e instanceof Error ? e.message : String(e)
+            } finally {
+                this.busy = false
+            }
+        },
+        loginExtension() {
+            return this.run(loginWithExtension)
+        },
+        loginNsec() {
+            return this.run(() => loginWithSecretKey(this.keyInput))
+        },
+        loginBunker() {
+            return this.run(() => loginWithBunker(this.bunkerInput))
+        },
+        doLogout() {
+            logout()
+            this.keyInput = ''
+            this.bunkerInput = ''
+        },
+        destroy() {
+            this._unsub?.()
+        },
+    }))
+
     // M0-Smoke: lädt kind:1-Notes ins `repository` und rendert sie live über
     // deriveEvents → subscribe → Alpine. Beweist die komplette Bridge-Kette.
     Alpine.data('nostrSmoke', (): SmokeState => ({

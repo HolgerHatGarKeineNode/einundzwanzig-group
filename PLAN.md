@@ -2,6 +2,21 @@
 
 > Zielgruppe: die nächste Claude-Instanz, die im Projekt `/home/user/Code/flotilla-einundzwanzig` startet und implementiert.
 
+### Fortschritt (Stand 2026-07-07)
+
+| Phase | Status | Ergebnis / nächster Schritt |
+|---|---|---|
+| **M0** — Setup (Vite + welshman-Insel + Shell) | ✅ **fertig** | `/nostr-smoke` zeigt 30 Live-`kind:1`-Notes; welshman bündelt via Vite; Design-System (Inconsolata) aus mobile-app übernommen. Commit `8fcae0f`. |
+| **M0.5** — Mobile-WebView-Smoke | ✅ **fertig** | welshman-Insel + Relay-WebSockets laufen im nativen Android-WebView (Screenshot bestätigt). App-ID `space.einundzwanzig.group`. Commit `de6eacf`. |
+| **M1** — Nostr-Login (NIP-07/46/55/nsec) | 🚧 **in Arbeit** | ✅ Client-Login fertig: `/nostr-login`, nsec/NIP-07/NIP-46-Signer + welshman-Session + localStorage-Persistenz (Reload/Logout getestet). **Offen:** NIP-98-Handoff an Laravel-Session + `EnsureNostrAuth`-Gate; NIP-55/Amber-Bridge (mobil). Test-Signer: Amber + nsec im Emulator. |
+| **M2** — Space/Room-Liste lesen | ⬜ offen | |
+| **M3** — Directory / Members (Fix A) | ⬜ offen | |
+| **M4** — Chat lesen | ⬜ offen | |
+| **M5** — Chat senden + Room join/leave | ⬜ offen | |
+| **M6** — Politur | ⬜ offen | |
+| **M7** — Realtime/Backend (optional) | ⬜ offen | |
+| **M8** — NativePHP Mobile (Release) | ⬜ offen | Vorarbeit (Setup/Smoke) via M0.5 erledigt. |
+
 ### Referenz-Repos (nur lesen, **nicht ändern**)
 
 | Repo | Rolle | Wofür nachschlagen |
