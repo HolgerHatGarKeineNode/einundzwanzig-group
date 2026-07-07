@@ -4,12 +4,24 @@
     @include('partials.head')
 </head>
 <body class="bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
-    <div class="mx-auto flex h-screen w-full max-w-md flex-col px-4 pt-safe pb-safe">
+    {{-- Chat-Bühne: Kopf + Verlauf + Composer unter EINEM Alpine-Scope (M4 lesen, M5 schreiben). --}}
+    <div x-data="nostrRoomChat(@js($h))" class="mx-auto flex h-screen w-full max-w-md flex-col px-4 pt-safe pb-safe">
 
-        <x-app-header :title="'# '.$h" :back="route('spaces')" class="shrink-0" />
+        <x-app-header :title="'# '.$h" :back="route('spaces')" class="shrink-0">
+            <x-slot:actions>
+                {{-- Folgen/Entfolgen: pflegt die persönliche 10009-Liste (Meine vs. Andere Räume). --}}
+                <flux:button size="xs" variant="ghost" icon="plus"
+                             x-show="!joined" x-cloak x-on:click="join()" aria-label="Raum beitreten">
+                    Beitreten
+                </flux:button>
+                <flux:button size="xs" variant="ghost" icon="arrow-right-start-on-rectangle"
+                             x-show="joined" x-cloak x-on:click="leave()" aria-label="Raum verlassen">
+                    Verlassen
+                </flux:button>
+            </x-slot:actions>
+        </x-app-header>
 
-        {{-- Chat-Bühne: Verlauf scrollt, Live-Nachrichten fließen ein (M4). --}}
-        <div x-data="nostrRoomChat(@js($h))" class="relative flex min-h-0 flex-1 flex-col">
+        <div class="relative flex min-h-0 flex-1 flex-col">
 
             <div x-ref="scroll" x-on:scroll.debounce.50ms="onScroll()"
                  class="min-h-0 flex-1 space-y-0.5 overflow-y-auto pb-4">
@@ -40,7 +52,7 @@
                 <template x-if="!loading && messages.length === 0">
                     <div class="surface-card empty-state mt-8 p-6 text-center">
                         <flux:icon.chat-bubble-left-right class="mx-auto size-8 text-zinc-400" />
-                        <flux:text class="mt-2">Noch keine Nachrichten in diesem Room.</flux:text>
+                        <flux:text class="mt-2">Noch keine Nachrichten in diesem Raum.</flux:text>
                     </div>
                 </template>
 
@@ -55,7 +67,7 @@
                             </div>
                         </template>
 
-                        <div class="flex gap-2 px-1" :class="m.showAuthor ? 'mt-2.5' : ''">
+                        <div class="group flex gap-2 px-1" :class="m.showAuthor ? 'mt-2.5' : ''">
                             <div class="w-8 shrink-0">
                                 <template x-if="m.showAuthor">
                                     <flux:avatar circle size="xs" ::src="m.picture || null" ::name="m.name" />
@@ -70,6 +82,12 @@
                                 </template>
                                 <div class="chat-content text-sm break-words whitespace-pre-wrap" x-html="m.html"></div>
                             </div>
+                            {{-- Löschen nur bei eigenen Nachrichten (erscheint bei Hover) --}}
+                            <button type="button" x-show="m.mine" x-cloak x-on:click="remove(m.id, m.created_at)"
+                                    class="pressable shrink-0 self-start p-1 text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-red-500 focus:opacity-100"
+                                    aria-label="Nachricht löschen">
+                                <flux:icon.trash variant="micro" />
+                            </button>
                         </div>
                     </div>
                 </template>
@@ -81,6 +99,28 @@
                 <flux:button size="xs" variant="primary" class="pointer-events-auto" icon="arrow-down" x-on:click="scrollToBottom()">
                     <span x-text="unread"></span> neue
                 </flux:button>
+            </div>
+        </div>
+
+        {{-- Fehler (Relay lehnt ab, AUTH etc.) --}}
+        <div x-show="error" x-cloak class="shrink-0 pb-2" x-transition.opacity>
+            <flux:callout variant="danger" icon="exclamation-triangle" class="text-sm">
+                <span x-text="error"></span>
+            </flux:callout>
+        </div>
+
+        {{-- Composer: immer verfügbar. Das Schreibrecht erzwingt der Relay (NIP-29);
+             lehnt er ab, erscheint der Fehler oben im Callout. Kein `type=submit`:
+             Flux hängt Submit-Buttons einen `wire:loading`-Spinner an, den ohne
+             Livewire niemand ausblendet — Enter-to-send läuft über den Textarea. --}}
+        <div class="shrink-0 pt-2">
+            <div class="flex items-end gap-2">
+                <flux:textarea x-ref="composer" x-model="draft" rows="1" resize="none"
+                               placeholder="Nachricht schreiben…" class="flex-1"
+                               x-on:keydown.enter.prevent="!$event.shiftKey && send()" />
+                <flux:button type="button" variant="primary" icon="paper-airplane"
+                             x-on:click="send()" ::disabled="sending || draft.trim().length === 0"
+                             aria-label="Senden" />
             </div>
         </div>
     </div>

@@ -8,10 +8,20 @@
  * (ROOM_META) auf genau diesem Relay; die Room→Space-Bindung entsteht über den
  * `tracker` (von welchem Relay das Event kam), nicht über ein Tag.
  */
-import { derived, writable, type Readable } from 'svelte/store'
-import { repository, tracker, pubkey, makeUserData, makeOutboxLoader } from '@welshman/app'
+import { derived, writable, get, type Readable } from 'svelte/store'
+import {
+    repository,
+    tracker,
+    pubkey,
+    makeUserData,
+    makeOutboxLoader,
+    nip44EncryptToSelf,
+    publishThunk,
+    waitForThunkError,
+} from '@welshman/app'
 import { deriveItemsByKey, deriveEventsByIdByUrl, sync, localStorageProvider } from '@welshman/store'
 import { load } from '@welshman/net'
+import { Router } from '@welshman/router'
 import {
     ROOMS,
     ROOM_META,
@@ -19,12 +29,16 @@ import {
     readList,
     readRoomMeta,
     asDecryptedEvent,
+    makeList,
+    addToListPublicly,
+    removeFromListByPredicate,
     getListTags,
     getRelayTagValues,
     getGroupTags,
     getTagValues,
     normalizeRelayUrl,
     isRelayUrl,
+    type List,
     type PublishedList,
     type TrustedEvent,
 } from '@welshman/util'
@@ -262,3 +276,37 @@ export const loadUserGroupList = (): Promise<void> | undefined => {
 /** Lädt die Room-Metas (39000/9008) eines Space direkt vom Space-Relay. */
 export const loadSpaceRooms = (url: string): Promise<unknown> =>
     load({ relays: [url], filters: [{ kinds: [ROOM_META, ROOM_DELETE] }] })
+
+// ── Beitreten / Verlassen (M5) ───────────────────────────────────────────────
+
+/** Zielrelays für die eigene 10009: Space-Relay + Outbox des Users. */
+const groupListRelays = (url: string): string[] => uniq([url, ...Router.get().FromUser().getUrls()])
+
+/** Die aktuelle 10009-Liste des Users oder — falls noch keine existiert — eine leere. */
+const currentGroupList = (): List => get(userGroupList) ?? makeList({ kind: ROOMS })
+
+/**
+ * Reconcilet eine 10009-Änderung (privat zu sich selbst verschlüsselt), signiert
+ * und publiziert sie optimistisch: der Thunk schreibt die neue Liste sofort ins
+ * Repository, `userGroupList` (→ `activeSpaceView`) reagiert live. Gibt '' bei
+ * Erfolg, sonst den Relay-Fehler.
+ */
+const publishGroupList = async (url: string, edit: ReturnType<typeof addToListPublicly>): Promise<string> => {
+    const event = await edit.reconcile(nip44EncryptToSelf)
+    return waitForThunkError(publishThunk({ event, relays: groupListRelays(url) }))
+}
+
+/**
+ * Tritt einem Room bei: fügt `["group",h,url]` (+ `["r",url]`) zur eigenen
+ * 10009-Liste hinzu und publiziert sie. Der Room wandert dadurch live von
+ * „Andere" nach „Meine".
+ */
+export const joinRoom = (url: string, h: string): Promise<string> =>
+    publishGroupList(url, addToListPublicly(currentGroupList(), ['r', url], ['group', h, url]))
+
+/** Verlässt einen Room: entfernt dessen `group`-Tag aus der 10009 und publiziert. */
+export const leaveRoom = (url: string, h: string): Promise<string> => {
+    const target = normalizeRelayUrl(url)
+    const pred = (t: string[]) => t[0] === 'group' && t[1] === h && normalizeRelayUrl(t[2] ?? '') === target
+    return publishGroupList(url, removeFromListByPredicate(currentGroupList(), pred))
+}

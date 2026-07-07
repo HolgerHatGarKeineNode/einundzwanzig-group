@@ -6,14 +6,14 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
-/** Loggt via nsec ein und öffnet den Chat des Rooms „welcome". */
-async function openRoom(page: Page): Promise<void> {
+/** Loggt via nsec ein und öffnet den Chat eines Raums (default „welcome"). */
+async function openRoom(page: Page, h = 'welcome'): Promise<void> {
     await useZooid(page)
     await page.goto('/nostr-login')
     await page.getByPlaceholder(/nsec1/).fill(NSEC)
     await page.getByRole('button', { name: 'Anmelden' }).click()
     await page.waitForURL('**/spaces')
-    await page.goto('/rooms/welcome')
+    await page.goto(`/rooms/${h}`)
 }
 
 /**
@@ -52,4 +52,59 @@ test('M4: neue Nachricht erscheint live', async ({ page }) => {
     ])
 
     await expect(page.getByText(`E2E ${marker}`)).toBeVisible({ timeout: 15_000 })
+})
+
+/**
+ * M5 (Senden) — der eingeloggte User ist Mitglied von „welcome", schreibt eine
+ * Nachricht über den Composer; sie erscheint optimistisch im eigenen Verlauf,
+ * der Composer wird geleert.
+ */
+test('M5: Nachricht senden', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const marker = `Send-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await composer.fill(`Hallo ${marker}`)
+    await page.getByRole('button', { name: 'Senden' }).click()
+
+    await expect(page.getByText(`Hallo ${marker}`)).toBeVisible({ timeout: 15_000 })
+    await expect(composer).toHaveValue('')
+})
+
+/** M5 (Löschen) — eine eigene Nachricht lässt sich löschen und verschwindet. */
+test('M5: eigene Nachricht löschen', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const marker = `Del-${Math.floor(Math.random() * 1e9)}`
+    await page.getByPlaceholder('Nachricht schreiben…').fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+
+    const message = page.getByText(marker, { exact: true })
+    await expect(message).toBeVisible({ timeout: 15_000 })
+
+    // Löschen-Button der eigenen Nachricht (in derselben Zeile).
+    await page.locator('div.group', { hasText: marker }).getByRole('button', { name: 'Nachricht löschen' }).click()
+    await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+})
+
+/**
+ * M5 (Join/Leave) — die persönliche 10009-Liste (Meine vs. Andere Räume). „dev"
+ * ist ein Raum, dem der User nicht folgt: Header zeigt „Beitreten", nach Klick
+ * „Verlassen" (optimistisch übers Repository), nach Verlassen wieder „Beitreten".
+ */
+test('M5: Raum beitreten und verlassen', async ({ page }) => {
+    await openRoom(page, 'dev')
+
+    const join = page.getByRole('button', { name: 'Raum beitreten' })
+    const leave = page.getByRole('button', { name: 'Raum verlassen' })
+
+    await expect(join).toBeVisible({ timeout: 15_000 })
+
+    await join.click()
+    await expect(leave).toBeVisible({ timeout: 15_000 })
+
+    await leave.click()
+    await expect(join).toBeVisible({ timeout: 15_000 })
 })

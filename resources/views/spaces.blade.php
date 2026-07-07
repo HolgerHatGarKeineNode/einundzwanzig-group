@@ -36,7 +36,7 @@
 
                 {{-- Geladen, aber der Space hat keine Rooms --}}
                 <template x-if="!loading && space && space.userRooms.length === 0 && space.otherRooms.length === 0">
-                    <flux:text class="mt-3 text-sm text-zinc-500">Dieser Space hat noch keine Rooms.</flux:text>
+                    <flux:text class="mt-3 text-sm text-zinc-500">Dieser Space hat noch keine Räume.</flux:text>
                 </template>
 
                 <flux:navlist class="mt-3">
@@ -44,7 +44,7 @@
                         <flux:navlist.item icon="hashtag" class="cursor-pointer" x-on:click="window.location.assign('/rooms/' + encodeURIComponent(room.h))"><span x-text="room.name"></span></flux:navlist.item>
                     </template>
 
-                    <flux:navlist.group heading="Andere Rooms" x-show="(space?.otherRooms.length ?? 0) > 0">
+                    <flux:navlist.group heading="Andere Räume" x-show="(space?.otherRooms.length ?? 0) > 0">
                         <template x-for="room in space?.otherRooms ?? []" :key="room.h">
                             <flux:navlist.item icon="hashtag" class="cursor-pointer" x-on:click="window.location.assign('/rooms/' + encodeURIComponent(room.h))"><span x-text="room.name"></span></flux:navlist.item>
                         </template>

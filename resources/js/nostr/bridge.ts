@@ -28,6 +28,9 @@ import {
     displayRelayUrl,
     loadUserGroupList,
     loadSpaceRooms,
+    deriveUserRooms,
+    joinRoom,
+    leaveRoom,
     type SpaceView,
 } from './groups'
 import {
@@ -37,7 +40,14 @@ import {
     type DirectoryView,
     type MemberView,
 } from './members'
-import { deriveRoomChat, listenRoom, loadRoomMessages, type ChatMessage } from './feeds'
+import {
+    deriveRoomChat,
+    listenRoom,
+    loadRoomMessages,
+    sendRoomMessage,
+    deleteRoomMessage,
+    type ChatMessage,
+} from './feeds'
 
 /** Alpine-Magics, die auf `this` einer Komponente verfügbar sind. */
 type AlpineMagics = { $refs: Record<string, HTMLElement>; $nextTick: (cb: () => void) => void }
@@ -120,9 +130,14 @@ type RoomChatState = {
     hasMore: boolean
     atBottom: boolean
     unread: number
+    joined: boolean
+    draft: string
+    sending: boolean
+    error: string
     _url: string | null
     _unsubActive: null | (() => void)
     _unsub: null | (() => void)
+    _unsubJoined: null | (() => void)
     _controller: AbortController | null
     _loadedProfiles: Set<string>
     init(): void
@@ -131,6 +146,10 @@ type RoomChatState = {
     loadOlder(): void
     onScroll(): void
     scrollToBottom(): void
+    send(): Promise<void>
+    remove(id: string, createdAt: number): Promise<void>
+    join(): Promise<void>
+    leave(): Promise<void>
     destroy(): void
 }
 
@@ -223,9 +242,9 @@ export function registerNostrComponents(Alpine: {
         },
     }))
 
-    // Room-Chat (M4, read-only): Verlauf eines Rooms im AKTIVEN Space. Live-Sub
-    // (limit:0) für neue Nachrichten + Cursor-Pagination (Ältere laden). Senden
-    // kommt mit M5. Rendering/Profile/Divider aus feeds.ts (deriveRoomChat).
+    // Room-Chat (M4 lesen + M5 schreiben): Verlauf eines Rooms im AKTIVEN Space.
+    // Live-Sub (limit:0) + Cursor-Pagination. Senden/Löschen (kind 9/5) und
+    // Join/Leave (10009) laufen optimistisch übers Repository (feeds/groups).
     Alpine.data('nostrRoomChat', (h: unknown): RoomChatState => ({
         h: String(h),
         messages: [],
@@ -234,9 +253,14 @@ export function registerNostrComponents(Alpine: {
         hasMore: true,
         atBottom: true,
         unread: 0,
+        joined: false,
+        draft: '',
+        sending: false,
+        error: '',
         _url: null,
         _unsubActive: null,
         _unsub: null,
+        _unsubJoined: null,
         _controller: null,
         _loadedProfiles: new Set<string>(),
         init() {
@@ -249,6 +273,14 @@ export function registerNostrComponents(Alpine: {
             this.loading = true
             this.messages = []
             this._controller = new AbortController()
+            // Die Raum-Seite steht für sich: eigene 10009 + Space-Rooms (39000)
+            // laden, damit die Mitgliedschaft überhaupt bekannt ist.
+            loadUserGroupList()
+            loadSpaceRooms(url)
+            // Mitgliedschaft dieses Raums (10009 ∩ 39000) → Composer vs. Hinweis.
+            this._unsubJoined = deriveUserRooms(url).subscribe((rooms: string[]) => {
+                this.joined = rooms.includes(this.h)
+            })
             listenRoom(url, this.h, this._controller.signal)
             loadRoomMessages(url, this.h).finally(() => {
                 this.loading = false
@@ -323,6 +355,60 @@ export function registerNostrComponents(Alpine: {
             this._controller?.abort()
             this._unsub?.()
             this._unsub = null
+            this._unsubJoined?.()
+            this._unsubJoined = null
+        },
+        // Nachricht senden (kind 9). Optimistisch: die Live-Sub echot sofort.
+        async send() {
+            const content = this.draft.trim()
+            if (!content || this.sending || !this._url) {
+                return
+            }
+            this.sending = true
+            this.error = ''
+            const draft = this.draft
+            this.draft = ''
+            try {
+                const err = await sendRoomMessage(this._url, this.h, content)
+                if (err) {
+                    this.error = err
+                    this.draft = draft // Text zurückgeben, damit nichts verloren geht
+                } else {
+                    this.scrollToBottom()
+                }
+            } finally {
+                this.sending = false
+            }
+        },
+        // Eigene Nachricht löschen (kind 5). Repository blendet sie sofort aus.
+        async remove(id: string, createdAt: number) {
+            if (!this._url) {
+                return
+            }
+            const err = await deleteRoomMessage(this._url, this.h, id, createdAt)
+            if (err) {
+                this.error = err
+            }
+        },
+        async join() {
+            if (!this._url) {
+                return
+            }
+            this.error = ''
+            const err = await joinRoom(this._url, this.h)
+            if (err) {
+                this.error = err
+            }
+        },
+        async leave() {
+            if (!this._url) {
+                return
+            }
+            this.error = ''
+            const err = await leaveRoom(this._url, this.h)
+            if (err) {
+                this.error = err
+            }
         },
         destroy() {
             this._unsubActive?.()

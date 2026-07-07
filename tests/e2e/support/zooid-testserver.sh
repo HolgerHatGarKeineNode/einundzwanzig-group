@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Startet den lokalen zooid-Relay für die E2E-Tests und seedet ihn idempotent:
-# 3 Rooms (kind 9007 → 39000) + eine kind-10009-Membership für den Wegwerf-User.
-# Läuft im Vordergrund (Playwright-webServer); zooid stirbt mit diesem Prozess.
+# 3 Räume (kind 9007 → 39000), Profile, Directory-Rollen (NIP-86) und Chat.
+# Hinweis: kind-10009 (persönliche Raum-Folgeliste) lehnt zooid als Gruppenrelay
+# ab — sie gehört auf die eigenen Relays des Users; die App führt sie clientseitig
+# (optimistisch). In dieser hermetischen Umgebung erscheinen daher alle Räume als
+# „Andere Räume". Läuft im Vordergrund (Playwright-webServer); stirbt mit ihm.
 set -uo pipefail
 export PATH="$PATH:/home/user/go/bin"
 
@@ -26,12 +29,10 @@ for _ in $(seq 1 40); do
     sleep 0.25
 done
 
-# Idempotent seeden — Rooms existieren evtl. schon (dann Fehler ignorieren),
-# die 10009 ist replaceable und wird überschrieben.
+# Idempotent seeden — Räume existieren evtl. schon (dann Fehler ignorieren).
 nak event --auth --sec "$ADMIN" -k 9007 -t h=welcome -t name=Willkommen -t about=Startkanal "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$ADMIN" -k 9007 -t h=general -t name=Allgemein -t about=Off-Topic "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$ADMIN" -k 9007 -t h=dev -t name=Dev -t about=Entwicklung "$R" >/dev/null 2>&1 || true
-nak event --auth --sec "$USER" -k 10009 -t r="$R" -t group="welcome;$R" -t group="general;$R" "$R" >/dev/null 2>&1 || true
 
 # Profile (kind 0) für lesbare Namen im Directory (M3) — AUTH nötig zum Schreiben.
 nak event --auth --sec "$ADMIN" -k 0 -c '{"name":"Relay Admin"}' "$R" >/dev/null 2>&1 || true

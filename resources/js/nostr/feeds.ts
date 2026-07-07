@@ -9,9 +9,9 @@
  */
 import { derived, type Readable } from 'svelte/store'
 import { load, request } from '@welshman/net'
-import { profilesByPubkey } from '@welshman/app'
+import { profilesByPubkey, publishThunk, waitForThunkError, pubkey } from '@welshman/app'
 import { parse, renderAsHtml } from '@welshman/content'
-import { MESSAGE, sortEventsAsc, displayProfile, type TrustedEvent } from '@welshman/util'
+import { MESSAGE, DELETE, makeEvent, sortEventsAsc, displayProfile, type TrustedEvent } from '@welshman/util'
 import * as nip19 from 'nostr-tools/nip19'
 import { deriveEventsForUrl } from './repository'
 
@@ -50,6 +50,7 @@ export type ChatMessage = {
     html: string
     divider: string // Datums-Trenner, wenn der Tag wechselt (sonst '')
     showAuthor: boolean // erster Beitrag eines Autor-Blocks (Gruppierung)
+    mine: boolean // vom eingeloggten User verfasst (→ löschbar, M5)
 }
 
 /**
@@ -58,7 +59,7 @@ export type ChatMessage = {
  * Event einmal geparst (Cache), Namen fließen reaktiv aus `profilesByPubkey`.
  */
 export const deriveRoomChat = (url: string, h: string): Readable<ChatMessage[]> =>
-    derived([deriveRoomMessages(url, h), profilesByPubkey], ([events, $profiles]) => {
+    derived([deriveRoomMessages(url, h), profilesByPubkey, pubkey], ([events, $profiles, $me]) => {
         let prevDay = ''
         let prevPubkey = ''
         return events.map((event): ChatMessage => {
@@ -80,6 +81,7 @@ export const deriveRoomChat = (url: string, h: string): Readable<ChatMessage[]> 
                 html: renderMessageHtml(event),
                 divider,
                 showAuthor,
+                mine: event.pubkey === $me,
             }
         })
     })
@@ -95,3 +97,31 @@ export const listenRoom = (url: string, h: string, signal: AbortSignal): void =>
  */
 export const loadRoomMessages = (url: string, h: string, until?: number): Promise<TrustedEvent[]> =>
     load({ relays: [url], filters: roomFilter(h).map((f) => ({ ...f, limit: 50, ...(until ? { until } : {}) })) })
+
+// ── Schreiben (M5) ───────────────────────────────────────────────────────────
+
+/**
+ * Sendet eine Nachricht (kind 9) in einen Room. Signiert im Browser, publiziert
+ * via Thunk (optimistisch: der Thunk legt das Event sofort ins Repository, die
+ * Live-Sub bestätigt es). Gibt die Fehlermeldung des Relays zurück, '' bei Erfolg.
+ * ponytail: kein PROTECTED-Tag (NIP-70) — relayseitige Autor-Härtung kommt in M6.
+ */
+export const sendRoomMessage = (url: string, h: string, content: string): Promise<string> =>
+    waitForThunkError(publishThunk({ relays: [url], event: makeEvent(MESSAGE, { content, tags: [['h', h]] }) }))
+
+/**
+ * Löscht eine eigene Nachricht (kind 5, NIP-09). Das `h`-Tag routet den Tombstone
+ * in den Raum; das Repository blendet die referenzierte Nachricht sofort aus.
+ * Der Tombstone braucht `created_at > Nachricht` (Repository-Regel) — sonst greift
+ * das Löschen direkt nach dem Senden (gleiche Unix-Sekunde) nicht.
+ */
+export const deleteRoomMessage = (url: string, h: string, id: string, createdAt: number): Promise<string> =>
+    waitForThunkError(
+        publishThunk({
+            relays: [url],
+            event: makeEvent(DELETE, {
+                created_at: Math.max(Math.floor(Date.now() / 1000), createdAt + 1),
+                tags: [['k', String(MESSAGE)], ['e', id], ['h', h]],
+            }),
+        }),
+    )
