@@ -58,6 +58,32 @@ test.describe('Nostr-Login (E2E)', () => {
         }
     })
 
+    test('NIP-07-Button erscheint auch bei verzögert injizierter Extension', async ({ page }) => {
+        await page.goto('/nostr-login')
+        const btn = page.getByRole('button', { name: /Browser-Erweiterung/ })
+        await expect(btn).toBeHidden()
+
+        // Alby/nos2x setzen window.nostr oft ERST nach dem Alpine-init (der gemeldete Bug).
+        await page.evaluate(() => {
+            // @ts-expect-error — window.nostr ist die NIP-07-Schnittstelle.
+            window.nostr = { getPublicKey: async () => 'a'.repeat(64), signEvent: async (e: unknown) => e }
+        })
+
+        await expect(btn).toBeVisible({ timeout: 5_000 })
+    })
+
+    test('Amber-QR (nostrconnect) wird erzeugt und angezeigt', async ({ page }) => {
+        await page.goto('/nostr-login')
+        await page.getByRole('tab', { name: 'Amber' }).click()
+        await page.getByRole('button', { name: /QR-Code für Amber/ }).click()
+
+        // Deckt die ganze Kette ab: startConnect → makeNostrconnectUrl → QR-Render.
+        // Der Handshake selbst nutzt dieselben Primitive wie der Bunker-Login (dort getestet).
+        const qr = page.getByAltText('nostrconnect QR-Code')
+        await expect(qr).toBeVisible({ timeout: 15_000 })
+        await expect(qr).toHaveAttribute('src', /^data:image\/png/)
+    })
+
     test('Logout leert beide Sessions und das Gate sperrt wieder', async ({ page }) => {
         await page.goto('/nostr-login')
         await page.getByPlaceholder(/nsec1/).fill(NSEC)

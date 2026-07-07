@@ -11,11 +11,13 @@ import { load } from '@welshman/net'
 import { deriveEvents } from '@welshman/store'
 import type { TrustedEvent } from '@welshman/util'
 import * as nip19 from 'nostr-tools/nip19'
+import QRCode from 'qrcode'
 import { DEFAULT_RELAYS } from './core'
 import {
     loginWithExtension,
     loginWithSecretKey,
     loginWithBunker,
+    loginWithNostrConnect,
     logout,
     handoffToServer,
     logoutServer,
@@ -117,15 +119,20 @@ type AuthState = {
     hasExtension: boolean
     keyInput: string
     bunkerInput: string
+    connectQr: string
+    connecting: boolean
     busy: boolean
     error: string
     _unsub: null | (() => void)
+    _connectAbort: AbortController | null
     init(): void
     destroy(): void
     completeLogin(fn: () => void | Promise<void>): Promise<void>
     loginExtension(): Promise<void>
     loginNsec(): Promise<void>
     loginBunker(): Promise<void>
+    startConnect(): Promise<void>
+    stopConnect(): void
     doLogout(): Promise<void>
 }
 
@@ -859,11 +866,26 @@ export function registerNostrComponents(Alpine: {
         hasExtension: false,
         keyInput: '',
         bunkerInput: '',
+        connectQr: '',
+        connecting: false,
         busy: false,
         error: '',
         _unsub: null,
+        _connectAbort: null,
         init() {
-            this.hasExtension = typeof (window as unknown as { nostr?: unknown }).nostr !== 'undefined'
+            // NIP-07-Extensions (Alby, nos2x …) injizieren `window.nostr` asynchron —
+            // oft erst NACH Alpine-init. Deshalb ~3 s pollen statt nur einmal prüfen.
+            const hasNostr = () => typeof (window as unknown as { nostr?: unknown }).nostr !== 'undefined'
+            this.hasExtension = hasNostr()
+            if (!this.hasExtension) {
+                let tries = 0
+                const timer = setInterval(() => {
+                    this.hasExtension = hasNostr()
+                    if (this.hasExtension || ++tries > 15) {
+                        clearInterval(timer)
+                    }
+                }, 200)
+            }
             this._unsub = pubkey.subscribe((pk: string | undefined) => {
                 this.pubkey = pk ?? null
                 this.npub = pk ? nip19.npubEncode(pk) : ''
@@ -895,7 +917,44 @@ export function registerNostrComponents(Alpine: {
         loginBunker() {
             return this.completeLogin(() => loginWithBunker(this.bunkerInput))
         },
+        // Amber-QR (nostrconnect://): QR anzeigen, im Hintergrund auf Amber warten,
+        // nach Verbindung den NIP-98-Handoff wie bei jedem Login fahren.
+        async startConnect() {
+            if (this.connecting) {
+                return
+            }
+            this.error = ''
+            this.connectQr = ''
+            this.connecting = true
+            const abort = new AbortController()
+            this._connectAbort = abort
+            try {
+                await loginWithNostrConnect(async (url) => {
+                    this.connectQr = await QRCode.toDataURL(url, { width: 256, margin: 1 })
+                }, abort.signal)
+                const redirect = await handoffToServer()
+                window.location.assign(redirect)
+            } catch (e) {
+                if (!abort.signal.aborted) {
+                    this.error = e instanceof Error ? e.message : String(e)
+                    logout()
+                }
+            } finally {
+                if (this._connectAbort === abort) {
+                    this.connecting = false
+                    this.connectQr = ''
+                    this._connectAbort = null
+                }
+            }
+        },
+        stopConnect() {
+            this._connectAbort?.abort()
+            this._connectAbort = null
+            this.connecting = false
+            this.connectQr = ''
+        },
         async doLogout() {
+            this.stopConnect()
             logout()
             await logoutServer()
             this.keyInput = ''
@@ -903,6 +962,7 @@ export function registerNostrComponents(Alpine: {
             window.location.assign('/nostr-login')
         },
         destroy() {
+            this._connectAbort?.abort()
             this._unsub?.()
         },
     }))

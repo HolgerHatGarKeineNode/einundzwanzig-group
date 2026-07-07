@@ -75,6 +75,50 @@ export async function loginWithBunker(bunkerUri: string): Promise<void> {
     }
 }
 
+/**
+ * NIP-46-Berechtigungen, die der Remote-Signer (Amber) beim Verbinden gewährt —
+ * begrenzt auf unseren Verein-Kern-Scope: nip44 (verschlüsselte Listen), Chat
+ * (kind 9), Löschen (5), Space/Room-Liste (10009), AUTH (22242), Room-Join (9021).
+ */
+const NIP46_PERMS = [
+    'nip44_encrypt',
+    'nip44_decrypt',
+    'sign_event:9',
+    'sign_event:5',
+    'sign_event:10009',
+    'sign_event:22242',
+    'sign_event:9021',
+].join(',')
+
+/**
+ * NIP-46 via `nostrconnect://` (Amber-QR-Flow): Der Client erzeugt eine Connect-URL,
+ * zeigt sie als QR-Code, Amber scannt und stellt die Verbindung her. Umgekehrt zum
+ * `bunker://`-Flow (dort liefert der Signer die URL). `onUrl` bekommt die URL, sobald
+ * sie bereit ist (→ QR rendern); das Promise löst nach erfolgreichem Login auf.
+ * Abbruch (Tab-Wechsel/Unmount) über das `signal`.
+ */
+export async function loginWithNostrConnect(
+    onUrl: (url: string) => void,
+    signal: AbortSignal,
+): Promise<void> {
+    const clientSecret = makeSecret()
+    const broker = new Nip46Broker({ clientSecret, relays: SIGNER_RELAYS })
+    try {
+        const url = await broker.makeNostrconnectUrl({
+            name: 'EINUNDZWANZIG',
+            url: window.location.origin,
+            perms: NIP46_PERMS,
+        })
+        onUrl(url)
+        const response = await broker.waitForNostrconnect(url, signal)
+        const pk = await broker.getPublicKey()
+        // connect() kann Relays gewechselt haben → die aktuellen des Brokers persistieren.
+        loginWithNip46(pk, clientSecret, response.event.pubkey, broker.params.relays)
+    } finally {
+        broker.cleanup()
+    }
+}
+
 /** CSRF-Token aus dem Meta-Tag (Laravel `web`-Middleware verlangt ihn). */
 function csrfToken(): string {
     return document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? ''

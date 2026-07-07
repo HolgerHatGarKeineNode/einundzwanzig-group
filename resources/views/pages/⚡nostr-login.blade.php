@@ -39,6 +39,7 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Anmelden')] class extends Compo
                     <flux:tabs variant="segmented" class="w-full">
                         <flux:tab name="nsec" icon="key">Schlüssel</flux:tab>
                         <flux:tab name="bunker" icon="link">Bunker</flux:tab>
+                        <flux:tab name="amber" icon="qr-code" x-on:click="stopConnect()">Amber</flux:tab>
                     </flux:tabs>
 
                     <flux:tab.panel name="nsec" class="mt-3 space-y-2">
@@ -49,6 +50,25 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Anmelden')] class extends Compo
                     <flux:tab.panel name="bunker" class="mt-3 space-y-2">
                         <flux:input x-model="bunkerInput" placeholder="bunker://…" x-on:keydown.enter="loginBunker()" />
                         <flux:button variant="primary" class="w-full" x-on:click="loginBunker()" ::disabled="busy">Verbinden</flux:button>
+                    </flux:tab.panel>
+
+                    {{-- Amber via nostrconnect-QR: Client zeigt QR, Amber scannt + verbindet --}}
+                    <flux:tab.panel name="amber" class="mt-3">
+                        <template x-if="!connecting">
+                            <flux:button variant="primary" class="w-full" icon="qr-code" x-on:click="startConnect()">QR-Code für Amber erzeugen</flux:button>
+                        </template>
+                        <template x-if="connecting">
+                            <div class="flex flex-col items-center gap-3 text-center">
+                                <template x-if="connectQr">
+                                    <img :src="connectQr" alt="nostrconnect QR-Code" class="size-56 rounded-tile bg-white p-2" />
+                                </template>
+                                <template x-if="!connectQr">
+                                    <flux:text>QR-Code wird erzeugt…</flux:text>
+                                </template>
+                                <flux:text class="text-sm">Mit Amber scannen — warte auf die Verbindung …</flux:text>
+                                <flux:button variant="ghost" x-on:click="stopConnect()">Abbrechen</flux:button>
+                            </div>
+                        </template>
                     </flux:tab.panel>
                 </flux:tab.group>
 
