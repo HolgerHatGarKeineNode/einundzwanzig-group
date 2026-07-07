@@ -69,9 +69,10 @@ export const getSpaceRoomsFromGroupList = (url: string, groupList?: PublishedLis
     if (!groupList) {
         return []
     }
+    const target = normalizeRelayUrl(url)
     const rooms: string[] = []
     for (const [, h, relay] of getGroupTags(getListTags(groupList))) {
-        if (h && relay && normalizeRelayUrl(url) === normalizeRelayUrl(relay)) {
+        if (h && relay && target === normalizeRelayUrl(relay)) {
             rooms.push(h)
         }
     }
