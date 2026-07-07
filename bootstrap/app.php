@@ -11,7 +11,7 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    // Nostr-Gate (`nostr.auth`) + CSP kommen aus dem einundzwanzig/nostr-chat-Package;
+    // Nostr-Gate (`nostr.auth`) + CSP kommen aus dem einundzwanzig/group-Package;
     // withMiddleware bleibt (leer) bestehen, damit die Default-Gruppen (web/api) greifen.
     ->withMiddleware(function (Middleware $middleware): void {})
     ->withExceptions(function (Exceptions $exceptions): void {

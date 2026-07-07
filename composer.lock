@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4e7db5db01bd876f2ae6c866a3889728",
+    "content-hash": "d60ffebe781cfb94c8c1b1f0e89b696f",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -765,12 +765,12 @@
             "time": "2025-03-06T22:45:56+00:00"
         },
         {
-            "name": "einundzwanzig/nostr-chat",
+            "name": "einundzwanzig/group",
             "version": "0.1.0",
             "dist": {
                 "type": "path",
                 "url": "packages/nostr-chat",
-                "reference": "24b459ac7c7409623140a9bcbac8c0fb885f1655"
+                "reference": "6ebb7a73268d506cfc2c76da9e6588dc64369dea"
             },
             "require": {
                 "illuminate/console": "^13.0",
