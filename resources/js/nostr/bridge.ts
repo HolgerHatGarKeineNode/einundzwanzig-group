@@ -178,13 +178,12 @@ export function registerNostrComponents(Alpine: {
                     this.ready = view.ready
                     this.members = view.members
                     // Profile der (neuen) Mitglieder nachladen — einmal je pubkey.
+                    // `loadMemberProfiles` ignoriert leere Listen selbst.
                     const missing = view.members
                         .map((m) => m.pubkey)
                         .filter((pk) => !this._loadedProfiles.has(pk))
-                    if (missing.length > 0) {
-                        missing.forEach((pk) => this._loadedProfiles.add(pk))
-                        loadMemberProfiles(missing)
-                    }
+                    missing.forEach((pk) => this._loadedProfiles.add(pk))
+                    loadMemberProfiles(url, missing)
                 })
             })
         },

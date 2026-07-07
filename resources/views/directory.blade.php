@@ -7,10 +7,7 @@
     <main class="mx-auto max-w-md px-4 py-8 pt-safe">
 
         {{-- Kopf: zurück zum Space + Titel --}}
-        <div class="mb-6 flex items-center gap-3">
-            <flux:button variant="ghost" size="sm" icon="arrow-left" href="{{ route('spaces') }}" aria-label="Zurück" />
-            <flux:heading size="xl">Mitglieder</flux:heading>
-        </div>
+        <x-app-header title="Mitglieder" :back="route('spaces')" />
 
         {{-- Directory des AKTIVEN Space (§12). Gated auf relay.self (Fix A). --}}
         <div x-data="nostrDirectory" class="page-enter space-y-4">

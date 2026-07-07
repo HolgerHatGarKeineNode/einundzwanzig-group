@@ -1,12 +1,12 @@
 /**
- * Store-über-Repository-Layer — portiert aus Flotillas `src/app/repository.ts`
+ * Store-über-Repository-Layer — portiert aus dem Referenz-Client (`src/app/repository.ts`)
  * (nur die für M3/Directory nötigen Ableitungen).
  *
  * `deriveRelaySignedEvents` ist der Kern des Space-Directorys: es filtert Events
  * auf `pubkey === relay.self` — nur der Relay selbst signiert die autoritative
  * Mitglieder-/Rollenliste (13534/33534). `relay.self` stammt aus NIP-11
  * (`deriveRelay` → HTTP-Fetch). Solange NIP-11 nicht geladen ist, ist
- * `relay.self === undefined` und der Filter liefert leer — das ist Flotillas
+ * `relay.self === undefined` und der Filter liefert leer — das ist das bekannte
  * „No members"-Flackern (Instabilität A). Die Insel gated deshalb auf
  * `relaySelfReady` statt blind die leere Liste zu rendern (siehe members.ts).
  */

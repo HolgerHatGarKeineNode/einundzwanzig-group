@@ -6,18 +6,17 @@
 <body class="min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
     <main class="mx-auto max-w-md px-4 py-8 pt-safe">
 
-        {{-- Kopf: wer bin ich + Einstellungen + Abmelden --}}
-        <div x-data="nostrAuth" class="mb-6 flex items-center justify-between gap-3">
-            <div class="min-w-0">
-                <flux:heading size="xl">Space</flux:heading>
+        {{-- Kopf: Marke + wer bin ich + Aktionen --}}
+        <x-app-header title="Space" x-data="nostrAuth">
+            <x-slot:subtitle>
                 <div class="truncate font-mono text-xs text-zinc-500" x-text="npub"></div>
-            </div>
-            <div class="flex items-center gap-1">
+            </x-slot:subtitle>
+            <x-slot:actions>
                 <flux:button variant="ghost" size="sm" icon="users" href="{{ route('directory') }}" aria-label="Mitglieder" />
                 <flux:button variant="ghost" size="sm" icon="cog-6-tooth" href="{{ route('space.settings') }}" aria-label="Space wechseln" />
                 <flux:button variant="ghost" size="sm" x-on:click="doLogout()">Abmelden</flux:button>
-            </div>
-        </div>
+            </x-slot:actions>
+        </x-app-header>
 
         {{-- Genau EIN fixierter Space + seine Rooms (kein Multi-Space-Layout, §12) --}}
         <div x-data="nostrSpaces" class="page-enter" x-show="space">

@@ -12,7 +12,7 @@
 | **M1.5** — E2E-Login-Tests (Playwright) | ✅ **fertig** | NIP-07/nsec/NIP-46-Bunker-Login + Logout end-to-end im Host-Chromium gegen hermetischen In-Process-Relay; Wegwerf-nsec in `.env`. 4 E2E-Tests grün. Commit `63ef745`. |
 | **M2** — Space/Room-Liste lesen | ✅ **fertig** | `groups.ts` portiert (Spaces aus kind 10009, Rooms aus 39000/9008, `deriveUserRooms`/`deriveOtherRooms`); NIP-42-AUTH-Policy automatisch; `/spaces`-Insel zeigt Spaces + beigetretene/andere Rooms live. E2E gegen lokalen **zooid** (auto-Start + Seed). Flux-`navlist`. |
 | **M3** — Directory / Members (Fix A) | ✅ **fertig** | `repository.ts` (`deriveRelaySignedEvents`) + `members.ts` (13534/33534, HSL-Rollenfarben) portiert; `deriveSpaceDirectory` aggregiert Members+Rollen+Profile in EINEN Store, gated auf `relay.self` (NIP-11) → **kein Flackern** (Fix A ohne Map-Persistenz gelöst). `/directory` (Flux card-grid, Rollen-Badges, Client-Suche). App auf **fixierten Default-Space** umgestellt (§12, keine Auswahl-Pflicht). 3 E2E-Tests grün (Members+Rollen, Suche, Reload); Suite gesamt 9/9. |
-| **M3.5** — Home/Landing + Navigation (Design) | ⬜ offen | Echte Startseite (statt Laravel-Welcome) mit Verlinkung Login → Space → Einstellungen; ein durchgängiges Grundgerüst zum Durchklicken. Provisorische Platzhalter-Home existiert bereits (`home.blade.php`). |
+| **M3.5** — Home/Landing + Navigation (Design) | ✅ **fertig** | Gestaltete Landing (`/`) im EINUNDZWANZIG-Design (Logomark auf hellem Chip, Inconsolata-Wortmarke + Terminal-Caret, Light+Dark), login-abhängige CTAs. Gemeinsamer `<x-app-header>` (Marke/Zurück/Aktionen) über Space/Directory/Einstellungen. `welcome.blade` entfernt. Marke IMMER **EINUNDZWANZIG**; „flotilla" komplett aus UI + Code-Kommentaren raus. Bonus: Mitglieder-Profile laden auch vom Space-Relay (Namen statt npubs). |
 | **M4** — Chat lesen | ⬜ offen | |
 | **M5** — Chat senden + Room join/leave | ⬜ offen | |
 | **M6** — Politur | ⬜ offen | |
@@ -306,11 +306,11 @@ Der Signer bleibt in **allen** Fällen client-seitig im WebView — auch auf Mob
 - **Schritte:** `members.ts` + `repository.ts` portieren. `relay.self` (NIP-11) **vor** dem Filter sicherstellen: `relaysByUrl` persistieren (`storage.ts`-Whitelist erweitern) und/oder server-seitig einmal auflösen (§10). `33534` in Whitelist. `MemberDirectory` (Flux card-grid, RoleBadge HSL) + Client-Suche.
 - **DoD:** Directory zeigt Members + Rollen **ohne** Race/Flackern (self-pubkey vor Filter da; überlebt Reload); Rollenfarben korrekt; Suche filtert.
 
-### M3.5 — Home/Landing + Navigation (Design)
-- **Ziel:** Eine echte, markenkonforme **Startseite** statt der Laravel-Default-`welcome` — plus durchgängige Verlinkung, damit die App **ohne URL-Tippen** vollständig durchklickbar ist (Home → Nostr-Login → aktiver Space → Space-Einstellungen → Abmelden). Dient auch als manuelle Sicht-Prüfung während der Entwicklung.
-- **Kontext:** Aktuell existiert nur eine bewusst minimale Platzhalter-Home (`resources/views/home.blade.php`, `route('home')`), die login-abhängig auf `/nostr-login` bzw. `/spaces` verlinkt. M3.5 macht daraus das **echte Design** im einundzwanzig-System (§12): Inconsolata, Brand-Ramp, `surface-card`/`page-enter`/`list-stagger`, echte Empty-/Loading-States.
-- **Schritte:** Landing im Design-System gestalten (Hero + Wert-in-einem-Satz, Login-CTA für Ausgeloggte, Space-Sprung für Eingeloggte); konsistente Rück-/Weiter-Navigation zwischen Home, Login, `/spaces`, `/settings/space`; `frontend-design`-Skill aktivieren; `welcome.blade.php` (Starter-Kit-Rest) entfernen, sobald ersetzt.
-- **DoD:** `/` zeigt die gestaltete Landing; von dort ist jeder Kern-Screen per Klick erreichbar (kein manuelles URL-Tippen); Login-Zustand steuert die CTAs korrekt; visuell im einundzwanzig-System.
+### M3.5 — Home/Landing + Navigation (Design) ✅
+- **Ziel:** Eine echte, markenkonforme **Startseite** statt der Laravel-Default-`welcome` — plus durchgängige Verlinkung, damit die App **ohne URL-Tippen** vollständig durchklickbar ist (Home → Nostr-Login → aktiver Space → Space-Einstellungen → Abmelden).
+- **Umsetzung:** `home.blade.php` als Hero im EINUNDZWANZIG-Design (§12): Logomark (`<x-app-brand-mark>`, offizielles SVG auf hellem Chip → lesbar in Light **und** Dark, kein Clipping), Inconsolata-Wortmarke **EINUNDZWANZIG** + Terminal-Caret, `empty-state`-Stagger, login-abhängige CTAs (Anmelden ↔ „Zu deinem Space"). Gemeinsamer **`<x-app-header>`** (Brand-Mark→Home / Zurück, Titel, `subtitle`/`actions`-Slots) über `/spaces`, `/directory`, `/settings/space`. `welcome.blade.php` entfernt.
+- **Marken-/Design-Regeln (dauerhaft, Auftraggeber):** Markenname IMMER **EINUNDZWANZIG** (komplett groß); das Wort „flotilla" **nie** in UI/Design — auch aus Code-Kommentaren raus (→ „Referenz-Client"). Client heißt EINUNDZWANZIG.
+- **DoD erfüllt:** `/` zeigt die gestaltete Landing in Light+Dark; jeder Kern-Screen per Klick erreichbar; CTAs login-abhängig; Header konsistent; E2E 9/9 grün. Zusatz: Mitglieder-Profile laden auch vom Space-Relay (Namen statt npubs).
 
 ### M4 — Chat lesen
 - **Ziel:** Room- + Space-Chat-Verlauf anzeigen.

@@ -6,13 +6,11 @@
 <body class="min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
     <main class="mx-auto max-w-md px-4 py-8 pt-safe">
 
-        <div class="mb-6 flex items-center gap-2">
-            <flux:button variant="ghost" size="sm" icon="arrow-left" href="{{ route('spaces') }}" aria-label="Zurück" />
-            <div>
-                <flux:heading size="xl">Space wählen</flux:heading>
+        <x-app-header title="Space wählen" :back="route('spaces')">
+            <x-slot:subtitle>
                 <flux:text class="text-sm">Die App zeigt immer genau diesen Space.</flux:text>
-            </div>
-        </div>
+            </x-slot:subtitle>
+        </x-app-header>
 
         {{-- Auswahl des aktiven Space (der einzige Ort zum Wechseln, §12) --}}
         <div x-data="nostrSpaceSettings" class="page-enter">

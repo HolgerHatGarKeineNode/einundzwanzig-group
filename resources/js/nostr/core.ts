@@ -4,7 +4,7 @@
  * welshman erzeugt keine eigenen Instanzen — `repository`, `tracker`, `pubkey`,
  * `sessions` sind globale Singletons aus `@welshman/app`; konfiguriert wird über
  * die mutierbaren Kontext-Objekte (`appContext`/`netContext`/`routerContext`).
- * Genau wie Flotillas globaler App-Init (src/routes/+layout.svelte), nur ohne
+ * Genau wie der globale App-Init des Referenz-Clients (src/routes/+layout.svelte), nur ohne
  * SvelteKit. Persistenz (IndexedDB) folgt später (Fix A, M3).
  */
 import { appContext, pubkey, sign } from '@welshman/app'
@@ -16,7 +16,7 @@ import { verifyEvent, type TrustedEvent } from '@welshman/util'
 /**
  * Relay-Override für Tests/Self-Hosting: setzt `window.__nostrRelays` VOR dem
  * Laden (E2E via addInitScript) auf einen lokalen zooid. Ohne Override die
- * öffentlichen Defaults (aus Flotilla .env übernommen). NativePHP/Web identisch.
+ * öffentlichen Defaults (aus dem Referenz-Client übernommen). NativePHP/Web identisch.
  */
 type RelayOverride = { indexer?: string[]; default?: string[]; signer?: string[] }
 const relayOverride = (globalThis as { __nostrRelays?: RelayOverride }).__nostrRelays

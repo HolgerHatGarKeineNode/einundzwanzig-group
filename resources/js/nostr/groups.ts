@@ -1,5 +1,5 @@
 /**
- * Space/Room-Datenschicht — portiert aus Flotillas `src/app/groups.ts` (nur der
+ * Space/Room-Datenschicht — portiert aus dem Referenz-Client (`src/app/groups.ts`, nur der
  * Lese-Teil für M2; Schreib-Ops/Join kommen mit M5).
  *
  * Modell (zooid/NIP-29): Ein **Space** ist eine Relay-URL (kein Event). Die
@@ -32,7 +32,7 @@ import { uniq, sortBy, partition } from '@welshman/lib'
 
 export type Room = ReturnType<typeof readRoomMeta> & { id: string; url: string }
 
-/** Room-ID = `${url}'${h}` (Trennzeichen wie in Flotilla). */
+/** Room-ID = `${url}'${h}` (Trennzeichen wie im Referenz-Client). */
 export const makeRoomId = (url: string, h: string): string => `${url}'${h}`
 
 // ── Space-Membership (kind 10009) ────────────────────────────────────────────

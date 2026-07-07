@@ -1,6 +1,6 @@
 /**
- * Space-Directory: Mitglieder + Rollen — portiert aus Flotillas
- * `src/app/members.ts` (nur der Lese-Teil für M3; Admin-Mutationen via
+ * Space-Directory: Mitglieder + Rollen — portiert aus dem Referenz-Client
+ * `src/app/members.ts`; nur der Lese-Teil für M3; Admin-Mutationen via
  * `manageRelay`/NIP-86 kommen mit M6).
  *
  * Autoritativ ist die **relay-signierte** Mitgliederliste (13534) und die
@@ -180,8 +180,16 @@ export const deriveSpaceDirectory = (url: string): Readable<DirectoryView> =>
 export const loadSpaceDirectory = (url: string): Promise<unknown> =>
     load({ relays: [url], filters: [{ kinds: [RELAY_MEMBERS, RELAY_ROLE] }] })
 
-/** Lädt die kind-0-Profile der Mitglieder nach (Namen/Avatare). */
-export const loadMemberProfiles = (pubkeys: string[]): void => {
+/**
+ * Lädt die kind-0-Profile der Mitglieder nach (Namen/Avatare) — vom Space-Relay
+ * (dort veröffentlichen Mitglieder ihr Profil oft direkt) UND über die
+ * Outbox-Relais der jeweiligen Autoren.
+ */
+export const loadMemberProfiles = (url: string, pubkeys: string[]): void => {
+    if (pubkeys.length === 0) {
+        return
+    }
+    load({ relays: [url], filters: [{ kinds: [0], authors: pubkeys }] })
     for (const pubkey of pubkeys) {
         loadProfile(pubkey)
     }

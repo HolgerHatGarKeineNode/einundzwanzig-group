@@ -132,6 +132,20 @@
 .empty-state > :nth-child(3) { animation-delay: 0.14s; }
 .empty-state > :nth-child(n + 4) { animation-delay: 0.21s; }
 
+/* Terminal-Caret: blinkender Block hinter der Wortmarke (monospace-Signatur). */
+@keyframes caret-blink {
+    0%, 45% { opacity: 1; }
+    55%, 100% { opacity: 0; }
+}
+.caret {
+    display: inline-block;
+    width: 0.6ch;
+    height: 1em;
+    translate: 0 0.12em;
+    background-color: var(--color-brand-500);
+    animation: caret-blink 1.1s steps(1) infinite;
+}
+
 /* Page-Enter beim (wire:)navigate. */
 @keyframes page-in {
     from { opacity: 0; transform: translateY(8px); }
@@ -149,9 +163,11 @@
     .empty-state > *,
     .page-enter,
     .list-stagger > *,
-    .skeleton {
+    .skeleton,
+    .caret {
         animation: none;
     }
+    .caret { opacity: 1; }
     .pressable { transition: none; }
     .pressable:active { transform: none; }
 }

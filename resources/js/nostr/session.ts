@@ -2,7 +2,7 @@
  * Nostr-Login: Signer-Auswahl + welshman-Session. Signing bleibt zu 100 % im
  * Browser — der Server sieht später nur den (via NIP-98 verifizierten) pubkey.
  *
- * Portiert aus Flotillas LogIn*.svelte + src/app/session.ts. welshman hält die
+ * Portiert aus dem Referenz-Client (LogIn*.svelte + src/app/session.ts). welshman hält die
  * globalen Stores `pubkey`/`sessions`/`signer`; wir binden `pubkey`+`sessions`
  * an localStorage, damit der Login einen Reload überlebt. Der Signer selbst wird
  * NICHT persistiert — er wird nach Reload aus der Session rekonstruiert.
