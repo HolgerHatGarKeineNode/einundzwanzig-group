@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0d46591e195ec57681e87fa775597005",
+    "content-hash": "4e7db5db01bd876f2ae6c866a3889728",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -763,6 +763,44 @@
                 }
             ],
             "time": "2025-03-06T22:45:56+00:00"
+        },
+        {
+            "name": "einundzwanzig/nostr-chat",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "packages/nostr-chat",
+                "reference": "24b459ac7c7409623140a9bcbac8c0fb885f1655"
+            },
+            "require": {
+                "illuminate/console": "^13.0",
+                "illuminate/http": "^13.0",
+                "illuminate/support": "^13.0",
+                "livewire/livewire": "^4.1",
+                "php": "^8.3",
+                "swentel/nostr-php": "^1.9"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "App\\Chat\\ChatServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "App\\Chat\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Nostr-Community-Chat (Spaces/Räume/Directory/Login) für EINUNDZWANZIG — als wiederverwendbares Laravel-Package.",
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
         },
         {
             "name": "endroid/qr-code",

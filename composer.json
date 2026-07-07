@@ -10,6 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
+        "einundzwanzig/nostr-chat": "*",
         "laravel/chisel": "^0.1.0",
         "laravel/fortify": "^1.37.2",
         "laravel/framework": "^13.17",
@@ -117,9 +118,18 @@
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
-    "repositories": [{
-        "name": "flux",
-        "type": "composer",
-        "url": "https://composer.fluxui.dev"
-    }]
+    "repositories": [
+        {
+            "type": "path",
+            "url": "packages/nostr-chat",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
+            "name": "flux",
+            "type": "composer",
+            "url": "https://composer.fluxui.dev"
+        }
+    ]
 }

@@ -5,12 +5,12 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 
 /** Directory (Mitglieder + Rollen des aktiven Space) als Livewire-SFC. */
-new #[Layout('layouts::einundzwanzig')] #[Title('Mitglieder')] class extends Component {}; ?>
+new #[Layout('chat::einundzwanzig')] #[Title('Mitglieder')] class extends Component {}; ?>
 
 <main class="mx-auto max-w-md px-4 py-8 pt-safe pb-28">
 
     {{-- Kopf: zurück zum Space + Titel --}}
-    <x-app-header title="Mitglieder" :back="route('spaces')" />
+    <x-chat::app-header title="Mitglieder" :back="route('chat.spaces')" />
 
     {{-- Directory des AKTIVEN Space (§12). Gated auf relay.self (Fix A). --}}
     <div x-data="nostrDirectory" class="page-enter space-y-4">
@@ -209,5 +209,5 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Mitglieder')] class extends Com
 
     </div>
 
-    <x-bottom-nav />
+    <x-chat::bottom-nav />
 </main>

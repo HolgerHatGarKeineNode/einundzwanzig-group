@@ -10,19 +10,19 @@ use Livewire\Component;
  * Server-Seam für spätere Cache-Vorteile (§10): hier könnten gecachte Space-/Room-
  * Daten in `mount()` geladen und via `@js(...)` an die Insel gereicht werden.
  */
-new #[Layout('layouts::einundzwanzig')] #[Title('Space')] class extends Component {}; ?>
+new #[Layout('chat::einundzwanzig')] #[Title('Space')] class extends Component {}; ?>
 
 <main class="mx-auto max-w-md px-4 py-8 pt-safe pb-28">
 
     {{-- Kopf: Marke + wer bin ich + Abmelden (Navigation liegt in der Bottom-Nav) --}}
-    <x-app-header title="Space" x-data="nostrAuth">
+    <x-chat::app-header title="Space" x-data="nostrAuth">
         <x-slot:subtitle>
             <div class="truncate font-mono text-xs text-zinc-500" x-text="npub"></div>
         </x-slot:subtitle>
         <x-slot:actions>
             <flux:button variant="ghost" size="sm" x-on:click="doLogout()">Abmelden</flux:button>
         </x-slot:actions>
-    </x-app-header>
+    </x-chat::app-header>
 
     {{-- Genau EIN fixierter Space + seine Räume (kein Multi-Space-Layout, §12) --}}
     <div x-data="nostrSpaces" class="page-enter" x-show="space">
@@ -59,5 +59,5 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Space')] class extends Componen
         </div>
     </div>
 
-    <x-bottom-nav />
+    <x-chat::bottom-nav />
 </main>

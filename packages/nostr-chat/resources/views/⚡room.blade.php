@@ -1,6 +1,6 @@
 <?php
 
-use App\Nostr\SpaceCache;
+use App\Chat\Nostr\SpaceCache;
 use Illuminate\Support\Facades\View;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
@@ -14,7 +14,7 @@ use Livewire\Component;
  * server-gerenderter `<head>` für Crawler/Share-Previews, ohne die client-seitige
  * Architektur zu berühren. Cache-Miss = Fallback auf die rohe Raum-ID.
  */
-new #[Layout('layouts::einundzwanzig')] class extends Component
+new #[Layout('chat::einundzwanzig')] class extends Component
 {
     public string $h;
 
@@ -41,7 +41,7 @@ new #[Layout('layouts::einundzwanzig')] class extends Component
 {{-- Chat-Bühne: Kopf + Verlauf + Composer unter EINEM Alpine-Scope (M4 lesen, M5 schreiben). --}}
 <div x-data="nostrRoomChat(@js($h))" class="mx-auto flex h-screen w-full max-w-md flex-col px-4 pt-safe pb-safe">
 
-    <x-app-header :title="'# '.($roomName ?? $h)" :back="route('spaces')" class="shrink-0">
+    <x-chat::app-header :title="'# '.($roomName ?? $h)" :back="route('chat.spaces')" class="shrink-0">
         <x-slot:actions>
             {{-- Mitglied → Verlassen (kind 9022). Beitreten liegt beim Composer. --}}
             <flux:button size="xs" variant="ghost" icon="arrow-right-start-on-rectangle"
@@ -49,7 +49,7 @@ new #[Layout('layouts::einundzwanzig')] class extends Component
                 Verlassen
             </flux:button>
         </x-slot:actions>
-    </x-app-header>
+    </x-chat::app-header>
 
     <div class="relative flex min-h-0 flex-1 flex-col">
 

@@ -28,8 +28,8 @@
 
 {{-- Prod-Default-Space: setzt die Vereins-Relay-URL VOR dem welshman-Boot.
      Muss VOR @vite stehen (das ES-Modul-Bundle liest window.__nostrSpace beim Init). --}}
-@if (config('nostr.space_url'))
-    <script>window.__nostrSpace = @js(config('nostr.space_url'));</script>
+@if (config('chat.space_url'))
+    <script>window.__nostrSpace = @js(config('chat.space_url'));</script>
 @endif
 
 @vite(['resources/css/app.css', 'resources/js/app.ts'])

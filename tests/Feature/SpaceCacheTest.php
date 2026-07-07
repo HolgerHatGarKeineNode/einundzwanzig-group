@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Nostr\SpaceCache;
+use App\Chat\Nostr\SpaceCache;
 use Illuminate\Support\Facades\Cache;
 
 test('parseRooms extrahiert Name und Beschreibung je h, überspringt d-lose Events', function () {
@@ -24,7 +24,7 @@ test('Raum-Seite rendert gecachten Namen in Titel/Header und Beschreibung als OG
     ]);
 
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('room', ['h' => 'welcome']))
+        ->get(route('chat.room', ['h' => 'welcome']))
         ->assertOk()
         ->assertSee('# Willkommen')
         ->assertSee('Der Startraum');
@@ -32,7 +32,7 @@ test('Raum-Seite rendert gecachten Namen in Titel/Header und Beschreibung als OG
 
 test('Raum-Seite fällt bei Cache-Miss auf die rohe Raum-ID zurück', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('room', ['h' => 'nochnie']))
+        ->get(route('chat.room', ['h' => 'nochnie']))
         ->assertOk()
         ->assertSee('# nochnie');
 });

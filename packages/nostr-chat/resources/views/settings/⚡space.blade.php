@@ -5,15 +5,15 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 
 /** Space-Wechsel (der einzige Ort dafür, §12) als Livewire-SFC. */
-new #[Layout('layouts::einundzwanzig')] #[Title('Space wählen')] class extends Component {}; ?>
+new #[Layout('chat::einundzwanzig')] #[Title('Space wählen')] class extends Component {}; ?>
 
 <main class="mx-auto max-w-md px-4 py-8 pt-safe pb-28">
 
-    <x-app-header title="Space wählen" :back="route('spaces')">
+    <x-chat::app-header title="Space wählen" :back="route('chat.spaces')">
         <x-slot:subtitle>
             <flux:text class="text-sm">Die App zeigt immer genau diesen Space.</flux:text>
         </x-slot:subtitle>
-    </x-app-header>
+    </x-chat::app-header>
 
     {{-- Auswahl des aktiven Space (der einzige Ort zum Wechseln, §12) --}}
     <div x-data="nostrSpaceSettings" class="page-enter">
@@ -48,5 +48,5 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Space wählen')] class extends 
         </div>
     </div>
 
-    <x-bottom-nav />
+    <x-chat::bottom-nav />
 </main>

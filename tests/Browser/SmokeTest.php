@@ -9,7 +9,7 @@ it('rendert die Landing im Host-Chromium', function () {
     $page = visit('/');
 
     $page->assertSee('EINUNDZWANZIG')
-        ->assertSee('Vereins-Chat auf Nostr')
+        ->assertSee('Die Bitcoin-Community auf Nostr')
         ->assertSee('Anmelden')
         ->assertNoJavaScriptErrors();
 });

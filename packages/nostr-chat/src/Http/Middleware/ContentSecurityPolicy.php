@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Middleware;
+namespace App\Chat\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
@@ -31,11 +31,19 @@ class ContentSecurityPolicy
             return $response;
         }
 
+        // Dev: Vite serviert @vite/client + app.ts/css von seinem eigenen Origin
+        // (public/hot). Ohne Freigabe blockt die CSP das Insel-Bundle → keine
+        // Alpine-Komponenten. Nur im Dev aktiv (im Prod-Build fehlt public/hot).
+        $vite = '';
+        if (is_file($hot = public_path('hot'))) {
+            $vite = ' '.trim((string) file_get_contents($hot));
+        }
+
         $policy = implode('; ', [
             "default-src 'self'",
             // Alpine/Livewire-Realität (siehe Klassendoku).
-            "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-            "style-src 'self' 'unsafe-inline'",
+            "script-src 'self' 'unsafe-eval' 'unsafe-inline'".$vite,
+            "style-src 'self' 'unsafe-inline'".$vite,
             // Avatare/Chat-Bilder kommen von beliebigen Hosts.
             'img-src * data: blob:',
             "font-src 'self' data:",

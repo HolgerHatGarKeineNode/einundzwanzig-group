@@ -5,7 +5,7 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 
 /** M0 welshman-Smoke-Test (temporär, öffentlich) als Livewire-SFC. */
-new #[Layout('layouts::einundzwanzig')] #[Title('welshman Smoke-Test')] class extends Component {}; ?>
+new #[Layout('chat::einundzwanzig')] #[Title('welshman Smoke-Test')] class extends Component {}; ?>
 
 <main class="mx-auto max-w-2xl px-4 py-10 pt-safe">
     <div class="page-enter">

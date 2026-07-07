@@ -1,7 +1,5 @@
 <?php
 
-use App\Http\Middleware\ContentSecurityPolicy;
-use App\Http\Middleware\EnsureNostrAuth;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -13,16 +11,9 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->alias([
-            'nostr.auth' => EnsureNostrAuth::class,
-        ]);
-
-        // CSP als Defense-in-Depth auf allen Web-Antworten.
-        $middleware->web(append: [
-            ContentSecurityPolicy::class,
-        ]);
-    })
+    // Nostr-Gate (`nostr.auth`) + CSP kommen aus dem einundzwanzig/nostr-chat-Package;
+    // withMiddleware bleibt (leer) bestehen, damit die Default-Gruppen (web/api) greifen.
+    ->withMiddleware(function (Middleware $middleware): void {})
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),

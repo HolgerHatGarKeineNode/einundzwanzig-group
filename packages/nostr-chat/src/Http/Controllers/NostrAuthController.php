@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Chat\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +15,7 @@ use swentel\nostr\Event\Event;
  * wird ausschließlich die Schnorr-Signatur server-seitig verifiziert. Erst
  * danach gilt der pubkey für das Gate als beglaubigt.
  */
-class NostrAuthController extends Controller
+class NostrAuthController
 {
     /** Maximales Alter des signierten Events (Uhren-Drift-Toleranz). */
     private const EVENT_MAX_AGE = 120;
@@ -38,7 +38,7 @@ class NostrAuthController extends Controller
 
         return response()->json([
             'challenge' => $challenge,
-            'url' => route('nostr.login'),
+            'url' => route('chat.nostr.login'),
         ]);
     }
 
@@ -84,7 +84,7 @@ class NostrAuthController extends Controller
         $method = $tags->firstWhere(0, 'method')[1] ?? null;
         $challenge = $tags->firstWhere(0, 'challenge')[1] ?? null;
 
-        if ($url !== route('nostr.login') || strtoupper((string) $method) !== 'POST') {
+        if ($url !== route('chat.nostr.login') || strtoupper((string) $method) !== 'POST') {
             return $this->reject('URL oder Methode stimmt nicht.');
         }
 
@@ -107,7 +107,7 @@ class NostrAuthController extends Controller
         return response()->json([
             'ok' => true,
             'pubkey' => $event['pubkey'],
-            'redirect' => session()->pull('url.intended', route('spaces')),
+            'redirect' => session()->pull('url.intended', route('chat.spaces')),
         ]);
     }
 

@@ -6,7 +6,7 @@
  * ein Guard: ist die config gesetzt, muss das inline-Script im HTML stehen.
  */
 test('setzt window.__nostrSpace, wenn NOSTR_SPACE_URL/config gesetzt ist', function () {
-    config()->set('nostr.space_url', 'wss://group.einundzwanzig.space/');
+    config()->set('chat.space_url', 'wss://group.einundzwanzig.space/');
 
     $this->get('/')
         ->assertOk()
@@ -15,7 +15,7 @@ test('setzt window.__nostrSpace, wenn NOSTR_SPACE_URL/config gesetzt ist', funct
 });
 
 test('injiziert nichts, wenn die Space-URL leer ist (Dev-Default)', function () {
-    config()->set('nostr.space_url', null);
+    config()->set('chat.space_url', null);
 
     $this->get('/')
         ->assertOk()

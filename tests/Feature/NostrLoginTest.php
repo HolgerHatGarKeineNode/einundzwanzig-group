@@ -40,17 +40,17 @@ test('challenge returns a nonce and the login url', function () {
     $this->getJson('/nostr/challenge')
         ->assertOk()
         ->assertJsonStructure(['challenge', 'url'])
-        ->assertJson(['url' => route('nostr.login')]);
+        ->assertJson(['url' => route('chat.nostr.login')]);
 });
 
 test('valid nip98 event authenticates the pubkey', function () {
     $challenge = 'challenge-'.str_repeat('a', 54);
-    $event = signHttpAuth(route('nostr.login'), 'POST', $challenge);
+    $event = signHttpAuth(route('chat.nostr.login'), 'POST', $challenge);
 
     $this->withSession([
         'nostr_challenge' => $challenge,
         'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('nostr.login'), ['event' => $event])
+    ])->postJson(route('chat.nostr.login'), ['event' => $event])
         ->assertOk()
         ->assertJson(['ok' => true, 'pubkey' => $event['pubkey']]);
 
@@ -59,32 +59,32 @@ test('valid nip98 event authenticates the pubkey', function () {
 
 test('tampered signature is rejected', function () {
     $challenge = 'challenge-'.str_repeat('b', 54);
-    $event = signHttpAuth(route('nostr.login'), 'POST', $challenge);
+    $event = signHttpAuth(route('chat.nostr.login'), 'POST', $challenge);
     $event['sig'] = str_repeat('0', 128);
 
     $this->withSession([
         'nostr_challenge' => $challenge,
         'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('nostr.login'), ['event' => $event])
+    ])->postJson(route('chat.nostr.login'), ['event' => $event])
         ->assertStatus(422);
 
     expect(session('nostr_pubkey'))->toBeNull();
 });
 
 test('wrong challenge is rejected', function () {
-    $event = signHttpAuth(route('nostr.login'), 'POST', 'signed-with-other');
+    $event = signHttpAuth(route('chat.nostr.login'), 'POST', 'signed-with-other');
 
     $this->withSession([
         'nostr_challenge' => 'server-expects-this',
         'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('nostr.login'), ['event' => $event])
+    ])->postJson(route('chat.nostr.login'), ['event' => $event])
         ->assertStatus(422);
 
     expect(session('nostr_pubkey'))->toBeNull();
 });
 
 test('gate redirects guests to login', function () {
-    $this->get('/spaces')->assertRedirect(route('nostr-login'));
+    $this->get('/spaces')->assertRedirect(route('chat.nostr-login'));
 });
 
 test('gate allows authenticated pubkey', function () {
@@ -95,7 +95,7 @@ test('gate allows authenticated pubkey', function () {
 
 test('logout clears the session', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->postJson(route('nostr.logout'))
+        ->postJson(route('chat.nostr.logout'))
         ->assertOk();
 
     expect(session('nostr_pubkey'))->toBeNull();

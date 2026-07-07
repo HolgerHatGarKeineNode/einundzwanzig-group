@@ -5,7 +5,7 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 
 /** Nostr-Login (öffentlich) als Livewire-SFC. Signer + Session leben im Browser. */
-new #[Layout('layouts::einundzwanzig')] #[Title('Anmelden')] class extends Component {}; ?>
+new #[Layout('chat::einundzwanzig')] #[Title('Anmelden')] class extends Component {}; ?>
 
 <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-10 pt-safe">
     <div x-data="nostrAuth" class="page-enter">
