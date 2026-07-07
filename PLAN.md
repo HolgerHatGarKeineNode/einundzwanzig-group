@@ -9,7 +9,7 @@
 | **M0** — Setup (Vite + welshman-Insel + Shell) | ✅ **fertig** | `/nostr-smoke` zeigt 30 Live-`kind:1`-Notes; welshman bündelt via Vite; Design-System (Inconsolata) aus mobile-app übernommen. Commit `8fcae0f`. |
 | **M0.5** — Mobile-WebView-Smoke | ✅ **fertig** | welshman-Insel + Relay-WebSockets laufen im nativen Android-WebView (Screenshot bestätigt). App-ID `space.einundzwanzig.group`. Commit `de6eacf`. |
 | **M1** — Nostr-Login (NIP-07/46/nsec) | ✅ **fertig** | Client-Login (nsec/NIP-07/NIP-46 + welshman-Session + localStorage) **und** NIP-98-Handoff an die Laravel-Session (server-seitige Schnorr-Verifikation via `swentel/nostr-php`, Einmal-Nonce) + `nostr.auth`-Gate (`/spaces`) + beidseitiges Logout. 8 Feature-Tests grün. **NIP-55/Amber-Bridge → M8** (mobil). |
-| **M1.5** — E2E-Login-Tests (Playwright) | 🚧 **in Arbeit** | NIP-07/nsec/NIP-46-Bunker-Login end-to-end im Host-Chromium gegen hermetischen In-Process-Relay; Wegwerf-nsec in `.env`. |
+| **M1.5** — E2E-Login-Tests (Playwright) | ✅ **fertig** | NIP-07/nsec/NIP-46-Bunker-Login + Logout end-to-end im Host-Chromium gegen hermetischen In-Process-Relay; Wegwerf-nsec in `.env`. 4 E2E-Tests grün. Commit `63ef745`. |
 | **M2** — Space/Room-Liste lesen | ⬜ offen | |
 | **M3** — Directory / Members (Fix A) | ⬜ offen | |
 | **M4** — Chat lesen | ⬜ offen | |
