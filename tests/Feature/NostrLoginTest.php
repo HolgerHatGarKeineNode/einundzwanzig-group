@@ -1,5 +1,6 @@
 <?php
 
+use Livewire\Livewire;
 use swentel\nostr\Event\Event;
 use swentel\nostr\Key\Key;
 use swentel\nostr\Sign\Sign;
@@ -107,6 +108,14 @@ test('mobile flag is true and gate passes through when nativephp runs', function
     $this->get('/spaces')
         ->assertOk()
         ->assertSee('window.__nostrMobile = true', false);
+});
+
+test('openAmber is a safe no-op without the native runtime', function () {
+    // Ohne NativePHP-Extension (Web/Test) darf die Methode nicht crashen — der
+    // Amber-Button ist dort ohnehin aus.
+    Livewire::test('chat::nostr-login')
+        ->call('openAmber', 'nostrconnect://relay?x=1')
+        ->assertOk();
 });
 
 test('logout clears the session', function () {
