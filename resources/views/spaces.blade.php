@@ -41,12 +41,12 @@
 
                 <flux:navlist class="mt-3">
                     <template x-for="room in space?.userRooms ?? []" :key="room.h">
-                        <flux:navlist.item icon="hashtag"><span x-text="room.name"></span></flux:navlist.item>
+                        <flux:navlist.item icon="hashtag" class="cursor-pointer" x-on:click="window.location.assign('/rooms/' + encodeURIComponent(room.h))"><span x-text="room.name"></span></flux:navlist.item>
                     </template>
 
                     <flux:navlist.group heading="Andere Rooms" x-show="(space?.otherRooms.length ?? 0) > 0">
                         <template x-for="room in space?.otherRooms ?? []" :key="room.h">
-                            <flux:navlist.item icon="hashtag"><span x-text="room.name"></span></flux:navlist.item>
+                            <flux:navlist.item icon="hashtag" class="cursor-pointer" x-on:click="window.location.assign('/rooms/' + encodeURIComponent(room.h))"><span x-text="room.name"></span></flux:navlist.item>
                         </template>
                     </flux:navlist.group>
                 </flux:navlist>

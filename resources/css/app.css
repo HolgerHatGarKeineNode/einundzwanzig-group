@@ -132,6 +132,16 @@
 .empty-state > :nth-child(3) { animation-delay: 0.14s; }
 .empty-state > :nth-child(n + 4) { animation-delay: 0.21s; }
 
+[x-cloak] { display: none !important; }
+
+/* Chat-Nachrichten: Links im gerenderten (welshman/content) Inhalt. */
+.chat-content a {
+    color: var(--color-brand-500);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    overflow-wrap: anywhere;
+}
+
 /* Terminal-Caret: blinkender Block hinter der Wortmarke (monospace-Signatur). */
 @keyframes caret-blink {
     0%, 45% { opacity: 1; }

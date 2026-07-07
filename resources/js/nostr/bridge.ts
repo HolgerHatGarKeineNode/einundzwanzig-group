@@ -37,6 +37,10 @@ import {
     type DirectoryView,
     type MemberView,
 } from './members'
+import { deriveRoomChat, listenRoom, loadRoomMessages, type ChatMessage } from './feeds'
+
+/** Alpine-Magics, die auf `this` einer Komponente verfügbar sind. */
+type AlpineMagics = { $refs: Record<string, HTMLElement>; $nextTick: (cb: () => void) => void }
 
 /** Generischer Adapter (für M2+): spiegelt einen Store in `this.value`. */
 export function alpineFromStore<T>(store: Readable<T>) {
@@ -108,6 +112,28 @@ type DirectoryState = {
     filtered(): MemberView[]
 }
 
+type RoomChatState = {
+    h: string
+    messages: ChatMessage[]
+    loading: boolean
+    loadingMore: boolean
+    hasMore: boolean
+    atBottom: boolean
+    unread: number
+    _url: string | null
+    _unsubActive: null | (() => void)
+    _unsub: null | (() => void)
+    _controller: AbortController | null
+    _loadedProfiles: Set<string>
+    init(): void
+    setup(url: string): void
+    teardown(): void
+    loadOlder(): void
+    onScroll(): void
+    scrollToBottom(): void
+    destroy(): void
+}
+
 type SpaceSettingsState = {
     spaces: { url: string; label: string }[]
     active: string | null
@@ -119,7 +145,7 @@ type SpaceSettingsState = {
 }
 
 export function registerNostrComponents(Alpine: {
-    data: (name: string, factory: () => unknown) => void
+    data: (name: string, factory: (...args: unknown[]) => unknown) => void
 }) {
     // Space/Room-Navigation (M2, Single-Space §12): lädt die 10009-Membership,
     // zieht die Room-Metas (39000) des AKTIVEN Space nach und spiegelt genau
@@ -194,6 +220,113 @@ export function registerNostrComponents(Alpine: {
         destroy() {
             this._unsubActive?.()
             this._unsubDir?.()
+        },
+    }))
+
+    // Room-Chat (M4, read-only): Verlauf eines Rooms im AKTIVEN Space. Live-Sub
+    // (limit:0) für neue Nachrichten + Cursor-Pagination (Ältere laden). Senden
+    // kommt mit M5. Rendering/Profile/Divider aus feeds.ts (deriveRoomChat).
+    Alpine.data('nostrRoomChat', (h: unknown): RoomChatState => ({
+        h: String(h),
+        messages: [],
+        loading: true,
+        loadingMore: false,
+        hasMore: true,
+        atBottom: true,
+        unread: 0,
+        _url: null,
+        _unsubActive: null,
+        _unsub: null,
+        _controller: null,
+        _loadedProfiles: new Set<string>(),
+        init() {
+            // Aktiver Space → dessen Room-Feed (Wechsel baut Sub + Live neu auf).
+            this._unsubActive = activeSpace.subscribe((url: string) => this.setup(url))
+        },
+        setup(url: string) {
+            this.teardown()
+            this._url = url
+            this.loading = true
+            this.messages = []
+            this._controller = new AbortController()
+            listenRoom(url, this.h, this._controller.signal)
+            loadRoomMessages(url, this.h).finally(() => {
+                this.loading = false
+            })
+            this._unsub = deriveRoomChat(url, this.h).subscribe((msgs: ChatMessage[]) => {
+                const wasAtBottom = this.atBottom
+                const grew = msgs.length > this.messages.length
+                this.messages = msgs
+
+                // Profile neuer Autoren nachladen (einmal je pubkey).
+                const missing = msgs
+                    .map((m) => m.pubkey)
+                    .filter((pk) => !this._loadedProfiles.has(pk))
+                if (missing.length > 0) {
+                    missing.forEach((pk) => this._loadedProfiles.add(pk))
+                    loadMemberProfiles(url, missing)
+                }
+
+                const magics = this as unknown as AlpineMagics
+                magics.$nextTick(() => {
+                    if (wasAtBottom) {
+                        this.scrollToBottom()
+                    } else if (grew) {
+                        this.unread++
+                    }
+                })
+            })
+        },
+        // Ältere Nachrichten vor der aktuell ältesten laden; Scroll-Position halten.
+        loadOlder() {
+            if (this.loadingMore || !this._url || this.messages.length === 0) {
+                return
+            }
+            this.loadingMore = true
+            const el = (this as unknown as AlpineMagics).$refs.scroll
+            const prevHeight = el?.scrollHeight ?? 0
+            const oldest = this.messages[0].created_at
+            loadRoomMessages(this._url, this.h, oldest)
+                .then((events) => {
+                    if (events.length === 0) {
+                        this.hasMore = false
+                    }
+                })
+                .finally(() => {
+                    this.loadingMore = false
+                    ;(this as unknown as AlpineMagics).$nextTick(() => {
+                        if (el) {
+                            el.scrollTop = el.scrollHeight - prevHeight
+                        }
+                    })
+                })
+        },
+        onScroll() {
+            const el = (this as unknown as AlpineMagics).$refs.scroll
+            if (!el) {
+                return
+            }
+            this.atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+            if (this.atBottom) {
+                this.unread = 0
+            }
+        },
+        scrollToBottom() {
+            const el = (this as unknown as AlpineMagics).$refs.scroll
+            if (el) {
+                el.scrollTop = el.scrollHeight
+            }
+            this.atBottom = true
+            this.unread = 0
+        },
+        teardown() {
+            this._controller?.abort()
+            this._unsub?.()
+            this._unsub = null
+        },
+        destroy() {
+            this._unsubActive?.()
+            this.teardown()
         },
     }))
 

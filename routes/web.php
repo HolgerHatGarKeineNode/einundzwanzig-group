@@ -20,6 +20,10 @@ Route::view('/spaces', 'spaces')->middleware('nostr.auth')->name('spaces');
 // M3 — Directory: Mitglieder + Rollen des aktiven Space
 Route::view('/directory', 'directory')->middleware('nostr.auth')->name('directory');
 
+// M4 — Room-Chat (read-only): Verlauf eines Rooms im aktiven Space
+Route::get('/rooms/{h}', fn (string $h) => view('room', ['h' => $h]))
+    ->middleware('nostr.auth')->name('room');
+
 // Space-Wechsel — versteckt in den Einstellungen (§12)
 Route::view('/settings/space', 'settings.space')->middleware('nostr.auth')->name('space.settings');
 

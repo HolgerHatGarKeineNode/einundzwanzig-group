@@ -52,4 +52,12 @@ mgmt '{"method":"createrole","params":["member","Mitglied","",["150","0.6","0.45
 mgmt "{\"method\":\"assignrole\",\"params\":[\"$SELF\",\"mod\"]}"
 mgmt "{\"method\":\"assignrole\",\"params\":[\"$VIEWER\",\"member\"]}"
 
+# Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
+# (nak-Events sind nicht replaceable → Duplikate vermeiden).
+if [ "$(nak req -k 9 -t h=welcome --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -c '"kind":9')" -eq 0 ]; then
+    nak event --auth --sec "$USER"  -k 9 -t h=welcome -c 'Willkommen im Space! 👋' "$R" >/dev/null 2>&1 || true
+    nak event --auth --sec "$ADMIN" -k 9 -t h=welcome -c 'Schön, dass du da bist. Infos: https://einundzwanzig.space' "$R" >/dev/null 2>&1 || true
+    nak event --auth --sec "$USER"  -k 9 -t h=welcome -c 'Danke!' "$R" >/dev/null 2>&1 || true
+fi
+
 wait $PID

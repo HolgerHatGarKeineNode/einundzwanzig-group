@@ -13,7 +13,7 @@
 | **M2** — Space/Room-Liste lesen | ✅ **fertig** | `groups.ts` portiert (Spaces aus kind 10009, Rooms aus 39000/9008, `deriveUserRooms`/`deriveOtherRooms`); NIP-42-AUTH-Policy automatisch; `/spaces`-Insel zeigt Spaces + beigetretene/andere Rooms live. E2E gegen lokalen **zooid** (auto-Start + Seed). Flux-`navlist`. |
 | **M3** — Directory / Members (Fix A) | ✅ **fertig** | `repository.ts` (`deriveRelaySignedEvents`) + `members.ts` (13534/33534, HSL-Rollenfarben) portiert; `deriveSpaceDirectory` aggregiert Members+Rollen+Profile in EINEN Store, gated auf `relay.self` (NIP-11) → **kein Flackern** (Fix A ohne Map-Persistenz gelöst). `/directory` (Flux card-grid, Rollen-Badges, Client-Suche). App auf **fixierten Default-Space** umgestellt (§12, keine Auswahl-Pflicht). 3 E2E-Tests grün (Members+Rollen, Suche, Reload); Suite gesamt 9/9. |
 | **M3.5** — Home/Landing + Navigation (Design) | ✅ **fertig** | Gestaltete Landing (`/`) im EINUNDZWANZIG-Design (Logomark auf hellem Chip, Inconsolata-Wortmarke + Terminal-Caret, Light+Dark), login-abhängige CTAs. Gemeinsamer `<x-app-header>` (Marke/Zurück/Aktionen) über Space/Directory/Einstellungen. `welcome.blade` entfernt. Marke IMMER **EINUNDZWANZIG**; „flotilla" komplett aus UI + Code-Kommentaren raus. Bonus: Mitglieder-Profile laden auch vom Space-Relay (Namen statt npubs). |
-| **M4** — Chat lesen | ⬜ offen | |
+| **M4** — Chat lesen | ✅ **fertig** | `feeds.ts` (schlank statt `makeFeed`): Live-Sub (`limit:0`) + Cursor-Pagination (`until`) über `deriveEventsForUrl`; `deriveRoomChat` aggregiert Nachrichten + Profile + Datums-Divider + Autor-Gruppierung; Content via `@welshman/content` (`parse`/`renderAsHtml`, sicher). `/rooms/{h}` (`nostrRoomChat`): Verlauf lädt, „Ältere laden", Live-Nachrichten (verifiziert), „Neue"-Pill, Auto-Scroll. Rooms in `/spaces` verlinken hierher. 2 E2E-Tests (Rendering+Profile+Link, Live); Suite 11/11. |
 | **M5** — Chat senden + Room join/leave | ⬜ offen | |
 | **M6** — Politur | ⬜ offen | |
 | **M7** — Realtime/Backend (optional) | ⬜ offen | |
@@ -312,10 +312,11 @@ Der Signer bleibt in **allen** Fällen client-seitig im WebView — auch auf Mob
 - **Marken-/Design-Regeln (dauerhaft, Auftraggeber):** Markenname IMMER **EINUNDZWANZIG** (komplett groß); das Wort „flotilla" **nie** in UI/Design — auch aus Code-Kommentaren raus (→ „Referenz-Client"). Client heißt EINUNDZWANZIG.
 - **DoD erfüllt:** `/` zeigt die gestaltete Landing in Light+Dark; jeder Kern-Screen per Klick erreichbar; CTAs login-abhängig; Header konsistent; E2E 9/9 grün. Zusatz: Mitglieder-Profile laden auch vom Space-Relay (Namen statt npubs).
 
-### M4 — Chat lesen
-- **Ziel:** Room- + Space-Chat-Verlauf anzeigen.
-- **Schritte:** `feeds.ts` (`makeFeed`) portieren → `alpineFromStore` → `x-for` in `wire:ignore`. `@welshman/content` (`parse`/`render`) fürs Rendering (mentions/links/emoji). Absender-Profile (kind 0) über `@welshman/app`-Profile-Loader. Datum-Divider/Autor-Gruppen, Scroll/„New Messages"-Pill, Pagination (Sliding-Window aus `makeFeed`).
-- **DoD:** Chat-Verlauf lädt + paginiert; neue Nachrichten live; Text korrekt gerendert; Profile aufgelöst.
+### M4 — Chat lesen ✅
+- **Ziel:** Room-Chat-Verlauf anzeigen (read-only; Senden = M5).
+- **Umsetzung:** `resources/js/nostr/feeds.ts` — **bewusst schlanker** als `makeFeed` des Referenz-Clients (kein bidirektionaler DOM-Scroller): Live-Subscription via `request({filters:[{kinds:[9],'#h':[h],limit:0}], signal})` + Cursor-Pagination via `load({until})`, beides über die reaktive `deriveEventsForUrl`-Ableitung. `deriveRoomChat(url,h)` aggregiert Nachrichten + Profile (`profilesByPubkey`) + Datums-Divider + Autor-Gruppierung in EINEN Store; Content über `@welshman/content` (`parse` + `renderAsHtml` → sichere HTML, Text escaped, URLs sanitized, je Event gecacht). `/rooms/{h}` (`room.blade.php`, `nostrRoomChat`): Skeleton→Verlauf, „Ältere laden", Live-Zustellung, „Neue"-Pill + Auto-Scroll bei `atBottom`. Rooms in `/spaces` verlinken auf den Chat. Profile laden auch vom Space-Relay (Namen statt npubs).
+- **DoD erfüllt:** Verlauf lädt + paginiert; neue Nachrichten live (E2E-verifiziert via nak-Publish); Text/Emoji/Links korrekt gerendert; Profile aufgelöst. 2 E2E-Tests grün, Suite 11/11.
+- **Nicht in M4:** Space-weiter Chat (kind 9 ohne `#h`) ausgelassen — Rooms sind der Kern; bei Bedarf später als eigener „Room" nachrüstbar.
 
 ### M5 — Chat senden + Room join/leave
 - **Ziel:** Schreiben.
