@@ -13,50 +13,45 @@
                 <div class="truncate font-mono text-xs text-zinc-500" x-text="npub"></div>
             </div>
             <div class="flex items-center gap-1">
+                <flux:button variant="ghost" size="sm" icon="users" href="{{ route('directory') }}" aria-label="Mitglieder" />
                 <flux:button variant="ghost" size="sm" icon="cog-6-tooth" href="{{ route('space.settings') }}" aria-label="Space wechseln" />
                 <flux:button variant="ghost" size="sm" x-on:click="doLogout()">Abmelden</flux:button>
             </div>
         </div>
 
-        {{-- Genau EIN aktiver Space + seine Rooms (kein Multi-Space-Layout, §12) --}}
-        <div x-data="nostrSpaces" class="page-enter">
-
-            <template x-if="loading">
-                <div class="surface-card space-y-2 p-4">
-                    <div class="skeleton h-4 w-32"></div>
-                    <div class="skeleton h-3 w-24"></div>
+        {{-- Genau EIN fixierter Space + seine Rooms (kein Multi-Space-Layout, §12) --}}
+        <div x-data="nostrSpaces" class="page-enter" x-show="space">
+            <div class="surface-card p-4">
+                <div class="flex items-center gap-2">
+                    <flux:icon.server variant="solid" class="size-4 text-brand-500" />
+                    <span class="truncate font-semibold" x-text="space?.label"></span>
                 </div>
-            </template>
 
-            <template x-if="!loading && !space">
-                <div class="surface-card empty-state p-6 text-center">
-                    <flux:icon.inbox class="mx-auto size-8 text-zinc-400" />
-                    <flux:text class="mt-2">Kein aktiver Space.</flux:text>
-                    <flux:button variant="primary" size="sm" class="mt-3" href="{{ route('space.settings') }}">Space wählen</flux:button>
-                </div>
-            </template>
-
-            <template x-if="space">
-                <div class="surface-card p-4">
-                    <div class="flex items-center gap-2">
-                        <flux:icon.server variant="solid" class="size-4 text-brand-500" />
-                        <span class="truncate font-semibold" x-text="space.label"></span>
+                {{-- Rooms laden noch --}}
+                <template x-if="loading && space && space.userRooms.length === 0 && space.otherRooms.length === 0">
+                    <div class="mt-3 space-y-2">
+                        <div class="skeleton h-4 w-32"></div>
+                        <div class="skeleton h-4 w-24"></div>
                     </div>
+                </template>
 
-                    <flux:navlist class="mt-3">
-                        <template x-for="room in space.userRooms" :key="room.h">
+                {{-- Geladen, aber der Space hat keine Rooms --}}
+                <template x-if="!loading && space && space.userRooms.length === 0 && space.otherRooms.length === 0">
+                    <flux:text class="mt-3 text-sm text-zinc-500">Dieser Space hat noch keine Rooms.</flux:text>
+                </template>
+
+                <flux:navlist class="mt-3">
+                    <template x-for="room in space?.userRooms ?? []" :key="room.h">
+                        <flux:navlist.item icon="hashtag"><span x-text="room.name"></span></flux:navlist.item>
+                    </template>
+
+                    <flux:navlist.group heading="Andere Rooms" x-show="(space?.otherRooms.length ?? 0) > 0">
+                        <template x-for="room in space?.otherRooms ?? []" :key="room.h">
                             <flux:navlist.item icon="hashtag"><span x-text="room.name"></span></flux:navlist.item>
                         </template>
-
-                        <flux:navlist.group heading="Andere Rooms" x-show="space.otherRooms.length > 0">
-                            <template x-for="room in space.otherRooms" :key="room.h">
-                                <flux:navlist.item icon="hashtag"><span x-text="room.name"></span></flux:navlist.item>
-                            </template>
-                        </flux:navlist.group>
-                    </flux:navlist>
-                </div>
-            </template>
-
+                    </flux:navlist.group>
+                </flux:navlist>
+            </div>
         </div>
     </main>
     @fluxScripts

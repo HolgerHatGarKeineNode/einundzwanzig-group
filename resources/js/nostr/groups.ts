@@ -173,40 +173,53 @@ export type SpaceView = {
 export const displayRelayUrl = (url: string): string =>
     url.replace(/^wss?:\/\//, '').replace(/\/$/, '')
 
+/** Baut die UI-Sicht EINES Space (beigetretene + entdeckbare Rooms). */
+const buildSpaceView = (
+    url: string,
+    list: PublishedList | undefined,
+    byUrl: Map<string, Room[]>,
+    byId: Map<string, Room>,
+): SpaceView => {
+    const nameOf = (h: string) => displayRoom(byId.get(makeRoomId(url, h)), h)
+
+    const joined = getSpaceRoomsFromGroupList(url, list).filter((h) => byId.has(makeRoomId(url, h)))
+    const joinedSet = new Set(joined)
+    const other = (byUrl.get(url) ?? [])
+        .filter((room) => !joinedSet.has(room.h) && !room.livekit)
+        .map((room) => room.h)
+
+    const toView = (hs: string[]) => sortBy(nameOf, uniq(hs)).map((h) => ({ h, name: nameOf(h) }))
+
+    return { url, label: displayRelayUrl(url), userRooms: toView(joined), otherRooms: toView(other) }
+}
+
 /**
  * Ein einziger reaktiver Snapshot aller Spaces des Users mit ihren beigetretenen
- * und entdeckbaren Rooms — die Alpine-Insel braucht so nur EIN `subscribe`, und
- * Space-/Room-Änderungen fließen automatisch (kein manuelles Sub-Management).
+ * und entdeckbaren Rooms — die Grundlage der Space-Auswahl in den Einstellungen.
  */
 export const userSpacesView: Readable<SpaceView[]> = derived(
     [userSpaceUrls, userGroupList, roomsByUrl, roomsById],
-    ([$urls, $list, $byUrl, $byId]) => {
-        const list = $list as PublishedList | undefined
-        return $urls.map((url): SpaceView => {
-            const nameOf = (h: string) => displayRoom($byId.get(makeRoomId(url, h)), h)
-
-            const joined = getSpaceRoomsFromGroupList(url, list).filter((h) =>
-                $byId.has(makeRoomId(url, h)),
-            )
-            const joinedSet = new Set(joined)
-            const other = ($byUrl.get(url) ?? [])
-                .filter((room) => !joinedSet.has(room.h) && !room.livekit)
-                .map((room) => room.h)
-
-            const toView = (hs: string[]) =>
-                sortBy(nameOf, uniq(hs)).map((h) => ({ h, name: nameOf(h) }))
-
-            return { url, label: displayRelayUrl(url), userRooms: toView(joined), otherRooms: toView(other) }
-        })
-    },
+    ([$urls, $list, $byUrl, $byId]) =>
+        $urls.map((url) => buildSpaceView(url, $list as PublishedList | undefined, $byUrl, $byId)),
 )
 
 // ── Aktiver Space (Single-Space-Fokus, §12) ─────────────────────────────────
 
 /**
- * Die vom User gewählte Space-URL, in localStorage persistiert. Es gibt KEINE
- * Space-Rail — die App zeigt immer nur diesen einen Space; gewechselt wird in
- * den Einstellungen (`/settings/space`).
+ * Fixierter Default-Space: eine hardcodierte Relay-URL (§12). Die App fokussiert
+ * IMMER genau diesen Space — unabhängig von der 10009-Mitgliedschaft; gewechselt
+ * wird nur in den Einstellungen. Überschreibbar via `window.__nostrSpace` (E2E);
+ * Prod setzt hier die echte Vereins-Relay-URL.
+ * ponytail: hardcodiert auf den lokalen Test-Relay — Upgrade: aus Server-Config
+ * injizieren, sobald die produktive Space-URL feststeht.
+ */
+const spaceOverride = (globalThis as { __nostrSpace?: string }).__nostrSpace
+export const DEFAULT_SPACE_URL = normalizeRelayUrl(spaceOverride ?? 'ws://localhost:3334/')
+
+/**
+ * Die vom User gewählte Space-URL, in localStorage persistiert. Null = Default.
+ * Es gibt KEINE Space-Rail und KEINE „Space wählen"-Pflicht — der Default-Space
+ * lädt sofort; gewechselt wird nur in den Einstellungen (`/settings/space`).
  */
 export const activeSpaceUrl = writable<string | null>(null)
 export const activeSpaceReady = sync({
@@ -218,19 +231,24 @@ export const activeSpaceReady = sync({
 /** Setzt den aktiven Space (aus der Einstellungsseite). */
 export const setActiveSpace = (url: string): void => activeSpaceUrl.set(url)
 
-/**
- * Die effektive aktive Space-URL: die gewählte, sofern der User ihr noch
- * angehört — sonst der erste beigetretene Space als Fallback.
- */
-export const activeSpace: Readable<string | null> = derived(
-    [activeSpaceUrl, userSpaceUrls],
-    ([$active, $urls]) => ($active && $urls.includes($active) ? $active : ($urls[0] ?? null)),
+/** Die effektive aktive Space-URL: die gewählte oder — Default — die fixierte. */
+export const activeSpace: Readable<string> = derived(activeSpaceUrl, ($active) =>
+    normalizeRelayUrl($active ?? DEFAULT_SPACE_URL),
 )
 
-/** Der aktive Space als fertige UI-Sicht (oder null, wenn keiner vorhanden). */
-export const activeSpaceView: Readable<SpaceView | null> = derived(
-    [activeSpace, userSpacesView],
-    ([$active, $views]) => $views.find((view) => view.url === $active) ?? null,
+/**
+ * Der aktive Space als fertige UI-Sicht — für JEDE URL, auch wenn der User dem
+ * Space (noch) nicht beigetreten ist. Rooms streamen nach dem 39000-Load ein.
+ */
+export const activeSpaceView: Readable<SpaceView> = derived(
+    [activeSpace, userGroupList, roomsByUrl, roomsById],
+    ([$active, $list, $byUrl, $byId]) =>
+        buildSpaceView($active, $list as PublishedList | undefined, $byUrl, $byId),
+)
+
+/** Space-Auswahl in den Einstellungen: der fixe Default + beigetretene Spaces. */
+export const spaceChoices: Readable<string[]> = derived(userSpaceUrls, ($urls) =>
+    uniq([DEFAULT_SPACE_URL, ...$urls]),
 )
 
 // ── Laden ────────────────────────────────────────────────────────────────────

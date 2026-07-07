@@ -21,7 +21,7 @@ import {
     logoutServer,
 } from './session'
 import {
-    userSpaceUrls,
+    spaceChoices,
     activeSpace,
     activeSpaceView,
     setActiveSpace,
@@ -30,6 +30,13 @@ import {
     loadSpaceRooms,
     type SpaceView,
 } from './groups'
+import {
+    deriveSpaceDirectory,
+    loadSpaceDirectory,
+    loadMemberProfiles,
+    type DirectoryView,
+    type MemberView,
+} from './members'
 
 /** Generischer Adapter (für M2+): spiegelt einen Store in `this.value`. */
 export function alpineFromStore<T>(store: Readable<T>) {
@@ -88,6 +95,19 @@ type SpacesState = {
     destroy(): void
 }
 
+type DirectoryState = {
+    ready: boolean
+    members: MemberView[]
+    query: string
+    _unsubActive: null | (() => void)
+    _unsubDir: null | (() => void)
+    _loadedDir: Set<string>
+    _loadedProfiles: Set<string>
+    init(): void
+    destroy(): void
+    filtered(): MemberView[]
+}
+
 type SpaceSettingsState = {
     spaces: { url: string; label: string }[]
     active: string | null
@@ -116,19 +136,65 @@ export function registerNostrComponents(Alpine: {
                 this.loading = false
             })
             // Aktiver Space → dessen Rooms laden (Wechsel baut Subs neu auf).
-            this._unsubActive = activeSpace.subscribe((url: string | null) => {
-                if (url && !this._loaded.has(url)) {
+            this._unsubActive = activeSpace.subscribe((url: string) => {
+                if (!this._loaded.has(url)) {
                     this._loaded.add(url)
                     loadSpaceRooms(url)
                 }
             })
-            this._unsubView = activeSpaceView.subscribe((view: SpaceView | null) => {
+            this._unsubView = activeSpaceView.subscribe((view: SpaceView) => {
                 this.space = view
             })
         },
         destroy() {
             this._unsubActive?.()
             this._unsubView?.()
+        },
+    }))
+
+    // Space-Directory (M3): Mitglieder + Rollen des AKTIVEN Space. Gated auf
+    // relay.self (Fix A) — bis NIP-11 da ist, Skeleton statt „keine Mitglieder".
+    // Client-Suche filtert über Name + npub. Kein Multi-Space (§12).
+    Alpine.data('nostrDirectory', (): DirectoryState => ({
+        ready: false,
+        members: [],
+        query: '',
+        _unsubActive: null,
+        _unsubDir: null,
+        _loadedDir: new Set<string>(),
+        _loadedProfiles: new Set<string>(),
+        init() {
+            // Aktiver Space → dessen Directory laden + Sub neu aufbauen.
+            this._unsubActive = activeSpace.subscribe((url: string) => {
+                this._unsubDir?.()
+                this._unsubDir = null
+                this.ready = false
+                this.members = []
+                if (!this._loadedDir.has(url)) {
+                    this._loadedDir.add(url)
+                    loadSpaceDirectory(url)
+                }
+                this._unsubDir = deriveSpaceDirectory(url).subscribe((view: DirectoryView) => {
+                    this.ready = view.ready
+                    this.members = view.members
+                    // Profile der (neuen) Mitglieder nachladen — einmal je pubkey.
+                    const missing = view.members
+                        .map((m) => m.pubkey)
+                        .filter((pk) => !this._loadedProfiles.has(pk))
+                    if (missing.length > 0) {
+                        missing.forEach((pk) => this._loadedProfiles.add(pk))
+                        loadMemberProfiles(missing)
+                    }
+                })
+            })
+        },
+        filtered() {
+            const q = this.query.trim().toLowerCase()
+            return q ? this.members.filter((m) => m.search.includes(q)) : this.members
+        },
+        destroy() {
+            this._unsubActive?.()
+            this._unsubDir?.()
         },
     }))
 
@@ -141,10 +207,10 @@ export function registerNostrComponents(Alpine: {
         _unsubActive: null,
         init() {
             loadUserGroupList()
-            this._unsubUrls = userSpaceUrls.subscribe((urls: string[]) => {
+            this._unsubUrls = spaceChoices.subscribe((urls: string[]) => {
                 this.spaces = urls.map((url) => ({ url, label: displayRelayUrl(url) }))
             })
-            this._unsubActive = activeSpace.subscribe((url: string | null) => {
+            this._unsubActive = activeSpace.subscribe((url: string) => {
                 this.active = url
             })
         },
