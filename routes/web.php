@@ -14,8 +14,11 @@ Route::get('/nostr/challenge', [NostrAuthController::class, 'challenge'])->name(
 Route::post('/nostr/login', [NostrAuthController::class, 'login'])->name('nostr.login');
 Route::post('/nostr/logout', [NostrAuthController::class, 'logout'])->name('nostr.logout');
 
-// Geschützt durch das Nostr-Gate (Platzhalter für die Space-Liste, M2)
+// Geschützt durch das Nostr-Gate: aktiver Space + Room-Liste (Single-Space, §12)
 Route::view('/spaces', 'spaces')->middleware('nostr.auth')->name('spaces');
+
+// Space-Wechsel — versteckt in den Einstellungen (§12)
+Route::view('/settings/space', 'settings.space')->middleware('nostr.auth')->name('space.settings');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');

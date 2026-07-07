@@ -45,6 +45,7 @@ Der Nostr-Client **Flotilla** (SvelteKit-SPA, Nostr-SDK `@welshman/*`) wird in e
 - **Hybrid Web + Mobile aus EINER Codebasis.** Dasselbe Laravel-Projekt wird (a) als klassischer Web-Client gehostet **und** (b) via **NativePHP Mobile v3** zu einer iOS-/Android-App kompiliert. NativePHP bettet PHP+Laravel in eine WebView-Shell ein (kein Remote-Webserver, offline-first, nur SQLite/`database`-Queue, `.env` wird mitgeliefert). Die welshman-Nostr-Insel (JS + WebSockets) läuft im WebView unverändert weiter. Details, Konsequenzen und Mobile-Meilenstein: **§11**. App-ID `space.einundzwanzig.group` (fix, eigene ID neben dem Portal).
 - **Eigenes Design — KEINE Flotilla-Optik.** Flotillas UI/Layout wird *nicht* übernommen. `flotilla-einundzwanzig` bekommt ein neues, eigenständiges AAA-Design aus der **einundzwanzig-Designfamilie**: das bereits ausgereifte Design-System aus `einundzwanzig-mobile-app` (Schrift **Inconsolata**, Bitcoin-Brand-Ramp, Token-/Motion-Skalen) wird als Grundlage übernommen — siehe **§12**. Das Komponenten-Mapping (§6) beschreibt nur **Funktion/Datenquelle**, nicht Aussehen.
 - **Flux UI ist Pflicht für ALLE UI-Controls.** Jedes interaktive/darstellende Element nutzt die passende **Flux-Komponente** (`flux:button`, `flux:input`, `flux:tabs`, `flux:navlist`, `flux:card`, `flux:badge`, `flux:heading`/`flux:text`, `flux:callout` …) statt rohem HTML. Rohes `<button>`/`<input>`/`<select>` ist nicht zulässig, wo es eine Flux-Entsprechung gibt; rohe `<ul>/<li>/<div>` nur für reinen Content/Layout ohne Flux-Pendant. Flux-Props sind **compile-time** (server-seitig) — dynamische Zustände nicht per `::prop` an Flux binden, sondern die zustandsführende Flux-Komponente nutzen (z.B. `flux:tabs` statt Alpine-Toggle auf Buttons).
+- **EIN aktiver Space, KEINE Space-Rail.** Die App zeigt immer nur **einen** aktiven Space (kein Discord-Multi-Space-Layout, keine dauerhafte Space-Navigation links/unten). Die Liste aller Spaces ist in den **Einstellungen** versteckt; dort wechselt der User den aktiven Space. Persistenz in localStorage (`activeSpaceUrl`). Details: **§12**.
 - **Ziel-Projekt existiert:** Laravel 13 / Livewire **v4** / Flux Pro v2.15 / Fortify + Passkeys / Laravel Boost / Tailwind v4 (via `@tailwindcss/vite`). *(Interop-Muster für Livewire **4** ggf. gegen die Doku verifizieren.)*
 
 ---
@@ -122,7 +123,7 @@ Diese sind **App-Bugs von Flotilla**, keine welshman-Limits — beim Portieren f
 **Die eine Regel:** Alles, was **signiert wird, aus einem Relay kommt oder ein welshman-Store ist**, gehört in die **client-seitige Nostr-Insel** (Vite-gebündeltes TS + welshman + Alpine, im Browser). Alles, was nur **Shell / Routing / Gate / öffentliches Read-Modell** ist, gehört **Livewire** (Server). Der Server ist nie im Signaturpfad und kennt nur den (verifizierten) pubkey.
 
 ### Was Livewire (Server) rendert
-- App-Shell: Layout, PrimaryNav/SecondaryNav, Header, Modals-Gerüst, Buttons, Formular-Chrome — alles mit Flux-Komponenten.
+- App-Shell: Layout, Space-Kopf (aktiver Space) + Room-Liste (SecondaryNav), Header, Modals-Gerüst, Buttons, Formular-Chrome — alles mit Flux-Komponenten. **Keine Space-Rail** (§12).
 - Routing + Auth-Gate: welche Route/welcher Space sichtbar ist (pubkey aus verifizierter Session, §7).
 - Leere **Mount-Points** (`<div wire:ignore x-data=...>`), in die die Nostr-Insel client-seitig rendert.
 - *Optional* (später, §10): öffentliche Read-Caches (Space-Metadaten, Member-Listen, NIP-11 `self`, OG/SEO) — nie autoritativ.
@@ -202,7 +203,7 @@ Keine Machbarkeitsfrage mehr (das ist Flotillas produktiver Stack). Nur bestäti
 
 ## 6. Komponenten-/Routen-Mapping
 
-> **Achtung — dies ist ein Funktions-/Datenmapping, KEIN Design.** Die Tabelle sagt nur, *welche Livewire-Komponente welche welshman-Daten mountet* — nicht, wie es aussieht. Layout, Optik, Dichte und Navigation kommen aus **§12** (kompaktes, mobile-first Discord-Paradigma im einundzwanzig-Design-System). Flotillas Aussehen wird **nicht** nachgebaut.
+> **Achtung — dies ist ein Funktions-/Datenmapping, KEIN Design.** Die Tabelle sagt nur, *welche Livewire-Komponente welche welshman-Daten mountet* — nicht, wie es aussieht. Layout, Optik, Dichte und Navigation kommen aus **§12** (mobile-first **Single-Space-Paradigma**, KEINE Discord-Space-Rail, im einundzwanzig-Design-System). Flotillas Aussehen wird **nicht** nachgebaut.
 
 | Flotilla-Route / -Komponente | Livewire-Komponente | Flux-Bausteine | Client-Insel (welshman) |
 |---|---|---|---|
@@ -222,7 +223,7 @@ Keine Machbarkeitsfrage mehr (das ist Flotillas produktiver Stack). Nur bestäti
 | `SpaceMembersBanned` | `BannedMembers` | `flux:modal`, `flux:card`-Liste | `manageRelay` ListBanned/Ban |
 | `RoomMembers`/`RoomMembersAdd` | `RoomMembers` | `flux:modal`, `flux:select multiple` | 39002 + 9000 |
 | `/join` | `InviteAccept` | `flux:modal`/`flux:card` | `parseInviteLink` + RELAY_JOIN |
-| PrimaryNav / Space-Switcher | `PrimaryNav` | `flux:sidebar` + `flux:navlist` (Avatare), Mobile `flux:navbar` | Notification-Dots (später) |
+| ~~PrimaryNav / Space-Rail~~ → **Space-Auswahl in Einstellungen** | `SpaceSettings` (eigene Route `/settings/space`, `nostr.auth`) | `flux:radio.group`/`flux:navlist` der beigetretenen Spaces | `userSpaceUrls` + `activeSpaceUrl` (localStorage) |
 
 **Stolpersteine:** (1) imperatives `pushModal` → deklarative `flux:modal` + `wire:model`/`$flux.modal()`. (2) TipTap-Composer (`@welshman/editor`) bleibt Client-JS; `flux:textarea` als Minimal-Fallback. (3) HSL-Rollenfarben als `flux:badge` mit inline-style. (4) Login-Signer = Alpine/JS-Bridge, nie server-seitig. (5) Svelte-Komponenten-Reaktivität (`$store`, `{#each}`) → `alpineFromStore` + `x-for`.
 
@@ -376,15 +377,15 @@ Der Signer bleibt in **allen** Fällen client-seitig im WebView — auch auf Mob
 - Flux-Bausteine innerhalb der Content-Views.
 
 **Getrennt (pro Plattform):**
-- **Shell-/Layout-Blades:** `layouts/web.blade.php` (Flux `sidebar`/Desktop-Nav) vs. `layouts/mobile.blade.php` (native EDGE `<native:bottom-nav>`/`<native:top-bar>`). Auswahl über **ein Plattform-Flag**.
+- **Shell-/Layout-Blades:** `layouts/web.blade.php` (Flux-Layout, Room-Liste — **keine Space-Rail**, §12) vs. `layouts/mobile.blade.php` (native EDGE `<native:bottom-nav>`/`<native:top-bar>`). Auswahl über **ein Plattform-Flag**.
 - **Auth-Guard:** Web = NIP-98-Handoff an Server-Session; Mobile = lokale pubkey/Signer-Präsenz (§7).
 - **Signer-Verfügbarkeit:** NIP-07 nur Web; NIP-55/SecureStorage nur Mobile (§7).
 
-**Das Plattform-Flag:** `function_exists('nativephp_call')` (aus dem Skill) unterscheidet WebView-Runtime von Web. Einmal als `config('app.is_mobile')`/Blade-Helper kapseln; Layout-Wahl + Guard-Verzweigung hängen daran. Native Aufrufe **immer** damit guarden (Skill-Regel 7).
+**Das Plattform-Flag:** `config('nativephp-internal.running')` (via `NATIVEPHP_RUNNING`) unterscheidet echte WebView-Runtime von Web. **NICHT** `function_exists('nativephp_call')` — die Funktion existiert auch im Web (PHP-Fallback des Pakets), siehe `EnsureNostrAuth`. Einmal als `config('app.is_mobile')`/Blade-Helper kapseln; Layout-Wahl + Guard-Verzweigung hängen daran.
 
 ```
-             ┌─ layouts/web.blade.php    (Flux sidebar, NIP-98-Gate)
-Shell ───────┤                                    ↑ function_exists('nativephp_call')
+             ┌─ layouts/web.blade.php    (Flux-Layout, keine Space-Rail, NIP-98-Gate)
+Shell ───────┤                                    ↑ config('nativephp-internal.running')
              └─ layouts/mobile.blade.php (native EDGE nav, lokales Gate, SecureStorage)
                         │
    ┌────────────────────┴─────────────────────┐   ← ab hier 100% geteilt
@@ -409,12 +410,13 @@ Die client/server-Grenze aus §3 bleibt: Signing zu 100% im WebView-JS, Server (
 
 **Leitsatz:** Kein Flotilla-Look. `flotilla-einundzwanzig` erbt die **einundzwanzig-Designsprache** aus `einundzwanzig-mobile-app` — dasselbe Design-System, damit Web-Client und kompilierte App zur selben Marke gehören. Das System ist **schon gebaut und ausgereift**; wir **übernehmen es**, nicht neu erfinden. Source of Truth: `/home/user/Code/einundzwanzig-mobile-app/resources/css/app.css`.
 
-### Layout-Paradigma: kompaktes Discord, mobile-first
-Die Discord-artige Struktur (Space-Rail → Room-Liste → Chat) **bleibt** — sie ist für Gruppen-Chat funktional richtig. Aber **deutlich kompakter als Flotilla** und **mobile-first** entworfen:
+### Layout-Paradigma: EIN aktiver Space, mobile-first (KEINE Discord-Space-Rail)
+**Harte Design-Entscheidung des Auftraggebers:** Die App fokussiert sich immer auf **genau einen aktiven Space**. Es gibt **keine** Discord-artige Space-Rail/Space-Navigation (weder links auf Desktop noch als dauerhafte Leiste auf Mobile). Die Liste aller beigetretenen Spaces ist **in den Einstellungen versteckt**; dort — und nur dort — wechselt der User den aktiven Space.
 
-- **Mobile (Primärfall, = die kompilierte App):** *ein* Screen zur Zeit, Stack-Navigation statt Spalten. **Bottom-Nav** (`nav-pill`-Indikator aus dem System) als Primärnavigation, **FAB** (`fab-enter`) für Compose/Space anlegen, **Bottom-Sheets** (`--radius-sheet`) statt Desktop-Modals. Space-Wechsel über Sheet/Flyout, nicht über eine dauerhafte Icon-Rail. Safe-Area (`pt-safe`/`pb-safe`) überall. Kompakte Dichte (`density-compact`).
-- **Desktop/Web (Progressive Enhancement):** ab `md`/`lg` darf sich die Anatomie entfalten — schmale **Space-Rail** (Avatare) + **kompakte Room-Liste** + **Chat-Bühne**, optional Member-Panel. Dünnere Rails, dichtere Zeilen, mehr Ruhe als Flotilla. Kein 4-Spalten-Gedränge als Default.
-- **Ein responsives Blade**, das von Bottom-Nav (schmal) zu Rail+Spalten (breit) skaliert. Deckt sich mit den plattform-getrennten Shell-Layouts aus §11 (`mobile.blade` = Bottom-Nav/EDGE, `web.blade` = Rail).
+- **Aktiver Space:** eine persistente Präferenz in **localStorage** (`activeSpaceUrl`), Default = erster beigetretener Space. (Multi-Device-Sync via Nostr-App-Data-Event kind 30078 ist ein späteres Refinement.) Alle Ansichten (Rooms, Directory, Chat) beziehen sich auf diesen einen Space.
+- **Space-Wechsel:** ausschließlich auf einer **eigenen Nostr-Einstellungsseite** (hinter dem `nostr.auth`-Gate; die Fortify-Settings sind Laravel-User-basiert und hier nicht passend). Erreichbar über ein dezentes Zahnrad/Einstellungs-Icon, nicht über die Haupt-Navigation.
+- **Anatomie:** Ohne Space-Rail bleibt pro Screen: Space-Kopf (Name/Icon des aktiven Space) → **Room-Liste** → **Chat-Bühne** (+ optional Member-Panel auf Desktop). Mobile: *ein* Screen zur Zeit, Stack-Navigation, Bottom-Sheets (`--radius-sheet`), FAB (`fab-enter`) für Compose, Safe-Area (`pt-safe`/`pb-safe`), kompakte Dichte. Desktop/Web: ab `md`/`lg` Room-Liste + Chat nebeneinander, dichter/ruhiger als Flotilla.
+- **Ein responsives Blade**, das von Mobile (ein Screen) zu Desktop (Spalten) skaliert. Deckt sich mit den plattform-getrennten Shell-Layouts aus §11 — aber **keine** Rail-Variante mehr im `web.blade`.
 
 ### Übernommene Design-Tokens (aus `app.css`)
 - **Schrift:** `Inconsolata` als `--font-sans` (Monospace-Charakter, technisch/Bitcoin), via `@fontsource/inconsolata` (400/500/600/700). **Das ist die prägende Design-Entscheidung** — die ganze UI ist monospaced.

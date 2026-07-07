@@ -8,9 +8,9 @@
  * (ROOM_META) auf genau diesem Relay; die Room→Space-Bindung entsteht über den
  * `tracker` (von welchem Relay das Event kam), nicht über ein Tag.
  */
-import { derived, type Readable } from 'svelte/store'
+import { derived, writable, type Readable } from 'svelte/store'
 import { repository, tracker, pubkey, makeUserData, makeOutboxLoader } from '@welshman/app'
-import { deriveItemsByKey, deriveEventsByIdByUrl } from '@welshman/store'
+import { deriveItemsByKey, deriveEventsByIdByUrl, sync, localStorageProvider } from '@welshman/store'
 import { load } from '@welshman/net'
 import {
     ROOMS,
@@ -199,6 +199,38 @@ export const userSpacesView: Readable<SpaceView[]> = derived(
             return { url, label: displayRelayUrl(url), userRooms: toView(joined), otherRooms: toView(other) }
         })
     },
+)
+
+// ── Aktiver Space (Single-Space-Fokus, §12) ─────────────────────────────────
+
+/**
+ * Die vom User gewählte Space-URL, in localStorage persistiert. Es gibt KEINE
+ * Space-Rail — die App zeigt immer nur diesen einen Space; gewechselt wird in
+ * den Einstellungen (`/settings/space`).
+ */
+export const activeSpaceUrl = writable<string | null>(null)
+export const activeSpaceReady = sync({
+    key: 'activeSpaceUrl',
+    store: activeSpaceUrl,
+    storage: localStorageProvider,
+})
+
+/** Setzt den aktiven Space (aus der Einstellungsseite). */
+export const setActiveSpace = (url: string): void => activeSpaceUrl.set(url)
+
+/**
+ * Die effektive aktive Space-URL: die gewählte, sofern der User ihr noch
+ * angehört — sonst der erste beigetretene Space als Fallback.
+ */
+export const activeSpace: Readable<string | null> = derived(
+    [activeSpaceUrl, userSpaceUrls],
+    ([$active, $urls]) => ($active && $urls.includes($active) ? $active : ($urls[0] ?? null)),
+)
+
+/** Der aktive Space als fertige UI-Sicht (oder null, wenn keiner vorhanden). */
+export const activeSpaceView: Readable<SpaceView | null> = derived(
+    [activeSpace, userSpacesView],
+    ([$active, $views]) => $views.find((view) => view.url === $active) ?? null,
 )
 
 // ── Laden ────────────────────────────────────────────────────────────────────

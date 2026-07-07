@@ -22,7 +22,10 @@ import {
 } from './session'
 import {
     userSpaceUrls,
-    userSpacesView,
+    activeSpace,
+    activeSpaceView,
+    setActiveSpace,
+    displayRelayUrl,
     loadUserGroupList,
     loadSpaceRooms,
     type SpaceView,
@@ -76,47 +79,82 @@ type AuthState = {
 }
 
 type SpacesState = {
-    spaces: SpaceView[]
+    space: SpaceView | null
     loading: boolean
     _unsubView: null | (() => void)
-    _unsubUrls: null | (() => void)
+    _unsubActive: null | (() => void)
     _loaded: Set<string>
     init(): void
     destroy(): void
 }
 
+type SpaceSettingsState = {
+    spaces: { url: string; label: string }[]
+    active: string | null
+    _unsubUrls: null | (() => void)
+    _unsubActive: null | (() => void)
+    init(): void
+    destroy(): void
+    choose(url: string): void
+}
+
 export function registerNostrComponents(Alpine: {
     data: (name: string, factory: () => unknown) => void
 }) {
-    // Space/Room-Navigation (M2): lädt die 10009-Membership des Users, zieht pro
-    // Space die Room-Metas (39000) nach und spiegelt die aggregierte Sicht nach
-    // Alpine. AUTH gegen zooid läuft dabei automatisch (Signer aus der Session).
+    // Space/Room-Navigation (M2, Single-Space §12): lädt die 10009-Membership,
+    // zieht die Room-Metas (39000) des AKTIVEN Space nach und spiegelt genau
+    // diesen einen Space nach Alpine. Kein Multi-Space-Layout, keine Rail.
+    // AUTH gegen zooid läuft automatisch (Signer aus der Session).
     Alpine.data('nostrSpaces', (): SpacesState => ({
-        spaces: [],
+        space: null,
         loading: true,
         _unsubView: null,
-        _unsubUrls: null,
+        _unsubActive: null,
         _loaded: new Set<string>(),
         init() {
             loadUserGroupList()?.finally(() => {
                 this.loading = false
             })
-            // Neue Space-URLs → deren Rooms nachladen (einmal je URL).
-            this._unsubUrls = userSpaceUrls.subscribe((urls: string[]) => {
-                for (const url of urls) {
-                    if (!this._loaded.has(url)) {
-                        this._loaded.add(url)
-                        loadSpaceRooms(url)
-                    }
+            // Aktiver Space → dessen Rooms laden (Wechsel baut Subs neu auf).
+            this._unsubActive = activeSpace.subscribe((url: string | null) => {
+                if (url && !this._loaded.has(url)) {
+                    this._loaded.add(url)
+                    loadSpaceRooms(url)
                 }
             })
-            this._unsubView = userSpacesView.subscribe((view: SpaceView[]) => {
-                this.spaces = view
+            this._unsubView = activeSpaceView.subscribe((view: SpaceView | null) => {
+                this.space = view
             })
         },
         destroy() {
-            this._unsubUrls?.()
+            this._unsubActive?.()
             this._unsubView?.()
+        },
+    }))
+
+    // Space-Auswahl (Einstellungen): listet die beigetretenen Spaces und lässt
+    // den aktiven wechseln. Der einzige Ort, an dem gewechselt wird (§12).
+    Alpine.data('nostrSpaceSettings', (): SpaceSettingsState => ({
+        spaces: [],
+        active: null,
+        _unsubUrls: null,
+        _unsubActive: null,
+        init() {
+            loadUserGroupList()
+            this._unsubUrls = userSpaceUrls.subscribe((urls: string[]) => {
+                this.spaces = urls.map((url) => ({ url, label: displayRelayUrl(url) }))
+            })
+            this._unsubActive = activeSpace.subscribe((url: string | null) => {
+                this.active = url
+            })
+        },
+        choose(url: string) {
+            setActiveSpace(url)
+            window.location.assign('/spaces')
+        },
+        destroy() {
+            this._unsubUrls?.()
+            this._unsubActive?.()
         },
     }))
 
