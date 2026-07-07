@@ -32,5 +32,8 @@
     <script>window.__nostrSpace = @js(config('chat.space_url'));</script>
 @endif
 
+{{-- Plattform-Flag: auf dem Gerät gated die Insel client-seitig (kein NIP-98). --}}
+<script>window.__nostrMobile = @js((bool) config('nativephp-internal.running'));</script>
+
 @vite(['resources/css/app.css', 'resources/js/app.ts'])
 @fluxAppearance

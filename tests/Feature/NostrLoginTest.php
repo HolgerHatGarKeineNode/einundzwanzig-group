@@ -93,6 +93,22 @@ test('gate allows authenticated pubkey', function () {
         ->assertOk();
 });
 
+test('mobile flag is false on the web', function () {
+    $this->get('/nostr-login')
+        ->assertOk()
+        ->assertSee('window.__nostrMobile = false', false);
+});
+
+test('mobile flag is true and gate passes through when nativephp runs', function () {
+    // Auf dem Gerät gibt es kein NIP-98-Server-Gate (§7): EnsureNostrAuth lässt
+    // durch, die Insel gated client-seitig anhand von window.__nostrMobile.
+    config()->set('nativephp-internal.running', true);
+
+    $this->get('/spaces')
+        ->assertOk()
+        ->assertSee('window.__nostrMobile = true', false);
+});
+
 test('logout clears the session', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->postJson(route('chat.nostr.logout'))
