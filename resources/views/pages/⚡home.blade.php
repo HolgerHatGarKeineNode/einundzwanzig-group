@@ -16,7 +16,7 @@ new #[Layout('layouts::einundzwanzig')] #[Title('EINUNDZWANZIG')] class extends 
         {{-- Wortmarke: der Verein führt, monospace + Terminal-Caret --}}
         <div class="mt-6">
             <h1 class="text-3xl font-bold tracking-tight">EINUNDZWANZIG<span class="caret ml-0.5" aria-hidden="true"></span></h1>
-            <div class="mt-1 font-mono text-xs tracking-wide text-zinc-500">Vereins-Chat auf Nostr</div>
+            <div class="mt-1 font-mono text-xs tracking-wide text-zinc-500">Die Bitcoin-Community auf Nostr</div>
         </div>
 
         {{-- Angemeldet → in den Space --}}

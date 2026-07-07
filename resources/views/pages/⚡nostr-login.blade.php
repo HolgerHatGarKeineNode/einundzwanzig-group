@@ -27,7 +27,7 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Anmelden')] class extends Compo
                     <flux:icon.bolt variant="solid" class="size-6 text-brand-500" />
                     Anmelden
                 </flux:heading>
-                <flux:text class="mt-1 mb-5">Mit deinem Nostr-Schlüssel. Der private Key verlässt den Browser nie.</flux:text>
+                <flux:text class="mt-1 mb-5">Melde dich mit deinem Nostr-Signer an — per Browser-Erweiterung, Amber oder Bunker.</flux:text>
 
                 {{-- NIP-07 (nur wenn Extension vorhanden) --}}
                 <flux:button x-show="hasExtension" variant="primary" class="w-full" x-on:click="loginExtension()" ::disabled="busy">
@@ -43,8 +43,12 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Anmelden')] class extends Compo
                     </flux:tabs>
 
                     <flux:tab.panel name="nsec" class="mt-3 space-y-2">
+                        <flux:callout variant="warning" icon="exclamation-triangle">
+                            <flux:callout.heading>Experimentell &amp; unsicher — nur für Tests</flux:callout.heading>
+                            <flux:callout.text>Dein privater Schlüssel wird im Browser gespeichert und ist dort angreifbar. Für echte Konten nutze eine Browser-Erweiterung, Amber oder einen Bunker.</flux:callout.text>
+                        </flux:callout>
                         <flux:input type="password" x-model="keyInput" placeholder="nsec1… oder 64-stelliger hex-Key" x-on:keydown.enter="loginNsec()" />
-                        <flux:button variant="primary" class="w-full" x-on:click="loginNsec()" ::disabled="busy">Anmelden</flux:button>
+                        <flux:button variant="danger" class="w-full" x-on:click="loginNsec()" ::disabled="busy">Trotzdem anmelden (unsicher)</flux:button>
                     </flux:tab.panel>
 
                     <flux:tab.panel name="bunker" class="mt-3 space-y-2">

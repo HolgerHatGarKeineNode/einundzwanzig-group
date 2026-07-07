@@ -33,7 +33,7 @@ test.describe('Nostr-Login (E2E)', () => {
 
         await page.goto('/nostr-login')
         await page.getByPlaceholder(/nsec1/).fill(NSEC)
-        await page.getByRole('button', { name: 'Anmelden' }).click()
+        await page.getByRole('button', { name: /Trotzdem anmelden/ }).click()
 
         await page.waitForURL('**/spaces')
         await expect(page.locator('body')).toContainText(npub)
@@ -87,7 +87,7 @@ test.describe('Nostr-Login (E2E)', () => {
     test('Logout leert beide Sessions und das Gate sperrt wieder', async ({ page }) => {
         await page.goto('/nostr-login')
         await page.getByPlaceholder(/nsec1/).fill(NSEC)
-        await page.getByRole('button', { name: 'Anmelden' }).click()
+        await page.getByRole('button', { name: /Trotzdem anmelden/ }).click()
         await page.waitForURL('**/spaces')
 
         await page.getByRole('button', { name: 'Abmelden' }).click()

@@ -38,7 +38,11 @@ export async function loginWithExtension(): Promise<void> {
     loginWithNip07(pk)
 }
 
-/** nsec1… oder 64-stelliger hex-Key. Der Key bleibt lokal (localStorage). */
+/**
+ * nsec1… oder 64-stelliger hex-Key. UNSICHER, nur für Tests: der Key liegt im
+ * Klartext im localStorage und ist für jedes XSS/kompromittierte Dependency
+ * lesbar. Echte Konten nutzen NIP-07 (Extension) oder NIP-46 (Amber/Bunker).
+ */
 export function loginWithSecretKey(input: string): void {
     const trimmed = input.trim()
     let secret: string

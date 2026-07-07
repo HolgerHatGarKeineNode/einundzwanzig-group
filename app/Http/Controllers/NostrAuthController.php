@@ -10,7 +10,7 @@ use swentel\nostr\Event\Event;
 /**
  * NIP-98-Handoff: der pubkey wird beweisbar in die Laravel-Session gesetzt.
  *
- * Der private Key verlässt den Browser nie — der Client signiert nur ein
+ * Der Server sieht den privaten Key nie — der Client signiert nur ein
  * NIP-98-Auth-Event (kind 27235) über die Login-URL + eine Server-Nonce; hier
  * wird ausschließlich die Schnorr-Signatur server-seitig verifiziert. Erst
  * danach gilt der pubkey für das Gate als beglaubigt.

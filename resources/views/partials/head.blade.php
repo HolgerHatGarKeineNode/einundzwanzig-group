@@ -4,7 +4,7 @@
 
 @php
     $pageTitle = filled($title ?? null) ? $title.' – '.config('app.name') : config('app.name');
-    $ogDescription = $ogDescription ?? 'Vereins-Chat auf Nostr.';
+    $ogDescription = $ogDescription ?? 'Die Bitcoin-Community auf Nostr.';
 @endphp
 
 <title>{{ $pageTitle }}</title>
