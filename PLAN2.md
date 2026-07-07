@@ -10,6 +10,19 @@
 > - **Chat-Feature** = der Nostr-Community-Kern (Spaces/Rooms/Directory/Chat/Login), der portiert wird.
 > - **welshman-Insel** = die client-seitige JS/WebSocket-Schicht (`resources/js/nostr/*`), plattformblind.
 
+### Fortschritt (Stand 2026-07-08)
+
+| Phase | Status | Ergebnis / nächster Schritt |
+|---|---|---|
+| **Planung & Entscheidungen** | ✅ **fertig** | Strategie-Pivot (Chat-Package-Tab statt eigener App), Architektur, Verteil-Mechanik, Reibungspunkte & Portier-Inventar — dieses Dokument. |
+| **P0** — Package-Skelett + `App\Chat\`-Umzug | ⬜ offen | **Startpunkt.** `packages/nostr-chat` anlegen, Namespace/`chat::`-Views umziehen, ServiceProvider; Web-Client dogfooded via path-repo; Suite grün. |
+| **P1** — Subtree-Split + Portal-Integration | ⬜ offen | `split-package.sh`; Portal requiret Package; Chat-Tab (1 Nav-Zeile) + Vollbild-Layout + „Zurück"-Pfad; Build im Emulator. |
+| **P2** — Integration härten | ⬜ offen | CSS/Theme-Scoping, `__nostrSpace`/Head, welshman-Lifecycle im WebView, Tailwind-Content-Globs. |
+| **P3** — Mobile-Signer (Workstream B) | ⬜ offen | NIP-46 (+ Deep-Link-Callback) → Amber/NIP-55 → nsec/SecureStorage+Biometrics. **Größte Unbekannte.** |
+| **P4** — Release | ⬜ offen | `NATIVEPHP_*`-Env-Abgleich, signiertes AAB, Store-Vorbereitung. |
+
+> Details je Phase in **§6 Fahrplan**. Legende: ✅ fertig · 🔄 in Arbeit · ⬜ offen.
+
 ---
 
 ## 1. Entscheidungen (2026-07-07, Auftraggeber)
