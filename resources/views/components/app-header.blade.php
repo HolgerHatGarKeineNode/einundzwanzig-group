@@ -9,7 +9,7 @@
      durchgereicht, damit Alpine-Scopes (z.B. nostrAuth) die Slots umschließen. --}}
 <header {{ $attributes->class('mb-6 flex items-center gap-3') }}>
     @if ($back)
-        <flux:button variant="ghost" size="sm" icon="arrow-left" :href="$back" aria-label="Zurück" />
+        <flux:button variant="ghost" size="sm" icon="arrow-left" :href="$back" wire:navigate aria-label="Zurück" />
     @else
         <a href="{{ route('home') }}" wire:navigate aria-label="Startseite" class="pressable shrink-0">
             <x-app-brand-mark class="size-9" />

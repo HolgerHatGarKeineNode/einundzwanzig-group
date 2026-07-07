@@ -434,7 +434,8 @@ export function registerNostrComponents(Alpine: {
         },
         choose(url: string) {
             setActiveSpace(url)
-            window.location.assign('/spaces')
+            // SPA-Navigation (welshman bleibt warm) statt Full-Reload.
+            ;(window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/spaces')
         },
         destroy() {
             this._unsubUrls?.()
