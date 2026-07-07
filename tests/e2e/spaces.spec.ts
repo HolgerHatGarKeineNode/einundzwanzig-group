@@ -14,8 +14,8 @@ async function login(page: import('@playwright/test').Page): Promise<void> {
 
 /**
  * M2 (Single-Space §12) — nach Login zeigt die App genau EINEN aktiven Space mit
- * seinen Räumen (39000). Die persönliche 10009-Folgeliste liegt nicht auf dem
- * Gruppenrelay (zooid lehnt sie ab), daher erscheinen hier alle Räume unter
+ * seinen Räumen (39000). Mitgliedschaft ist relay-seitig (39002): der Seed lässt
+ * den Test-User `welcome`+`general` beitreten → „Meine Räume", `dev` bleibt unter
  * „Andere Räume". Prüft zugleich, dass NIP-42-AUTH automatisch durchläuft.
  */
 test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async ({ page }) => {
@@ -24,7 +24,7 @@ test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async 
     // Der eine aktive Space (Relay-URL als Label)
     await expect(page.getByText('localhost:3334')).toBeVisible({ timeout: 15_000 })
 
-    // Die Räume des Space (39000) erscheinen live
+    // Beigetretene Räume (39002-Mitglied) + der entdeckbare `dev` unter „Andere Räume"
     await expect(page.getByText('Willkommen')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Allgemein')).toBeVisible()
     await expect(page.getByText('Andere Räume')).toBeVisible()

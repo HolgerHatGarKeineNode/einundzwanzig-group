@@ -1,44 +1,39 @@
 /**
- * Space/Room-Datenschicht — portiert aus dem Referenz-Client (`src/app/groups.ts`, nur der
- * Lese-Teil für M2; Schreib-Ops/Join kommen mit M5).
+ * Space/Raum-Datenschicht — portiert aus dem Referenz-Client (`src/app/groups.ts`).
  *
- * Modell (zooid/NIP-29): Ein **Space** ist eine Relay-URL (kein Event). Die
- * Membership steht in der **kind-10009**-Liste des Users (`["r",url]` = Space,
- * `["group",h,url]` = Room). Ein **Room** ist ein **kind-39000**-Event
- * (ROOM_META) auf genau diesem Relay; die Room→Space-Bindung entsteht über den
- * `tracker` (von welchem Relay das Event kam), nicht über ein Tag.
+ * Modell (zooid/NIP-29): Ein **Space** ist eine Relay-URL (kein Event). Ein
+ * **Raum** ist ein **kind-39000**-Event (ROOM_META) auf genau diesem Relay; die
+ * Raum→Space-Bindung entsteht über den `tracker` (von welchem Relay das Event
+ * kam), nicht über ein Tag.
+ *
+ * Zwei Mitgliedschafts-Ebenen: die **SPACE-Ebene** steht in der persönlichen
+ * **kind-10009**-Liste des Users (`["r",url]`) und trägt nur die Space-Auswahl.
+ * Die **RAUM-Ebene** ist relay-autoritativ: der Relay pflegt bei Join (9021) /
+ * Leave (9022) die signierte Members-Liste **kind-39002** (`d`=h, `p`=Mitglieder)
+ * — sie ist persistent und die Quelle für „bin ich Mitglied dieses Raums".
  */
-import { derived, writable, get, type Readable } from 'svelte/store'
-import {
-    repository,
-    tracker,
-    pubkey,
-    makeUserData,
-    makeOutboxLoader,
-    nip44EncryptToSelf,
-    publishThunk,
-    waitForThunkError,
-} from '@welshman/app'
+import { derived, writable, type Readable } from 'svelte/store'
+import { repository, tracker, pubkey, makeUserData, makeOutboxLoader, publishThunk, waitForThunkError } from '@welshman/app'
 import { deriveItemsByKey, deriveEventsByIdByUrl, sync, localStorageProvider } from '@welshman/store'
-import { load } from '@welshman/net'
-import { Router } from '@welshman/router'
+import { load, request } from '@welshman/net'
 import {
     ROOMS,
     ROOM_META,
     ROOM_DELETE,
+    ROOM_MEMBERS,
+    ROOM_JOIN,
+    ROOM_LEAVE,
     readList,
     readRoomMeta,
     asDecryptedEvent,
-    makeList,
-    addToListPublicly,
-    removeFromListByPredicate,
+    makeEvent,
     getListTags,
     getRelayTagValues,
     getGroupTags,
+    getTagValue,
     getTagValues,
     normalizeRelayUrl,
     isRelayUrl,
-    type List,
     type PublishedList,
     type TrustedEvent,
 } from '@welshman/util'
@@ -78,22 +73,11 @@ export const getSpaceUrlsFromGroupList = (groupList?: PublishedList): string[] =
     return uniq(urls.map(normalizeRelayUrl))
 }
 
-/** Beigetretene Rooms (`h`) eines Space aus den `group`-Tags der 10009-Liste. */
-export const getSpaceRoomsFromGroupList = (url: string, groupList?: PublishedList): string[] => {
-    if (!groupList) {
-        return []
-    }
-    const target = normalizeRelayUrl(url)
-    const rooms: string[] = []
-    for (const [, h, relay] of getGroupTags(getListTags(groupList))) {
-        if (h && relay && target === normalizeRelayUrl(relay)) {
-            rooms.push(h)
-        }
-    }
-    return uniq(rooms)
-}
-
-/** Alle Spaces (Relay-URLs) des eingeloggten Users — Quelle der Space-Rail. */
+/**
+ * Alle Spaces (Relay-URLs) des eingeloggten Users aus der 10009. Nur noch die
+ * SPACE-Ebene wird aus der 10009 gelesen (Space-Auswahl); Raum-Mitgliedschaft
+ * ist relay-seitig (39002, siehe unten) statt aus der persönlichen `group`-Liste.
+ */
 export const userSpaceUrls = derived(userGroupList, getSpaceUrlsFromGroupList)
 
 // ── Rooms (kind 39000 / 9008) ────────────────────────────────────────────────
@@ -143,35 +127,47 @@ export const roomsById = derived(roomsByUrl, ($byUrl) => {
     return result
 })
 
+// ── Raum-Mitgliedschaft (NIP-29 39002, relay-autoritativ) ────────────────────
+
+/** Members-Listen (39002) je Space-URL, nach Herkunfts-Relay (tracker). */
+export const roomMembersEventsByIdByUrl = deriveEventsByIdByUrl({
+    tracker,
+    repository,
+    filters: [{ kinds: [ROOM_MEMBERS] }],
+})
+
+/**
+ * Mitglieder-Pubkeys je Room-`h` und Space-URL, aus der relay-signierten
+ * 39002-Liste (`d`=h, `p`=Mitglieder). Das ist die **autoritative** Quelle: der
+ * Relay pflegt sie bei Join (9021) / Leave (9022) und sie übersteht Reloads.
+ */
+export const roomMembersByUrl: Readable<Map<string, Map<string, Set<string>>>> = derived(
+    roomMembersEventsByIdByUrl,
+    ($byUrl) => {
+        const result = new Map<string, Map<string, Set<string>>>()
+        for (const [url, byId] of $byUrl) {
+            const byH = new Map<string, Set<string>>()
+            for (const event of byId.values()) {
+                const { tags } = event as TrustedEvent
+                const h = getTagValue('d', tags)
+                if (h) {
+                    byH.set(h, new Set(getTagValues('p', tags)))
+                }
+            }
+            result.set(url, byH)
+        }
+        return result
+    },
+)
+
+/** Ist der eingeloggte User Mitglied des Raums (reaktiv, relay-autoritativ)? */
+export const deriveUserInRoom = (url: string, h: string): Readable<boolean> =>
+    derived([roomMembersByUrl, pubkey], ([$byUrl, $pk]) =>
+        Boolean($pk && $byUrl.get(normalizeRelayUrl(url))?.get(h)?.has($pk)),
+    )
+
 /** Anzeigename eines Rooms (Name oder Fallback auf `h`). */
 export const displayRoom = (room: Room | undefined, h: string): string => room?.name || h
-
-const roomSortKey = ($byId: Map<string, Room>, url: string) => (h: string) =>
-    displayRoom($byId.get(makeRoomId(url, h)), h).toLowerCase()
-
-/** Beigetretene Rooms eines Space: 10009-`group`-Tags ∩ existierende 39000. */
-export const deriveUserRooms = (url: string): Readable<string[]> =>
-    derived([userGroupList, roomsById], ([$list, $byId]) => {
-        const rooms: string[] = []
-        for (const h of getSpaceRoomsFromGroupList(url, $list as PublishedList | undefined)) {
-            if ($byId.has(makeRoomId(url, h))) {
-                rooms.push(h)
-            }
-        }
-        return sortBy(roomSortKey($byId, url), rooms)
-    })
-
-/** Entdeckbare (nicht beigetretene) Text-Rooms eines Space. */
-export const deriveOtherRooms = (url: string): Readable<string[]> =>
-    derived([deriveUserRooms(url), roomsByUrl, roomsById], ([$user, $byUrl, $byId]) => {
-        const rooms: string[] = []
-        for (const room of $byUrl.get(url) ?? []) {
-            if (!$user.includes(room.h) && !room.livekit) {
-                rooms.push(room.h)
-            }
-        }
-        return sortBy(roomSortKey($byId, url), uniq(rooms))
-    })
 
 // ── Aggregierte Sicht für die UI ─────────────────────────────────────────────
 
@@ -187,20 +183,28 @@ export type SpaceView = {
 export const displayRelayUrl = (url: string): string =>
     url.replace(/^wss?:\/\//, '').replace(/\/$/, '')
 
-/** Baut die UI-Sicht EINES Space (beigetretene + entdeckbare Rooms). */
+/**
+ * Baut die UI-Sicht EINES Space: beigetretene (Mitglied laut 39002) vs.
+ * entdeckbare Räume. Mitgliedschaft ist relay-autoritativ und persistent.
+ */
 const buildSpaceView = (
     url: string,
-    list: PublishedList | undefined,
     byUrl: Map<string, Room[]>,
     byId: Map<string, Room>,
+    membersByH: Map<string, Set<string>>,
+    pk: string | undefined,
 ): SpaceView => {
     const nameOf = (h: string) => displayRoom(byId.get(makeRoomId(url, h)), h)
+    const isMember = (h: string) => Boolean(pk && membersByH.get(h)?.has(pk))
 
-    const joined = getSpaceRoomsFromGroupList(url, list).filter((h) => byId.has(makeRoomId(url, h)))
-    const joinedSet = new Set(joined)
-    const other = (byUrl.get(url) ?? [])
-        .filter((room) => !joinedSet.has(room.h) && !room.livekit)
-        .map((room) => room.h)
+    const joined: string[] = []
+    const other: string[] = []
+    for (const room of byUrl.get(url) ?? []) {
+        if (room.livekit) {
+            continue
+        }
+        ;(isMember(room.h) ? joined : other).push(room.h)
+    }
 
     const toView = (hs: string[]) => sortBy(nameOf, uniq(hs)).map((h) => ({ h, name: nameOf(h) }))
 
@@ -209,12 +213,12 @@ const buildSpaceView = (
 
 /**
  * Ein einziger reaktiver Snapshot aller Spaces des Users mit ihren beigetretenen
- * und entdeckbaren Rooms — die Grundlage der Space-Auswahl in den Einstellungen.
+ * und entdeckbaren Räumen — die Grundlage der Space-Auswahl in den Einstellungen.
  */
 export const userSpacesView: Readable<SpaceView[]> = derived(
-    [userSpaceUrls, userGroupList, roomsByUrl, roomsById],
-    ([$urls, $list, $byUrl, $byId]) =>
-        $urls.map((url) => buildSpaceView(url, $list as PublishedList | undefined, $byUrl, $byId)),
+    [userSpaceUrls, roomsByUrl, roomsById, roomMembersByUrl, pubkey],
+    ([$urls, $byUrl, $byId, $members, $pk]) =>
+        $urls.map((url) => buildSpaceView(url, $byUrl, $byId, $members.get(url) ?? new Map(), $pk)),
 )
 
 // ── Aktiver Space (Single-Space-Fokus, §12) ─────────────────────────────────
@@ -255,9 +259,9 @@ export const activeSpace: Readable<string> = derived(activeSpaceUrl, ($active) =
  * Space (noch) nicht beigetreten ist. Rooms streamen nach dem 39000-Load ein.
  */
 export const activeSpaceView: Readable<SpaceView> = derived(
-    [activeSpace, userGroupList, roomsByUrl, roomsById],
-    ([$active, $list, $byUrl, $byId]) =>
-        buildSpaceView($active, $list as PublishedList | undefined, $byUrl, $byId),
+    [activeSpace, roomsByUrl, roomsById, roomMembersByUrl, pubkey],
+    ([$active, $byUrl, $byId, $members, $pk]) =>
+        buildSpaceView($active, $byUrl, $byId, $members.get($active) ?? new Map(), $pk),
 )
 
 /** Space-Auswahl in den Einstellungen: der fixe Default + beigetretene Spaces. */
@@ -273,40 +277,27 @@ export const loadUserGroupList = (): Promise<void> | undefined => {
     return pk ? makeOutboxLoader(ROOMS)(pk) : undefined
 }
 
-/** Lädt die Room-Metas (39000/9008) eines Space direkt vom Space-Relay. */
+/** Lädt Raum-Metas (39000/9008) + Mitglieder-Listen (39002) vom Space-Relay. */
 export const loadSpaceRooms = (url: string): Promise<unknown> =>
-    load({ relays: [url], filters: [{ kinds: [ROOM_META, ROOM_DELETE] }] })
+    load({ relays: [url], filters: [{ kinds: [ROOM_META, ROOM_DELETE, ROOM_MEMBERS] }] })
 
-// ── Beitreten / Verlassen (M5) ───────────────────────────────────────────────
-
-/** Zielrelays für die eigene 10009: Space-Relay + Outbox des Users. */
-const groupListRelays = (url: string): string[] => uniq([url, ...Router.get().FromUser().getUrls()])
-
-/** Die aktuelle 10009-Liste des Users oder — falls noch keine existiert — eine leere. */
-const currentGroupList = (): List => get(userGroupList) ?? makeList({ kind: ROOMS })
-
-/**
- * Reconcilet eine 10009-Änderung (privat zu sich selbst verschlüsselt), signiert
- * und publiziert sie optimistisch: der Thunk schreibt die neue Liste sofort ins
- * Repository, `userGroupList` (→ `activeSpaceView`) reagiert live. Gibt '' bei
- * Erfolg, sonst den Relay-Fehler.
- */
-const publishGroupList = async (url: string, edit: ReturnType<typeof addToListPublicly>): Promise<string> => {
-    const event = await edit.reconcile(nip44EncryptToSelf)
-    return waitForThunkError(publishThunk({ event, relays: groupListRelays(url) }))
+/** Live-Sub für Mitglieder-Änderungen (39002) — Join/Leave reflektiert sofort. */
+export const listenRoomMembers = (url: string, signal: AbortSignal): void => {
+    void request({ relays: [url], signal, filters: [{ kinds: [ROOM_MEMBERS], limit: 0 }] })
 }
 
+// ── Beitreten / Verlassen (NIP-29, relay-seitig) ─────────────────────────────
+
 /**
- * Tritt einem Room bei: fügt `["group",h,url]` (+ `["r",url]`) zur eigenen
- * 10009-Liste hinzu und publiziert sie. Der Room wandert dadurch live von
- * „Andere" nach „Meine".
+ * Tritt einem Raum bei: Join-Request (kind 9021) ans Space-Relay. Offene Räume
+ * genehmigt zooid automatisch und trägt den User in die relay-signierte
+ * Members-Liste (39002) ein — die Mitgliedschaft ist damit **relay-autoritativ
+ * und übersteht Reloads**. Kein optimistischer Fake; `deriveUserInRoom` flippt,
+ * sobald die aktualisierte 39002 (via Live-Sub) eintrifft. '' = Erfolg.
  */
 export const joinRoom = (url: string, h: string): Promise<string> =>
-    publishGroupList(url, addToListPublicly(currentGroupList(), ['r', url], ['group', h, url]))
+    waitForThunkError(publishThunk({ relays: [url], event: makeEvent(ROOM_JOIN, { tags: [['h', h]] }) }))
 
-/** Verlässt einen Room: entfernt dessen `group`-Tag aus der 10009 und publiziert. */
-export const leaveRoom = (url: string, h: string): Promise<string> => {
-    const target = normalizeRelayUrl(url)
-    const pred = (t: string[]) => t[0] === 'group' && t[1] === h && normalizeRelayUrl(t[2] ?? '') === target
-    return publishGroupList(url, removeFromListByPredicate(currentGroupList(), pred))
-}
+/** Verlässt einen Raum: Leave-Request (kind 9022) → Relay entfernt aus der 39002. */
+export const leaveRoom = (url: string, h: string): Promise<string> =>
+    waitForThunkError(publishThunk({ relays: [url], event: makeEvent(ROOM_LEAVE, { tags: [['h', h]] }) }))

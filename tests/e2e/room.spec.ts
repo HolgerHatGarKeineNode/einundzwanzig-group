@@ -90,21 +90,34 @@ test('M5: eigene Nachricht löschen', async ({ page }) => {
 })
 
 /**
- * M5 (Join/Leave) — die persönliche 10009-Liste (Meine vs. Andere Räume). „dev"
- * ist ein Raum, dem der User nicht folgt: Header zeigt „Beitreten", nach Klick
- * „Verlassen" (optimistisch übers Repository), nach Verlassen wieder „Beitreten".
+ * M5 (Join/Leave) — echte, relay-seitige NIP-29-Mitgliedschaft (39002). „dev" ist
+ * ein Raum, dem der User nicht beigetreten ist: Beitreten-Hinweis + kein Composer.
+ * Nach Beitreten (kind 9021, auto-approve) erscheint der Composer, die Mitglied-
+ * schaft **übersteht einen Reload** (der Kern des Bugs), Verlassen dreht es zurück.
  */
-test('M5: Raum beitreten und verlassen', async ({ page }) => {
+test('M5: Raum beitreten, persistiert über Reload, verlassen', async ({ page }) => {
     await openRoom(page, 'dev')
 
-    const join = page.getByRole('button', { name: 'Raum beitreten' })
-    const leave = page.getByRole('button', { name: 'Raum verlassen' })
+    const joinBtn = page.getByRole('button', { name: 'Beitreten' })
+    const leaveBtn = page.getByRole('button', { name: 'Raum verlassen' })
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
 
-    await expect(join).toBeVisible({ timeout: 15_000 })
+    // Nicht Mitglied → Hinweis, kein Composer
+    await expect(joinBtn).toBeVisible({ timeout: 15_000 })
+    await expect(composer).toBeHidden()
 
-    await join.click()
-    await expect(leave).toBeVisible({ timeout: 15_000 })
+    // Beitreten → relay-seitige Mitgliedschaft → Composer
+    await joinBtn.click()
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await expect(leaveBtn).toBeVisible()
 
-    await leave.click()
-    await expect(join).toBeVisible({ timeout: 15_000 })
+    // Persistenz: nach hartem Reload weiterhin Mitglied (39002 liegt auf dem Relay)
+    await page.reload()
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await expect(joinBtn).toBeHidden()
+
+    // Verlassen → zurück zum Hinweis (Zustand für Wiederholläufe zurücksetzen)
+    await leaveBtn.click()
+    await expect(joinBtn).toBeVisible({ timeout: 15_000 })
+    await expect(composer).toBeHidden()
 })

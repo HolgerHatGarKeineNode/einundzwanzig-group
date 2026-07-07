@@ -24,13 +24,9 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Raum')] class extends Component
 
     <x-app-header :title="'# '.$h" :back="route('spaces')" class="shrink-0">
         <x-slot:actions>
-            {{-- Folgen/Entfolgen: pflegt die persönliche 10009-Liste (Meine vs. Andere Räume). --}}
-            <flux:button size="xs" variant="ghost" icon="plus"
-                         x-show="!joined" x-cloak x-on:click="join()" aria-label="Raum beitreten">
-                Beitreten
-            </flux:button>
+            {{-- Mitglied → Verlassen (kind 9022). Beitreten liegt beim Composer. --}}
             <flux:button size="xs" variant="ghost" icon="arrow-right-start-on-rectangle"
-                         x-show="joined" x-cloak x-on:click="leave()" aria-label="Raum verlassen">
+                         x-show="joined" x-cloak x-on:click="leave()" ::disabled="joining" aria-label="Raum verlassen">
                 Verlassen
             </flux:button>
         </x-slot:actions>
@@ -124,18 +120,28 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Raum')] class extends Component
         </flux:callout>
     </div>
 
-    {{-- Composer: immer verfügbar. Das Schreibrecht erzwingt der Relay (NIP-29);
-         lehnt er ab, erscheint der Fehler oben im Callout. Bewusst KEIN Livewire-
-         Submit, sondern eine reine Alpine-Aktion (welshman signiert + publiziert
-         im Browser) — kein Server-Roundtrip; Enter-to-send läuft über den Textarea. --}}
+    {{-- Composer nur für Mitglieder; sonst Beitreten-Hinweis. Mitgliedschaft ist
+         relay-seitig (NIP-29 39002) und persistent. `membershipReady` verhindert,
+         dass der Hinweis kurz aufblitzt, bevor die Members-Liste geladen ist.
+         Senden ist eine reine Alpine-Aktion (welshman signiert im Browser). --}}
     <div class="shrink-0 pt-2">
-        <div class="flex items-end gap-2">
+        <div x-show="!membershipReady" x-cloak class="skeleton h-11 rounded-card"></div>
+
+        <div x-show="membershipReady && joined" x-cloak class="flex items-end gap-2">
             <flux:textarea x-ref="composer" x-model="draft" rows="1" resize="none"
                            placeholder="Nachricht schreiben…" class="flex-1"
                            x-on:keydown.enter.prevent="!$event.shiftKey && send()" />
             <flux:button type="button" variant="primary" icon="paper-airplane"
                          x-on:click="send()" ::disabled="sending || draft.trim().length === 0"
                          aria-label="Senden" />
+        </div>
+
+        <div x-show="membershipReady && !joined" x-cloak
+             class="surface-card flex items-center justify-between gap-3 p-3">
+            <flux:text class="text-sm text-zinc-500">Tritt dem Raum bei, um mitzuschreiben.</flux:text>
+            <flux:button size="sm" variant="primary" icon="plus" x-on:click="join()" ::disabled="joining">
+                <span x-text="joining ? 'Trete bei…' : 'Beitreten'"></span>
+            </flux:button>
         </div>
     </div>
 </div>

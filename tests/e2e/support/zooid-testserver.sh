@@ -38,6 +38,13 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=dev -t name=Dev -t about=Entwicklun
 nak event --auth --sec "$ADMIN" -k 0 -c '{"name":"Relay Admin"}' "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER"  -k 0 -c '{"name":"Alice Test"}'  "$R" >/dev/null 2>&1 || true
 
+# Raum-Mitgliedschaft (NIP-29, M5): Test-User tritt welcome + general bei (9021).
+# Offene Räume → zooid genehmigt automatisch und pflegt die 39002-Members-Liste.
+# „dev" bleibt ausgespart (für den Join/Leave-E2E-Test). Idempotent: ist der User
+# bereits Mitglied, lehnt zooid das 9021 als „duplicate" ab (ignoriert).
+nak event --auth --sec "$USER" -k 9021 -t h=welcome "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$USER" -k 9021 -t h=general "$R" >/dev/null 2>&1 || true
+
 # Directory (M3): 2 Rollen (33534, HSL-Farbe) + Zuweisungen über NIP-86
 # (HTTP + NIP-98). `assignrole` legt den Member automatisch in der 13534 an.
 mgmt() {

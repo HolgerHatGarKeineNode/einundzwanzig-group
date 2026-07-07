@@ -28,7 +28,8 @@ import {
     displayRelayUrl,
     loadUserGroupList,
     loadSpaceRooms,
-    deriveUserRooms,
+    listenRoomMembers,
+    deriveUserInRoom,
     joinRoom,
     leaveRoom,
     type SpaceView,
@@ -131,6 +132,8 @@ type RoomChatState = {
     atBottom: boolean
     unread: number
     joined: boolean
+    joining: boolean
+    membershipReady: boolean
     draft: string
     sending: boolean
     error: string
@@ -242,9 +245,10 @@ export function registerNostrComponents(Alpine: {
         },
     }))
 
-    // Room-Chat (M4 lesen + M5 schreiben): Verlauf eines Rooms im AKTIVEN Space.
-    // Live-Sub (limit:0) + Cursor-Pagination. Senden/Löschen (kind 9/5) und
-    // Join/Leave (10009) laufen optimistisch übers Repository (feeds/groups).
+    // Room-Chat (M4 lesen + M5 schreiben): Verlauf eines Raums im AKTIVEN Space.
+    // Live-Sub (limit:0) + Cursor-Pagination. Senden/Löschen = kind 9/5 (optimistisch).
+    // Beitreten/Verlassen = NIP-29 (kind 9021/9022) → relay-autoritative 39002-
+    // Mitgliedschaft (persistent); der Composer ist an `joined` gekoppelt.
     Alpine.data('nostrRoomChat', (h: unknown): RoomChatState => ({
         h: String(h),
         messages: [],
@@ -254,6 +258,8 @@ export function registerNostrComponents(Alpine: {
         atBottom: true,
         unread: 0,
         joined: false,
+        joining: false,
+        membershipReady: false,
         draft: '',
         sending: false,
         error: '',
@@ -271,15 +277,18 @@ export function registerNostrComponents(Alpine: {
             this.teardown()
             this._url = url
             this.loading = true
+            this.membershipReady = false
             this.messages = []
             this._controller = new AbortController()
-            // Die Raum-Seite steht für sich: eigene 10009 + Space-Rooms (39000)
-            // laden, damit die Mitgliedschaft überhaupt bekannt ist.
-            loadUserGroupList()
-            loadSpaceRooms(url)
-            // Mitgliedschaft dieses Raums (10009 ∩ 39000) → Composer vs. Hinweis.
-            this._unsubJoined = deriveUserRooms(url).subscribe((rooms: string[]) => {
-                this.joined = rooms.includes(this.h)
+            // Raum-Metas + Mitglieder (39002) laden; Live-Sub auf 39002, damit
+            // Beitreten/Verlassen sofort reflektiert. `membershipReady` verhindert
+            // ein Aufblitzen des Beitreten-Hinweises, bevor die 39002 da ist.
+            loadSpaceRooms(url).finally(() => {
+                this.membershipReady = true
+            })
+            listenRoomMembers(url, this._controller.signal)
+            this._unsubJoined = deriveUserInRoom(url, this.h).subscribe((isMember: boolean) => {
+                this.joined = isMember
             })
             listenRoom(url, this.h, this._controller.signal)
             loadRoomMessages(url, this.h).finally(() => {
@@ -390,24 +399,37 @@ export function registerNostrComponents(Alpine: {
                 this.error = err
             }
         },
+        // Beitreten (kind 9021). Round-trip: `joined` flippt, sobald die vom Relay
+        // aktualisierte 39002 über die Live-Sub eintrifft (kein optimistischer Fake).
         async join() {
-            if (!this._url) {
+            if (!this._url || this.joining) {
                 return
             }
+            this.joining = true
             this.error = ''
-            const err = await joinRoom(this._url, this.h)
-            if (err) {
-                this.error = err
+            try {
+                const err = await joinRoom(this._url, this.h)
+                if (err) {
+                    this.error = err
+                }
+            } finally {
+                this.joining = false
             }
         },
+        // Verlassen (kind 9022). `joined` flippt mit der aktualisierten 39002.
         async leave() {
-            if (!this._url) {
+            if (!this._url || this.joining) {
                 return
             }
+            this.joining = true
             this.error = ''
-            const err = await leaveRoom(this._url, this.h)
-            if (err) {
-                this.error = err
+            try {
+                const err = await leaveRoom(this._url, this.h)
+                if (err) {
+                    this.error = err
+                }
+            } finally {
+                this.joining = false
             }
         },
         destroy() {
