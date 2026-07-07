@@ -1,28 +1,47 @@
 <?php
 
+use App\Nostr\SpaceCache;
+use Illuminate\Support\Facades\View;
 use Livewire\Attributes\Layout;
-use Livewire\Attributes\Title;
 use Livewire\Component;
 
 /**
  * Raum-Chat als Livewire-SFC. `$h` (Raum-ID) kommt aus dem Routen-Parameter und
  * wird via `@js($h)` an die welshman/Alpine-Insel gereicht — die einzige
  * Server→Insel-Übergabe; der ganze Chat-Zustand lebt clientseitig.
+ *
+ * Titel + OG-Beschreibung kommen aus dem server-seitigen Read-Cache (§10/M7):
+ * server-gerenderter `<head>` für Crawler/Share-Previews, ohne die client-seitige
+ * Architektur zu berühren. Cache-Miss = Fallback auf die rohe Raum-ID.
  */
-new #[Layout('layouts::einundzwanzig')] #[Title('Raum')] class extends Component
+new #[Layout('layouts::einundzwanzig')] class extends Component
 {
     public string $h;
 
-    public function mount(string $h): void
+    public ?string $roomName = null;
+
+    public string $roomAbout = '';
+
+    public function mount(string $h, SpaceCache $cache): void
     {
         $this->h = $h;
+        $room = $cache->rooms(SpaceCache::spaceUrl())[$h] ?? null;
+        $this->roomName = $room['name'] ?? null;
+        $this->roomAbout = $room['about'] ?? '';
+    }
+
+    public function render()
+    {
+        View::share('ogDescription', $this->roomAbout ?: null);
+
+        return $this->view()->title('# '.($this->roomName ?? $this->h));
     }
 }; ?>
 
 {{-- Chat-Bühne: Kopf + Verlauf + Composer unter EINEM Alpine-Scope (M4 lesen, M5 schreiben). --}}
 <div x-data="nostrRoomChat(@js($h))" class="mx-auto flex h-screen w-full max-w-md flex-col px-4 pt-safe pb-safe">
 
-    <x-app-header :title="'# '.$h" :back="route('spaces')" class="shrink-0">
+    <x-app-header :title="'# '.($roomName ?? $h)" :back="route('spaces')" class="shrink-0">
         <x-slot:actions>
             {{-- Mitglied → Verlassen (kind 9022). Beitreten liegt beim Composer. --}}
             <flux:button size="xs" variant="ghost" icon="arrow-right-start-on-rectangle"
