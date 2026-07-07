@@ -179,10 +179,10 @@ export function registerNostrComponents(Alpine: {
     // M0-Smoke: lädt kind:1-Notes ins `repository` und rendert sie live über
     // deriveEvents → subscribe → Alpine. Beweist die komplette Bridge-Kette.
     Alpine.data('nostrSmoke', (): SmokeState => ({
-        events: [] as TrustedEvent[],
+        events: [],
         loading: true,
         error: '',
-        _unsub: null as null | (() => void),
+        _unsub: null,
         init() {
             const store = deriveEvents({ repository, filters: [{ kinds: [1] }] })
             this._unsub = store.subscribe((evs: TrustedEvent[]) => {
