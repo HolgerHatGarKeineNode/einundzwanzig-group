@@ -43,13 +43,26 @@ rsync -az --delete \
     --exclude='.claude/' \
     ./ "${REMOTE}:${APP_DIR}/"
 
-echo "▸ 3/3  Remote: Composer + Migrationen + Cache"
+echo "▸ 3/4  Remote: Composer + Migrationen + Cache"
 ssh "$REMOTE" "cd ${APP_DIR} && \
     composer install --no-dev --optimize-autoloader --no-interaction && \
     php artisan migrate --force && \
     php artisan optimize && \
     php artisan storage:link 2>/dev/null || true"
-# ponytail: kein fpm-reload (Site-User hat kein sudo). Forge-Opcache revalidiert
-# per Timestamp; falls stale, Deploy-Hook im Forge-Dashboard triggern.
+
+echo "▸ 4/4  FPM-Opcache leeren (Forge-API php-reload)"
+# Prod-FPM läuft mit opcache.validate_timestamps=0 → neue Blades/Klassen greifen
+# NICHT ohne Reload. Der Site-User hat kein sudo; Forge reloadet FPM als root.
+# (Graceful — betrifft nur PHP-Pools, nicht den zooid-Go-Prozess.)
+FORGE_ORG=prime-software; FORGE_SERVER=1147867; PHP_VERSION=php84
+tok=$(python3 -c "import json;print(json.load(open('$HOME/.laravel-forge/config.json'))['token'])" 2>/dev/null || echo "")
+if [ -n "$tok" ]; then
+    curl -s -X POST "https://forge.laravel.com/api/orgs/${FORGE_ORG}/servers/${FORGE_SERVER}/services/php/actions" \
+        -H "Authorization: Bearer $tok" -H "Accept: application/json" -H "Content-Type: application/json" \
+        -d "{\"action\":\"reload\",\"version\":\"${PHP_VERSION}\"}" \
+        -o /dev/null -w "  php-reload → HTTP %{http_code}\n"
+else
+    echo "  ⚠ Kein Forge-Token gefunden — FPM manuell reloaden, sonst bleiben alte Texte/Klassen im Opcache."
+fi
 
 echo "✓ Deploy fertig — https://group.einundzwanzig.space/"
