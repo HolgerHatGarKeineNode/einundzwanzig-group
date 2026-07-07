@@ -31,10 +31,19 @@ export default defineConfig({
             },
         },
     ],
-    webServer: {
-        command: `npm run build && php artisan serve --port=${PORT}`,
-        url: `http://127.0.0.1:${PORT}`,
-        reuseExistingServer: !process.env.CI,
-        timeout: 120_000,
-    },
+    webServer: [
+        {
+            // Lokaler zooid-Relay + Testdaten (M2). Läuft schon? Wird wiederverwendet.
+            command: 'bash tests/e2e/support/zooid-testserver.sh',
+            url: 'http://localhost:3334',
+            reuseExistingServer: true,
+            timeout: 60_000,
+        },
+        {
+            command: `npm run build && php artisan serve --port=${PORT}`,
+            url: `http://127.0.0.1:${PORT}`,
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+        },
+    ],
 })

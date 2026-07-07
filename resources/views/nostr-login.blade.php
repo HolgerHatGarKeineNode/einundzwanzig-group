@@ -31,29 +31,23 @@
                         Mit Browser-Erweiterung (NIP-07)
                     </flux:button>
 
-                    {{-- Methoden-Umschalter --}}
-                    <div class="mt-4 flex gap-2 text-sm">
-                        <button type="button"
-                                class="pressable rounded-tile px-3 py-1"
-                                ::class="method==='nsec' ? 'bg-brand-500 text-zinc-950' : 'bg-zinc-200 dark:bg-zinc-800'"
-                                x-on:click="method='nsec'; error=''">Schlüssel</button>
-                        <button type="button"
-                                class="pressable rounded-tile px-3 py-1"
-                                ::class="method==='bunker' ? 'bg-brand-500 text-zinc-950' : 'bg-zinc-200 dark:bg-zinc-800'"
-                                x-on:click="method='bunker'; error=''">Bunker (NIP-46)</button>
-                    </div>
+                    {{-- Signer-Methode: Flux managed die Tab-Auswahl --}}
+                    <flux:tab.group class="mt-4">
+                        <flux:tabs variant="segmented" class="w-full">
+                            <flux:tab name="nsec" icon="key">Schlüssel</flux:tab>
+                            <flux:tab name="bunker" icon="link">Bunker</flux:tab>
+                        </flux:tabs>
 
-                    {{-- nsec / hex --}}
-                    <div x-show="method==='nsec'" class="mt-3 space-y-2">
-                        <flux:input type="password" x-model="keyInput" placeholder="nsec1… oder 64-stelliger hex-Key" x-on:keydown.enter="loginNsec()" />
-                        <flux:button variant="primary" class="w-full" x-on:click="loginNsec()" ::disabled="busy">Anmelden</flux:button>
-                    </div>
+                        <flux:tab.panel name="nsec" class="mt-3 space-y-2">
+                            <flux:input type="password" x-model="keyInput" placeholder="nsec1… oder 64-stelliger hex-Key" x-on:keydown.enter="loginNsec()" />
+                            <flux:button variant="primary" class="w-full" x-on:click="loginNsec()" ::disabled="busy">Anmelden</flux:button>
+                        </flux:tab.panel>
 
-                    {{-- Bunker --}}
-                    <div x-show="method==='bunker'" class="mt-3 space-y-2">
-                        <flux:input x-model="bunkerInput" placeholder="bunker://…" x-on:keydown.enter="loginBunker()" />
-                        <flux:button variant="primary" class="w-full" x-on:click="loginBunker()" ::disabled="busy">Verbinden</flux:button>
-                    </div>
+                        <flux:tab.panel name="bunker" class="mt-3 space-y-2">
+                            <flux:input x-model="bunkerInput" placeholder="bunker://…" x-on:keydown.enter="loginBunker()" />
+                            <flux:button variant="primary" class="w-full" x-on:click="loginBunker()" ::disabled="busy">Verbinden</flux:button>
+                        </flux:tab.panel>
+                    </flux:tab.group>
 
                     <template x-if="error">
                         <flux:callout variant="danger" icon="exclamation-triangle" class="mt-4">

@@ -20,6 +20,13 @@ import {
     handoffToServer,
     logoutServer,
 } from './session'
+import {
+    userSpaceUrls,
+    userSpacesView,
+    loadUserGroupList,
+    loadSpaceRooms,
+    type SpaceView,
+} from './groups'
 
 /** Generischer Adapter (für M2+): spiegelt einen Store in `this.value`. */
 export function alpineFromStore<T>(store: Readable<T>) {
@@ -54,7 +61,6 @@ type AuthState = {
     pubkey: string | null
     npub: string
     hasExtension: boolean
-    method: 'nsec' | 'bunker'
     keyInput: string
     bunkerInput: string
     busy: boolean
@@ -69,16 +75,57 @@ type AuthState = {
     doLogout(): Promise<void>
 }
 
+type SpacesState = {
+    spaces: SpaceView[]
+    loading: boolean
+    _unsubView: null | (() => void)
+    _unsubUrls: null | (() => void)
+    _loaded: Set<string>
+    init(): void
+    destroy(): void
+}
+
 export function registerNostrComponents(Alpine: {
     data: (name: string, factory: () => unknown) => void
 }) {
+    // Space/Room-Navigation (M2): lädt die 10009-Membership des Users, zieht pro
+    // Space die Room-Metas (39000) nach und spiegelt die aggregierte Sicht nach
+    // Alpine. AUTH gegen zooid läuft dabei automatisch (Signer aus der Session).
+    Alpine.data('nostrSpaces', (): SpacesState => ({
+        spaces: [],
+        loading: true,
+        _unsubView: null,
+        _unsubUrls: null,
+        _loaded: new Set<string>(),
+        init() {
+            loadUserGroupList()?.finally(() => {
+                this.loading = false
+            })
+            // Neue Space-URLs → deren Rooms nachladen (einmal je URL).
+            this._unsubUrls = userSpaceUrls.subscribe((urls: string[]) => {
+                for (const url of urls) {
+                    if (!this._loaded.has(url)) {
+                        this._loaded.add(url)
+                        loadSpaceRooms(url)
+                    }
+                }
+            })
+            this._unsubView = userSpacesView.subscribe((view: SpaceView[]) => {
+                this.spaces = view
+            })
+        },
+        destroy() {
+            this._unsubUrls?.()
+            this._unsubView?.()
+        },
+    }))
+
     // Nostr-Login: spiegelt den welshman-`pubkey`-Store nach Alpine und bietet
     // die Signer-Pfade (Extension/nsec/Bunker). Signing bleibt im Browser.
     Alpine.data('nostrAuth', (): AuthState => ({
         pubkey: null,
         npub: '',
         hasExtension: false,
-        method: 'nsec',
         keyInput: '',
         bunkerInput: '',
         busy: false,
