@@ -29,3 +29,7 @@ yarn-error.log
 
 # NativePHP build artifacts (ephemer, 400+ MB)
 /nativephp
+
+# Pest-Browsertests: Host-Chromium-Registry (Symlinks) + Screenshots
+/tests/Browser/browsers
+/tests/Browser/Screenshots

@@ -20,7 +20,9 @@
 | **M7** — Realtime/Backend (optional) | ⬜ offen | |
 | **M8** — NativePHP Mobile (Release) | ⬜ offen | Vorarbeit (Setup/Smoke) via M0.5 erledigt. |
 
-> **Test-Grundsatz (gilt für jede M-Phase):** Jede Phase wird programmatisch getestet, bevor sie als ✅ gilt. **PHPUnit** für alles Server-seitige (Routen, Verifikation, Gate, Livewire). **Playwright-E2E** (Host-Chromium, hermetischer In-Process-Relay) für alles, was nur im Browser läuft (Signer/Login, welshman-Insel, Alpine-Bridges). Erledigte Phasen: M0 `NostrSmokeTest`, M1 `NostrLoginTest` (8), M1.5 baut die E2E-Suite auf; M0.5 ist naturgemäß manuell (nativer WebView, Screenshot-Nachweis).
+> **Test-Grundsatz (gilt für jede M-Phase):** Jede Phase wird programmatisch getestet, bevor sie als ✅ gilt. **Pest** (auf PHPUnit) für alles Server-seitige (Routen, Verifikation, Gate, Livewire). **Playwright-E2E** (Host-Chromium, hermetischer In-Process-zooid-Relay) für alles, was nur im Browser läuft (Signer/Login, welshman-Insel, Alpine-Bridges). Erledigte Phasen: M0 `NostrSmokeTest`, M1 `NostrLoginTest` (8), M1.5 baut die E2E-Suite auf; M0.5 ist naturgemäß manuell (nativer WebView, Screenshot-Nachweis).
+>
+> **Pest-v4-Browsertests (eingerichtet):** laufen im **Host-Chromium** (`/bin/chromium`, kein `npx playwright install`) — `ensureHostChromium()` in `tests/Pest.php` symlinkt das Host-Binary in Playwrights projekt-lokale Registry (`tests/Browser/browsers`, gitignored; Revision aus `playwright-core/browsers.json`), `PLAYWRIGHT_BROWSERS_PATH` in `phpunit.xml`. Proof: `tests/Browser/SmokeTest.php` (Landing). **Grenze für den vollen E2E-Umzug:** `pest-plugin-browser` bietet **keine öffentliche Init-Script-API**, um `window.__nostrRelays` VOR dem welshman-Boot zu setzen — die hermetischen zooid-Tests bleiben deshalb vorerst bei Playwright. Voller Umzug später via **server-injizierter Relay-Config** (z.B. `<meta>` aus `config`, nur in `testing`), die `core.ts` liest — nützt auch dem produktiven Self-Hosting.
 
 ### Referenz-Repos (nur lesen, **nicht ändern**)
 
