@@ -9,6 +9,7 @@
 | **M0** — Setup (Vite + welshman-Insel + Shell) | ✅ **fertig** | `/nostr-smoke` zeigt 30 Live-`kind:1`-Notes; welshman bündelt via Vite; Design-System (Inconsolata) aus mobile-app übernommen. Commit `8fcae0f`. |
 | **M0.5** — Mobile-WebView-Smoke | ✅ **fertig** | welshman-Insel + Relay-WebSockets laufen im nativen Android-WebView (Screenshot bestätigt). App-ID `space.einundzwanzig.group`. Commit `de6eacf`. |
 | **M1** — Nostr-Login (NIP-07/46/nsec) | ✅ **fertig** | Client-Login (nsec/NIP-07/NIP-46 + welshman-Session + localStorage) **und** NIP-98-Handoff an die Laravel-Session (server-seitige Schnorr-Verifikation via `swentel/nostr-php`, Einmal-Nonce) + `nostr.auth`-Gate (`/spaces`) + beidseitiges Logout. 8 Feature-Tests grün. **NIP-55/Amber-Bridge → M8** (mobil). |
+| **M1.5** — E2E-Login-Tests (Playwright) | 🚧 **in Arbeit** | NIP-07/nsec/NIP-46-Bunker-Login end-to-end im Host-Chromium gegen hermetischen In-Process-Relay; Wegwerf-nsec in `.env`. |
 | **M2** — Space/Room-Liste lesen | ⬜ offen | |
 | **M3** — Directory / Members (Fix A) | ⬜ offen | |
 | **M4** — Chat lesen | ⬜ offen | |
@@ -16,6 +17,8 @@
 | **M6** — Politur | ⬜ offen | |
 | **M7** — Realtime/Backend (optional) | ⬜ offen | |
 | **M8** — NativePHP Mobile (Release) | ⬜ offen | Vorarbeit (Setup/Smoke) via M0.5 erledigt. |
+
+> **Test-Grundsatz (gilt für jede M-Phase):** Jede Phase wird programmatisch getestet, bevor sie als ✅ gilt. **PHPUnit** für alles Server-seitige (Routen, Verifikation, Gate, Livewire). **Playwright-E2E** (Host-Chromium, hermetischer In-Process-Relay) für alles, was nur im Browser läuft (Signer/Login, welshman-Insel, Alpine-Bridges). Erledigte Phasen: M0 `NostrSmokeTest`, M1 `NostrLoginTest` (8), M1.5 baut die E2E-Suite auf; M0.5 ist naturgemäß manuell (nativer WebView, Screenshot-Nachweis).
 
 ### Referenz-Repos (nur lesen, **nicht ändern**)
 
@@ -278,6 +281,17 @@ Der Signer bleibt in **allen** Fällen client-seitig im WebView — auch auf Mob
 - **Ziel:** Einloggen, pubkey verifiziert in Laravel-Session.
 - **Schritte:** `LogInModal` (Flux) + Alpine-Signer-Bridge; `nip46.ts` + welshman-Session portieren (§7). NIP-98-Challenge-Endpoint + PHP-Verify (`swentel/nostr-php`). `EnsureNostrAuth`-Gate. Logout (Laravel-Session + welshman-Session clearen). Session-Persistenz via `storage.ts`.
 - **DoD:** NIP-07- und NIP-46-Login funktionieren; verifizierter pubkey steht in Session; geschützte Route ohne Login → Gate; Reload hält beide Sessions.
+
+### M1.5 — E2E-Login-Tests (Playwright, Host-Chromium)
+- **Ziel:** Die Client-Login-Pfade (die PHPUnit nicht erreicht, weil der Signer im Browser sitzt) end-to-end absichern — inkl. NIP-98-Handoff + Gate-Redirect.
+- **Setup:** `@playwright/test` (kein Browser-Download — Host-Chromium via `executablePath: /bin/chromium`), `webServer` = Vite-Build + `php artisan serve`. **Hermetisch:** ein In-Process-`ws`-Relay als Transport (kein öffentliches Relay → deterministisch/CI-tauglich). Wegwerf-`nsec` fix in `.env` (`NOSTR_TEST_NSEC`, nur Tests) für Re-use.
+- **Testfälle:**
+  - **NIP-07:** injiziertes `window.nostr` (Mock via `addInitScript`, Wegwerf-Key) → „Mit Erweiterung" → Handoff → `/spaces`.
+  - **nsec:** Key-Eingabe → Anmelden → Handoff → `/spaces`.
+  - **NIP-46 (Bunker):** Fake-Bunker in Node (nostr-tools, nip44, kind 24133) über den lokalen Relay; `bunker://`-URI ins Feld → Verbinden → Handoff → `/spaces`. **Deckt zugleich Amber-als-Nostr-Connect ab.**
+  - **Logout:** `/spaces` → Abmelden → beide Sessions leer → `/nostr-login`.
+- **DoD:** Alle drei Login-Pfade + Logout laufen im echten Browser grün gegen den hermetischen Relay; kein Netzabhängiger Flake.
+- **Hinweis:** NIP-55/Amber-**Intent** (Android-nativ, kein Relay) ist hier **nicht** testbar → echter Intent-Roundtrip erst in **M8** auf dem Emulator.
 
 ### M2 — Space/Room-Liste lesen
 - **Ziel:** Beigetretene Spaces + Rooms anzeigen (read-only).
