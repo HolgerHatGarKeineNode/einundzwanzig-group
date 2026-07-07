@@ -15,8 +15,8 @@
 | Phase | Status | Ergebnis / nächster Schritt |
 |---|---|---|
 | **Planung & Entscheidungen** | ✅ **fertig** | Strategie-Pivot (Chat-Package-Tab statt eigener App), Architektur, Verteil-Mechanik, Reibungspunkte & Portier-Inventar — dieses Dokument. |
-| **P0** — Package-Skelett + `App\Chat\`-Umzug | ⬜ offen | **Startpunkt.** `packages/nostr-chat` anlegen, Namespace/`chat::`-Views umziehen, ServiceProvider; Web-Client dogfooded via path-repo; Suite grün. |
-| **P1** — Subtree-Split + Portal-Integration | ⬜ offen | `split-package.sh`; Portal requiret Package; Chat-Tab (1 Nav-Zeile) + Vollbild-Layout + „Zurück"-Pfad; Build im Emulator. |
+| **P0** — Package-Skelett + `App\Chat\`-Umzug | ✅ **fertig** | `packages/nostr-chat` (path-repo, `App\Chat\`, `chat::`-Views, `x-chat::`-Komponenten, `chat.*`-Routen). ChatServiceProvider (Routen+`web`+CSP, Views, Config-Merge, `nostr.auth`-Alias, warm-cache-Schedule). Web-Client dogfooded, Suite grün 48/48, Dev-Server läuft (CSP gibt Vite-Origin via `public/hot` frei). Commit `be186cd`. |
+| **P1** — Subtree-Split + Portal-Integration | ⬜ offen | `split-package.sh`; Portal requiret Package; Chat-Tab (1 Nav-Zeile) + Vollbild-Layout + „Zurück"-Pfad; Build im Emulator. **Aus P0 übernommen:** JS-Insel als npm-Package auslagern; `einundzwanzig-square.svg` package-owned + `publishes` (aktuell nur im Web-Client-`public/img/`). |
 | **P2** — Integration härten | ⬜ offen | CSS/Theme-Scoping, `__nostrSpace`/Head, welshman-Lifecycle im WebView, Tailwind-Content-Globs. |
 | **P3** — Mobile-Signer (Workstream B) | ⬜ offen | NIP-46 (+ Deep-Link-Callback) → Amber/NIP-55 → nsec/SecureStorage+Biometrics. **Größte Unbekannte.** |
 | **P4** — Release | ⬜ offen | `NATIVEPHP_*`-Env-Abgleich, signiertes AAB, Store-Vorbereitung. |
