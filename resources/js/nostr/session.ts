@@ -10,13 +10,14 @@
 import {
     pubkey,
     sessions,
+    signer,
     loginWithNip01,
     loginWithNip07,
     loginWithNip46,
     dropSession,
 } from '@welshman/app'
 import { getNip07, Nip46Broker } from '@welshman/signer'
-import { makeSecret } from '@welshman/util'
+import { makeSecret, makeHttpAuth } from '@welshman/util'
 import { sync, localStorageProvider } from '@welshman/store'
 import { bytesToHex } from '@welshman/lib'
 import * as nip19 from 'nostr-tools/nip19'
@@ -72,6 +73,59 @@ export async function loginWithBunker(bunkerUri: string): Promise<void> {
     } else {
         throw new Error('Bunker-Verbindung fehlgeschlagen.')
     }
+}
+
+/** CSRF-Token aus dem Meta-Tag (Laravel `web`-Middleware verlangt ihn). */
+function csrfToken(): string {
+    return document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? ''
+}
+
+/**
+ * NIP-98-Handoff: signiert ein Auth-Event über die Login-URL + Server-Nonce mit
+ * dem aktiven Signer und lässt Laravel die Signatur verifizieren. Der Key bleibt
+ * im Browser; die Session trägt danach den beglaubigten pubkey. Gibt die
+ * Ziel-URL nach erfolgreichem Login zurück.
+ */
+export async function handoffToServer(): Promise<string> {
+    const activeSigner = signer.get()
+    if (!activeSigner) {
+        throw new Error('Kein aktiver Signer für den Server-Login.')
+    }
+
+    const challengeRes = await fetch('/nostr/challenge', {
+        headers: { Accept: 'application/json' },
+    })
+    if (!challengeRes.ok) {
+        throw new Error('Challenge konnte nicht geladen werden.')
+    }
+    const { challenge, url } = (await challengeRes.json()) as { challenge: string; url: string }
+
+    const template = await makeHttpAuth(url, 'POST')
+    template.tags.push(['challenge', challenge])
+    const event = await activeSigner.sign(template)
+
+    const loginRes = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            'X-CSRF-TOKEN': csrfToken(),
+        },
+        body: JSON.stringify({ event }),
+    })
+    const data = (await loginRes.json()) as { ok?: boolean; error?: string; redirect?: string }
+    if (!loginRes.ok || !data.ok) {
+        throw new Error(data.error ?? 'Server-Login fehlgeschlagen.')
+    }
+    return data.redirect ?? '/spaces'
+}
+
+/** Beendet die Laravel-Session (Gegenstück zum NIP-98-Handoff). */
+export async function logoutServer(): Promise<void> {
+    await fetch('/nostr/logout', {
+        method: 'POST',
+        headers: { 'X-CSRF-TOKEN': csrfToken(), Accept: 'application/json' },
+    })
 }
 
 /** Aktive Session beenden (Signer-Cleanup + Store leeren → localStorage folgt). */

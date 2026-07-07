@@ -12,7 +12,14 @@ import { deriveEvents } from '@welshman/store'
 import type { TrustedEvent } from '@welshman/util'
 import * as nip19 from 'nostr-tools/nip19'
 import { DEFAULT_RELAYS } from './core'
-import { loginWithExtension, loginWithSecretKey, loginWithBunker, logout } from './session'
+import {
+    loginWithExtension,
+    loginWithSecretKey,
+    loginWithBunker,
+    logout,
+    handoffToServer,
+    logoutServer,
+} from './session'
 
 /** Generischer Adapter (für M2+): spiegelt einen Store in `this.value`. */
 export function alpineFromStore<T>(store: Readable<T>) {
@@ -55,11 +62,11 @@ type AuthState = {
     _unsub: null | (() => void)
     init(): void
     destroy(): void
-    run(fn: () => void | Promise<void>): Promise<void>
+    completeLogin(fn: () => void | Promise<void>): Promise<void>
     loginExtension(): Promise<void>
     loginNsec(): Promise<void>
     loginBunker(): Promise<void>
-    doLogout(): void
+    doLogout(): Promise<void>
 }
 
 export function registerNostrComponents(Alpine: {
@@ -84,30 +91,38 @@ export function registerNostrComponents(Alpine: {
                 this.npub = pk ? nip19.npubEncode(pk) : ''
             })
         },
-        async run(fn) {
+        // welshman-Login (Signer im Browser) → NIP-98-Handoff → Redirect ins Gate.
+        // Schlägt der Handoff fehl, wird die welshman-Session zurückgerollt, damit
+        // Browser- und Laravel-Zustand konsistent bleiben.
+        async completeLogin(fn) {
             this.busy = true
             this.error = ''
             try {
                 await fn()
+                const redirect = await handoffToServer()
+                window.location.assign(redirect)
             } catch (e) {
                 this.error = e instanceof Error ? e.message : String(e)
+                logout()
             } finally {
                 this.busy = false
             }
         },
         loginExtension() {
-            return this.run(loginWithExtension)
+            return this.completeLogin(loginWithExtension)
         },
         loginNsec() {
-            return this.run(() => loginWithSecretKey(this.keyInput))
+            return this.completeLogin(() => loginWithSecretKey(this.keyInput))
         },
         loginBunker() {
-            return this.run(() => loginWithBunker(this.bunkerInput))
+            return this.completeLogin(() => loginWithBunker(this.bunkerInput))
         },
-        doLogout() {
+        async doLogout() {
             logout()
+            await logoutServer()
             this.keyInput = ''
             this.bunkerInput = ''
+            window.location.assign('/nostr-login')
         },
         destroy() {
             this._unsub?.()
