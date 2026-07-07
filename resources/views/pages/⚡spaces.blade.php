@@ -12,16 +12,14 @@ use Livewire\Component;
  */
 new #[Layout('layouts::einundzwanzig')] #[Title('Space')] class extends Component {}; ?>
 
-<main class="mx-auto max-w-md px-4 py-8 pt-safe">
+<main class="mx-auto max-w-md px-4 py-8 pt-safe pb-28">
 
-    {{-- Kopf: Marke + wer bin ich + Aktionen --}}
+    {{-- Kopf: Marke + wer bin ich + Abmelden (Navigation liegt in der Bottom-Nav) --}}
     <x-app-header title="Space" x-data="nostrAuth">
         <x-slot:subtitle>
             <div class="truncate font-mono text-xs text-zinc-500" x-text="npub"></div>
         </x-slot:subtitle>
         <x-slot:actions>
-            <flux:button variant="ghost" size="sm" icon="users" :href="route('directory')" wire:navigate aria-label="Mitglieder" />
-            <flux:button variant="ghost" size="sm" icon="cog-6-tooth" :href="route('space.settings')" wire:navigate aria-label="Space wechseln" />
             <flux:button variant="ghost" size="sm" x-on:click="doLogout()">Abmelden</flux:button>
         </x-slot:actions>
     </x-app-header>
@@ -60,4 +58,6 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Space')] class extends Componen
             </flux:navlist>
         </div>
     </div>
+
+    <x-bottom-nav />
 </main>

@@ -2,16 +2,21 @@ import { test, expect, type Page } from '@playwright/test'
 import { useZooid } from './support/zooid'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
+// Relay-Owner-Secret (Pubkey = relay.self) — der einzige NIP-86-Admin des zooid.
+const ADMIN_HEX = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
-/** Loggt via nsec ein und öffnet das Directory des fixierten Space. */
-async function openDirectory(page: Page): Promise<void> {
+/** Loggt mit einem Secret ein und öffnet das Directory des fixierten Space. */
+async function openDirectoryAs(page: Page, secret: string): Promise<void> {
     await useZooid(page)
     await page.goto('/nostr-login')
-    await page.getByPlaceholder(/nsec1/).fill(NSEC)
+    await page.getByPlaceholder(/nsec1/).fill(secret)
     await page.getByRole('button', { name: 'Anmelden' }).click()
     await page.waitForURL('**/spaces')
     await page.goto('/directory')
 }
+
+/** Standard: als Wegwerf-Test-User (kein Admin). */
+const openDirectory = (page: Page): Promise<void> => openDirectoryAs(page, NSEC)
 
 /**
  * M3 (Directory, Fix A) — Mitglieder + Rollen des fixierten Space erscheinen
@@ -26,9 +31,10 @@ test('M3: Directory zeigt Members + Rollen, ohne Flackern', async ({ page }) => 
     await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Alice Test')).toBeVisible()
 
-    // Rollen-Badges aus 33534 (exakt — „Mitglied" ≠ Überschrift „Mitglieder")
-    await expect(page.getByText('Moderator', { exact: true })).toBeVisible()
-    await expect(page.getByText('Mitglied', { exact: true })).toBeVisible()
+    // Rollen-Badges aus 33534 (exakt — „Mitglied" ≠ Überschrift „Mitglieder").
+    // `.first()`: dieselben Labels stehen auch in den (versteckten) Admin-Modals.
+    await expect(page.getByText('Moderator', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Mitglied', { exact: true }).first()).toBeVisible()
 
     // Fix A: der „leere" Zustand darf nie erscheinen (self war vor dem Filter da)
     await expect(page.getByText('Noch keine Mitglieder')).toBeHidden()
@@ -62,6 +68,31 @@ test('M3: Directory überlebt Reload ohne Flackern', async ({ page }) => {
     await page.reload()
 
     await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Moderator')).toBeVisible()
+    await expect(page.getByText('Moderator', { exact: true }).first()).toBeVisible()
     await expect(page.getByText('Noch keine Mitglieder')).toBeHidden()
+})
+
+/**
+ * M6 (Admin, NIP-86) — der Relay-Owner (self) wird über `supportedmethods`
+ * (HTTP + NIP-98, im Browser signiert) als Admin erkannt und sieht die
+ * Verwaltungstools; die Rollen-Liste zeigt die geseedeten Rollen.
+ */
+test('M6: Relay-Owner sieht die NIP-86-Verwaltungstools', async ({ page }) => {
+    await openDirectoryAs(page, ADMIN_HEX)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+
+    await expect(page.getByRole('button', { name: 'Rollen verwalten' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Gebannt' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Einladen' })).toBeVisible()
+
+    // Rollen-Liste öffnet und zeigt die geseedeten 33534-Rollen
+    await page.getByRole('button', { name: 'Rollen verwalten' }).click()
+    await expect(page.getByRole('dialog').getByText('Moderator', { exact: true }).first()).toBeVisible()
+})
+
+/** M6 — ein normaler User sieht KEINE Verwaltungstools (Gating). */
+test('M6: normaler User sieht keine Verwaltungstools', async ({ page }) => {
+    await openDirectory(page)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Rollen verwalten' })).toBeHidden()
 })

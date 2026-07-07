@@ -26,6 +26,9 @@ Route::livewire('/rooms/{h}', 'pages::room')->middleware('nostr.auth')->name('ro
 // Space-Wechsel — versteckt in den Einstellungen (§12)
 Route::livewire('/settings/space', 'pages::settings.space')->middleware('nostr.auth')->name('space.settings');
 
+// M6 — Invite einlösen (`/join?r=&c=`): Space beitreten (28934 + Claim)
+Route::livewire('/join', 'pages::join')->middleware('nostr.auth')->name('join');
+
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
 });

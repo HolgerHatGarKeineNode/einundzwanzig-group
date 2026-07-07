@@ -91,14 +91,26 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Raum')] class extends Component
                                     <span class="shrink-0 font-mono text-[0.7rem] text-zinc-500" x-text="m.time"></span>
                                 </div>
                             </template>
+                            {{-- Zitat-Vorschau (Antwort auf eine Nachricht im selben Raum) --}}
+                            <template x-if="m.reply">
+                                <div class="mt-0.5 mb-1 border-l-2 border-brand-500/60 pl-2">
+                                    <div class="truncate text-xs font-semibold text-brand-500" x-text="m.reply.name"></div>
+                                    <div class="truncate text-xs text-zinc-500" x-text="m.reply.text"></div>
+                                </div>
+                            </template>
                             <div class="chat-content text-sm break-words whitespace-pre-wrap" x-html="m.html"></div>
                         </div>
-                        {{-- Löschen nur bei eigenen Nachrichten (erscheint bei Hover) --}}
-                        <button type="button" x-show="m.mine" x-cloak x-on:click="remove(m.id, m.created_at)"
-                                class="pressable shrink-0 self-start p-1 text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-red-500 focus:opacity-100"
-                                aria-label="Nachricht löschen">
-                            <flux:icon.trash variant="micro" />
-                        </button>
+                        {{-- Aktionen (erscheinen bei Hover): Antworten, Löschen (nur eigene) --}}
+                        <div class="flex shrink-0 items-start gap-0.5 self-start opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                            <button type="button" x-on:click="setReply(m)"
+                                    class="pressable p-1 text-zinc-400 hover:text-brand-500" aria-label="Antworten">
+                                <flux:icon.arrow-uturn-left variant="micro" />
+                            </button>
+                            <button type="button" x-show="m.mine" x-cloak x-on:click="remove(m.id, m.created_at)"
+                                    class="pressable p-1 text-zinc-400 hover:text-red-500" aria-label="Nachricht löschen">
+                                <flux:icon.trash variant="micro" />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </template>
@@ -113,12 +125,7 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Raum')] class extends Component
         </div>
     </div>
 
-    {{-- Fehler (Relay lehnt ab, AUTH etc.) --}}
-    <div x-show="error" x-cloak class="shrink-0 pb-2" x-transition.opacity>
-        <flux:callout variant="danger" icon="exclamation-triangle" class="text-sm">
-            <span x-text="error"></span>
-        </flux:callout>
-    </div>
+    {{-- Fehler (Relay lehnt ab, AUTH etc.) erscheinen als globaler Toast. --}}
 
     {{-- Composer nur für Mitglieder; sonst Beitreten-Hinweis. Mitgliedschaft ist
          relay-seitig (NIP-29 39002) und persistent. `membershipReady` verhindert,
@@ -126,6 +133,18 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Raum')] class extends Component
          Senden ist eine reine Alpine-Aktion (welshman signiert im Browser). --}}
     <div class="shrink-0 pt-2">
         <div x-show="!membershipReady" x-cloak class="skeleton h-11 rounded-card"></div>
+
+        {{-- Antwort-Kontext (Zitat) über dem Composer, mit Abbrechen --}}
+        <div x-show="membershipReady && joined && replyTo" x-cloak
+             class="surface-card mb-1 flex items-center gap-2 border-l-2 border-brand-500/60 px-3 py-1.5">
+            <div class="min-w-0 flex-1">
+                <div class="text-xs font-semibold text-brand-500">Antwort an <span x-text="replyTo?.name"></span></div>
+                <div class="truncate text-xs text-zinc-500" x-text="replyTo?.text"></div>
+            </div>
+            <button type="button" x-on:click="clearReply()" class="pressable p-1 text-zinc-400 hover:text-zinc-600" aria-label="Antwort abbrechen">
+                <flux:icon.x-mark variant="micro" />
+            </button>
+        </div>
 
         <div x-show="membershipReady && joined" x-cloak class="flex items-end gap-2">
             <flux:textarea x-ref="composer" x-model="draft" rows="1" resize="none"

@@ -7,7 +7,7 @@ use Livewire\Component;
 /** Space-Wechsel (der einzige Ort dafür, §12) als Livewire-SFC. */
 new #[Layout('layouts::einundzwanzig')] #[Title('Space wählen')] class extends Component {}; ?>
 
-<main class="mx-auto max-w-md px-4 py-8 pt-safe">
+<main class="mx-auto max-w-md px-4 py-8 pt-safe pb-28">
 
     <x-app-header title="Space wählen" :back="route('spaces')">
         <x-slot:subtitle>
@@ -33,5 +33,20 @@ new #[Layout('layouts::einundzwanzig')] #[Title('Space wählen')] class extends 
                 </flux:navlist.item>
             </template>
         </flux:navlist>
+
+        {{-- Mitgliedschaft im aktiven Space (Space-Ebene, kind 28934/28936) --}}
+        <div class="surface-card mt-4 flex items-center justify-between gap-3 p-3">
+            <div class="min-w-0">
+                <flux:text class="text-sm font-medium">Mitgliedschaft</flux:text>
+                <div class="truncate text-xs text-zinc-500"
+                     x-text="activeJoined ? 'Du bist Mitglied dieses Space.' : 'Noch nicht beigetreten.'"></div>
+            </div>
+            <flux:button size="sm" variant="ghost" icon="arrow-right-start-on-rectangle"
+                         x-show="activeJoined" x-cloak x-on:click="leaveActive()" ::disabled="busy">Verlassen</flux:button>
+            <flux:button size="sm" variant="primary" icon="plus"
+                         x-show="!activeJoined" x-cloak x-on:click="joinActive()" ::disabled="busy">Beitreten</flux:button>
+        </div>
     </div>
+
+    <x-bottom-nav />
 </main>

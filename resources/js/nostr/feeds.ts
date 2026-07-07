@@ -11,22 +11,33 @@ import { derived, type Readable } from 'svelte/store'
 import { load, request } from '@welshman/net'
 import { profilesByPubkey, publishThunk, waitForThunkError, pubkey } from '@welshman/app'
 import { parse, renderAsHtml } from '@welshman/content'
-import { MESSAGE, DELETE, makeEvent, sortEventsAsc, displayProfile, type TrustedEvent } from '@welshman/util'
+import { MESSAGE, DELETE, makeEvent, sortEventsAsc, displayProfile, getTagValue, type TrustedEvent } from '@welshman/util'
 import * as nip19 from 'nostr-tools/nip19'
 import { deriveEventsForUrl } from './repository'
 
 const roomFilter = (h: string) => [{ kinds: [MESSAGE], '#h': [h] }]
 
+/** Vorangestelltes `nostr:nevent…`/`note…` einer Reply (unser Quote-Prefix). */
+const QUOTE_PREFIX = /^nostr:(?:nevent1|note1)[0-9a-z]+\n\n/
+
 /** Aufsteigend sortierter Chat-Verlauf eines Rooms (reaktiv aus dem Repository). */
 const deriveRoomMessages = (url: string, h: string): Readable<TrustedEvent[]> =>
     derived(deriveEventsForUrl(url, roomFilter(h)), (events) => sortEventsAsc(events))
 
-/** Rendert den Nachrichtentext zu sicherer HTML (Text escaped, URLs sanitized). */
+/** Rohtext einer Nachricht ohne den vorangestellten Reply-Quote (für Snippets). */
+const bodyWithoutQuote = (event: TrustedEvent): string =>
+    getTagValue('q', event.tags) ? event.content.replace(QUOTE_PREFIX, '') : event.content
+
+/**
+ * Rendert den Nachrichtentext zu sicherer HTML (Text escaped, URLs sanitized).
+ * Bei Replies wird das vorangestellte `nostr:nevent…` entfernt (trimParent) —
+ * das Zitat zeigt stattdessen die kompakte Vorschau (siehe `deriveRoomChat`).
+ */
 const htmlCache = new Map<string, string>()
 const renderMessageHtml = (event: TrustedEvent): string => {
     let html = htmlCache.get(event.id)
     if (html === undefined) {
-        html = renderAsHtml(parse({ content: event.content, tags: event.tags })).toString()
+        html = renderAsHtml(parse({ content: bodyWithoutQuote(event), tags: event.tags })).toString()
         htmlCache.set(event.id, html)
     }
     return html
@@ -40,6 +51,9 @@ const dayLabel = (ts: number): string =>
 const timeLabel = (ts: number): string =>
     new Date(ts * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
 
+/** Kompakte Vorschau der zitierten Nachricht (aufgelöst im selben Raum). */
+export type ReplyPreview = { id: string; name: string; text: string }
+
 export type ChatMessage = {
     id: string
     pubkey: string
@@ -51,6 +65,13 @@ export type ChatMessage = {
     divider: string // Datums-Trenner, wenn der Tag wechselt (sonst '')
     showAuthor: boolean // erster Beitrag eines Autor-Blocks (Gruppierung)
     mine: boolean // vom eingeloggten User verfasst (→ löschbar, M5)
+    reply: ReplyPreview | null // zitierte Nachricht (q-Tag), sonst null
+}
+
+/** Snippet aus Rohtext: Whitespace kollabiert + auf Länge gekürzt. */
+const snippet = (text: string, max = 120): string => {
+    const clean = text.replace(/\s+/g, ' ').trim()
+    return clean.length > max ? `${clean.slice(0, max)}…` : clean
 }
 
 /**
@@ -60,6 +81,10 @@ export type ChatMessage = {
  */
 export const deriveRoomChat = (url: string, h: string): Readable<ChatMessage[]> =>
     derived([deriveRoomMessages(url, h), profilesByPubkey, pubkey], ([events, $profiles, $me]) => {
+        const nameOf = (pk: string) => displayProfile($profiles.get(pk), shortNpub(nip19.npubEncode(pk)))
+        // Index für die Reply-Auflösung im selben Raum (q-Tag → zitierte Nachricht).
+        const byId = new Map(events.map((e) => [e.id, e]))
+
         let prevDay = ''
         let prevPubkey = ''
         return events.map((event): ChatMessage => {
@@ -69,19 +94,25 @@ export const deriveRoomChat = (url: string, h: string): Readable<ChatMessage[]> 
             prevDay = day
             prevPubkey = event.pubkey
 
-            const npub = nip19.npubEncode(event.pubkey)
+            const quotedId = getTagValue('q', event.tags)
+            const quoted = quotedId ? byId.get(quotedId) : undefined
+            const reply: ReplyPreview | null = quoted
+                ? { id: quoted.id, name: nameOf(quoted.pubkey), text: snippet(bodyWithoutQuote(quoted)) }
+                : null
+
             const profile = $profiles.get(event.pubkey)
             return {
                 id: event.id,
                 pubkey: event.pubkey,
                 created_at: event.created_at,
                 time: timeLabel(event.created_at),
-                name: displayProfile(profile, shortNpub(npub)),
+                name: nameOf(event.pubkey),
                 picture: profile?.picture ?? '',
                 html: renderMessageHtml(event),
                 divider,
                 showAuthor,
                 mine: event.pubkey === $me,
+                reply,
             }
         })
     })
@@ -100,14 +131,28 @@ export const loadRoomMessages = (url: string, h: string, until?: number): Promis
 
 // ── Schreiben (M5) ───────────────────────────────────────────────────────────
 
+/** Ziel einer Antwort: die zitierte Nachricht (id + Autor). */
+export type ReplyTarget = { id: string; pubkey: string }
+
 /**
  * Sendet eine Nachricht (kind 9) in einen Room. Signiert im Browser, publiziert
  * via Thunk (optimistisch: der Thunk legt das Event sofort ins Repository, die
  * Live-Sub bestätigt es). Gibt die Fehlermeldung des Relays zurück, '' bei Erfolg.
- * ponytail: kein PROTECTED-Tag (NIP-70) — relayseitige Autor-Härtung kommt in M6.
+ *
+ * Ist `reply` gesetzt, wird nach NIP-18-Manier zitiert: `q`+`p`-Tags plus ein
+ * vorangestelltes `nostr:nevent…` im Content (kein NIP-10 e-reply — so macht es
+ * auch der Referenz-Client für NIP-29-Rooms).
  */
-export const sendRoomMessage = (url: string, h: string, content: string): Promise<string> =>
-    waitForThunkError(publishThunk({ relays: [url], event: makeEvent(MESSAGE, { content, tags: [['h', h]] }) }))
+export const sendRoomMessage = (url: string, h: string, content: string, reply?: ReplyTarget): Promise<string> => {
+    const tags: string[][] = [['h', h]]
+    let body = content
+    if (reply) {
+        const nevent = nip19.neventEncode({ id: reply.id, relays: [url], author: reply.pubkey, kind: MESSAGE })
+        tags.push(['q', reply.id, url, reply.pubkey], ['p', reply.pubkey, url])
+        body = `nostr:${nevent}\n\n${content}`
+    }
+    return waitForThunkError(publishThunk({ relays: [url], event: makeEvent(MESSAGE, { content: body, tags }) }))
+}
 
 /**
  * Löscht eine eigene Nachricht (kind 5, NIP-09). Das `h`-Tag routet den Tombstone

@@ -121,3 +121,32 @@ test('M5: Raum beitreten, persistiert über Reload, verlassen', async ({ page })
     await expect(joinBtn).toBeVisible({ timeout: 15_000 })
     await expect(composer).toBeHidden()
 })
+
+/**
+ * M6 (Reply/Quote) — auf eine Nachricht antworten: der Reply-Kontext erscheint
+ * über dem Composer; die gesendete Antwort trägt eine Zitat-Vorschau der
+ * Ursprungsnachricht (q-Tag + `nostr:nevent`, im selben Raum aufgelöst).
+ */
+test('M6: auf eine Nachricht antworten (Zitat)', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const a = `Frage-${Math.floor(Math.random() * 1e9)}`
+    const b = `Antwort-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+
+    // Nachricht A senden
+    await composer.fill(a)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(a, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Auf A antworten → Reply-Kontext erscheint
+    await page.locator('div.group', { hasText: a }).getByRole('button', { name: 'Antworten' }).click()
+    await expect(page.getByText('Antwort an')).toBeVisible()
+
+    // Antwort B senden → B ist da UND zitiert A (Original + Zitat = 2× A)
+    await composer.fill(b)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(a, { exact: true })).toHaveCount(2)
+})

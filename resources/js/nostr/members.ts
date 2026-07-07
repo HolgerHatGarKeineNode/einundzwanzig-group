@@ -1,25 +1,26 @@
 /**
  * Space-Directory: Mitglieder + Rollen — portiert aus dem Referenz-Client
- * `src/app/members.ts`; nur der Lese-Teil für M3; Admin-Mutationen via
- * `manageRelay`/NIP-86 kommen mit M6).
+ * `src/app/members.ts`. Lese-Teil (M3) + Admin-Mutationen via `manageRelay`/
+ * NIP-86 (M6): Rollen, Member-Zuweisung, Ban/Entfernen, Admin-Erkennung.
  *
  * Autoritativ ist die **relay-signierte** Mitgliederliste (13534) und die
  * Rollendefinitionen (33534, app-lokal). Beide filtert `deriveRelaySignedEvents`
  * auf `pubkey === relay.self`. Rollen-Zuweisungen stehen als Extra-Werte an den
  * `["member", pubkey, ...roleIds]`-Tags der 13534.
  */
-import { derived, type Readable } from 'svelte/store'
-import { load } from '@welshman/net'
-import { profilesByPubkey, loadProfile } from '@welshman/app'
+import { derived, writable, type Readable } from 'svelte/store'
+import { load, request } from '@welshman/net'
+import { profilesByPubkey, loadProfile, manageRelay, pubkey } from '@welshman/app'
 import {
     RELAY_MEMBERS,
+    ManagementMethod,
     getTags,
     getTagValue,
     getTagValues,
     displayProfile,
     type PublishedProfile,
 } from '@welshman/util'
-import { first, sortBy, uniq } from '@welshman/lib'
+import { first, randomId, sortBy, uniq } from '@welshman/lib'
 import * as nip19 from 'nostr-tools/nip19'
 import { deriveRelaySignedEvents, deriveRelaySelfReady } from './repository'
 
@@ -121,9 +122,11 @@ export type MemberView = {
     name: string
     picture: string
     roles: RoleView[]
+    roleIds: string[] // rohe Zuweisungen (für die Admin-Zuweisungs-UI)
     search: string
 }
-export type DirectoryView = { ready: boolean; members: MemberView[] }
+/** `roles` = alle Rollen des Space (für Verwaltung/Zuweisung, nicht nur belegte). */
+export type DirectoryView = { ready: boolean; members: MemberView[]; roles: RoleView[] }
 
 /** Kurzform eines npub für die Anzeige ohne Profil. */
 const shortNpub = (npub: string): string => `${npub.slice(0, 12)}…${npub.slice(-6)}`
@@ -156,9 +159,8 @@ export const deriveSpaceDirectory = (url: string): Readable<DirectoryView> =>
                 const npub = nip19.npubEncode(pubkey)
                 const profile = $profiles.get(pubkey) as PublishedProfile | undefined
                 const name = displayProfile(profile, shortNpub(npub))
-                const memberRoleViews = (memberRoles.get(pubkey) ?? [])
-                    .map(toRoleView)
-                    .filter((r): r is RoleView => r !== null)
+                const roleIds = memberRoles.get(pubkey) ?? []
+                const memberRoleViews = roleIds.map(toRoleView).filter((r): r is RoleView => r !== null)
                 return {
                     pubkey,
                     npub,
@@ -166,19 +168,140 @@ export const deriveSpaceDirectory = (url: string): Readable<DirectoryView> =>
                     name,
                     picture: profile?.picture ?? '',
                     roles: memberRoleViews,
+                    roleIds,
                     search: `${name} ${npub}`.toLowerCase(),
                 }
             })
 
-            return { ready, members: sortBy((m) => m.name.toLowerCase(), views) }
+            const allRoles = roles
+                .map((r) => toRoleView(r.id))
+                .filter((r): r is RoleView => r !== null)
+            return { ready, members: sortBy((m) => m.name.toLowerCase(), views), roles: allRoles }
         },
     )
+
+// ── Admin (NIP-86 manageRelay) ───────────────────────────────────────────────
+
+/**
+ * Admin-Erkennung + Cache-Invalidierung (Fix C). Der Relay beantwortet
+ * `supportedmethods` pubkey-abhängig — Admin = nicht-leere Methodenliste. Der
+ * Referenz-Client memoiziert das und wird nach Rollenwechseln stale; hier hält
+ * eine per-URL-`writable` den Zustand, und `refreshSpaceAdmin` fragt bewusst neu
+ * (nach jeder Rollen-/Member-Mutation und beim Login-Wechsel).
+ */
+const adminByUrl = new Map<string, ReturnType<typeof writable<boolean>>>()
+
+export const refreshSpaceAdmin = (url: string): void => {
+    const store = adminByUrl.get(url)
+    if (!store) {
+        return
+    }
+    if (!pubkey.get()) {
+        store.set(false)
+        return
+    }
+    manageRelay(url, { method: ManagementMethod.SupportedMethods, params: [] })
+        .then((res) => store.set(Boolean(res.result?.length)))
+        .catch(() => store.set(false))
+}
+
+/** Ist der eingeloggte User Admin dieses Space? (reaktiv, invalidierbar) */
+export const deriveUserIsSpaceAdmin = (url: string): Readable<boolean> => {
+    if (!adminByUrl.has(url)) {
+        adminByUrl.set(url, writable(false))
+        refreshSpaceAdmin(url)
+    }
+    return adminByUrl.get(url)!
+}
+
+/** Extrahiert die Fehlermeldung aus einer manageRelay-Antwort ('' = Erfolg). */
+type ManageResult = { error?: string }
+const manageError = (res: ManageResult): string => res.error ?? ''
+
+// Rollen (kind 33534). `createrole`/… sind relay-spezifische Erweiterungen
+// (nicht im ManagementMethod-Enum) — der Referenz-Client castet ebenso.
+const roleColorParams = (color: SpaceRoleColor): string =>
+    [color.hue, color.saturation, color.lightness] as unknown as string
+
+export const createRole = async (
+    url: string,
+    label: string,
+    description: string,
+    color: SpaceRoleColor,
+    order: number,
+): Promise<string> =>
+    manageError(
+        await manageRelay(url, {
+            method: 'createrole' as ManagementMethod,
+            params: [randomId(), label, description, roleColorParams(color), order.toString()],
+        }),
+    )
+
+export const editRole = async (
+    url: string,
+    id: string,
+    label: string,
+    description: string,
+    color: SpaceRoleColor,
+    order: number,
+): Promise<string> =>
+    manageError(
+        await manageRelay(url, {
+            method: 'editrole' as ManagementMethod,
+            params: [id, label, description, roleColorParams(color), order.toString()],
+        }),
+    )
+
+export const deleteRole = async (url: string, id: string): Promise<string> =>
+    manageError(await manageRelay(url, { method: 'deleterole' as ManagementMethod, params: [id] }))
+
+export const assignRole = async (url: string, pubkey: string, roleId: string): Promise<string> =>
+    manageError(await manageRelay(url, { method: 'assignrole' as ManagementMethod, params: [pubkey, roleId] }))
+
+export const unassignRole = async (url: string, pubkey: string, roleId: string): Promise<string> =>
+    manageError(await manageRelay(url, { method: 'unassignrole' as ManagementMethod, params: [pubkey, roleId] }))
+
+// Mitglieder (NIP-86 allow/ban)
+export const addSpaceMember = async (url: string, pubkey: string): Promise<string> =>
+    manageError(await manageRelay(url, { method: ManagementMethod.AllowPubkey, params: [pubkey] }))
+
+export const removeSpaceMember = async (url: string, pubkey: string): Promise<string> =>
+    manageError(await manageRelay(url, { method: ManagementMethod.UnallowPubkey, params: [pubkey] }))
+
+export const banSpaceMember = async (url: string, pubkey: string, reason = ''): Promise<string> =>
+    manageError(
+        await manageRelay(url, {
+            method: ManagementMethod.BanPubkey,
+            params: reason ? [pubkey, reason] : [pubkey],
+        }),
+    )
+
+export const unbanSpaceMember = async (url: string, pubkey: string): Promise<string> =>
+    manageError(await manageRelay(url, { method: ManagementMethod.UnbanPubkey, params: [pubkey] }))
+
+export type BannedMember = { pubkey: string; npub: string; short: string; reason: string }
+
+/** Lädt die Ban-Liste (`listbannedpubkeys`) frisch als Promise (kein Store-Cache). */
+export const loadBannedMembers = async (url: string): Promise<BannedMember[]> => {
+    const res = (await manageRelay(url, { method: ManagementMethod.ListBannedPubkeys, params: [] })) as {
+        result?: { pubkey: string; reason?: string }[]
+    }
+    return (res.result ?? []).map(({ pubkey, reason }) => {
+        const npub = nip19.npubEncode(pubkey)
+        return { pubkey, npub, short: shortNpub(npub), reason: reason ?? '' }
+    })
+}
 
 // ── Laden ────────────────────────────────────────────────────────────────────
 
 /** Lädt Mitglieder- und Rollen-Events (13534/33534) vom Space-Relay. */
 export const loadSpaceDirectory = (url: string): Promise<unknown> =>
     load({ relays: [url], filters: [{ kinds: [RELAY_MEMBERS, RELAY_ROLE] }] })
+
+/** Live-Sub auf 13534/33534 — Admin-Änderungen (Rollen/Member) sofort sichtbar. */
+export const listenSpaceDirectory = (url: string, signal: AbortSignal): void => {
+    void request({ relays: [url], signal, filters: [{ kinds: [RELAY_MEMBERS, RELAY_ROLE], limit: 0 }] })
+}
 
 /**
  * Lädt die kind-0-Profile der Mitglieder nach (Namen/Avatare) — vom Space-Relay

@@ -12,9 +12,19 @@
  * Leave (9022) die signierte Members-Liste **kind-39002** (`d`=h, `p`=Mitglieder)
  * — sie ist persistent und die Quelle für „bin ich Mitglied dieses Raums".
  */
-import { derived, writable, type Readable } from 'svelte/store'
-import { repository, tracker, pubkey, makeUserData, makeOutboxLoader, publishThunk, waitForThunkError } from '@welshman/app'
+import { derived, writable, get, type Readable } from 'svelte/store'
+import {
+    repository,
+    tracker,
+    pubkey,
+    makeUserData,
+    makeOutboxLoader,
+    publishThunk,
+    waitForThunkError,
+    nip44EncryptToSelf,
+} from '@welshman/app'
 import { deriveItemsByKey, deriveEventsByIdByUrl, sync, localStorageProvider } from '@welshman/store'
+import { Router } from '@welshman/router'
 import { load, request } from '@welshman/net'
 import {
     ROOMS,
@@ -23,10 +33,16 @@ import {
     ROOM_MEMBERS,
     ROOM_JOIN,
     ROOM_LEAVE,
+    RELAY_JOIN,
+    RELAY_LEAVE,
+    RELAY_INVITE,
     readList,
     readRoomMeta,
     asDecryptedEvent,
     makeEvent,
+    makeList,
+    addToListPublicly,
+    removeFromListByPredicate,
     getListTags,
     getRelayTagValues,
     getGroupTags,
@@ -301,3 +317,75 @@ export const joinRoom = (url: string, h: string): Promise<string> =>
 /** Verlässt einen Raum: Leave-Request (kind 9022) → Relay entfernt aus der 39002. */
 export const leaveRoom = (url: string, h: string): Promise<string> =>
     waitForThunkError(publishThunk({ relays: [url], event: makeEvent(ROOM_LEAVE, { tags: [['h', h]] }) }))
+
+// ── Space beitreten/verlassen (Space-Ebene, NIP-29 kind 28934/28936) ─────────
+
+/** Fügt den Space der persönlichen 10009-Liste hinzu (`["r", url]`, nip44-self). */
+const addSpaceToList = async (url: string): Promise<void> => {
+    const list = get(userGroupList) ?? makeList({ kind: ROOMS })
+    const event = await addToListPublicly(list, ['r', url]).reconcile(nip44EncryptToSelf)
+    const relays = uniq([...Router.get().FromUser().getUrls(), ...getRelayTagValues(event.tags)])
+    await waitForThunkError(publishThunk({ event, relays }))
+}
+
+/** Entfernt den Space aus der 10009-Liste (`r`- oder `group`-Tag). */
+const removeSpaceFromList = async (url: string): Promise<void> => {
+    const list = get(userGroupList)
+    if (!list) {
+        return
+    }
+    const pred = (t: string[]) => normalizeRelayUrl(t[t[0] === 'r' ? 1 : 2] ?? '') === url
+    const event = await removeFromListByPredicate(list, pred).reconcile(nip44EncryptToSelf)
+    const relays = uniq([url, ...Router.get().FromUser().getUrls(), ...getRelayTagValues(event.tags)])
+    await waitForThunkError(publishThunk({ event, relays }))
+}
+
+/**
+ * Tritt einem Space bei: Join-Request (kind 28934, optionaler Invite-`claim`) ans
+ * Space-Relay + Aufnahme in die persönliche 10009-Liste (damit der Space in der
+ * Auswahl auftaucht). AUTH läuft automatisch über die Socket-Policy. '' = Erfolg.
+ */
+export const joinSpace = async (url: string, claim = ''): Promise<string> => {
+    const tags = claim ? [['claim', claim]] : []
+    const err = await waitForThunkError(publishThunk({ relays: [url], event: makeEvent(RELAY_JOIN, { tags }) }))
+    if (err) {
+        return err
+    }
+    await addSpaceToList(url)
+    return ''
+}
+
+/** Verlässt einen Space: aus der 10009 entfernen + Leave-Request (kind 28936). */
+export const leaveSpace = async (url: string): Promise<string> => {
+    await removeSpaceFromList(url)
+    return waitForThunkError(publishThunk({ relays: [url], event: makeEvent(RELAY_LEAVE) }))
+}
+
+/** Ist der Space in der persönlichen 10009-Liste (reaktiv)? */
+export const deriveUserInSpace = (url: string): Readable<boolean> =>
+    derived(userSpaceUrls, ($urls) => $urls.includes(normalizeRelayUrl(url)))
+
+// ── Invites (kind 28935 RELAY_INVITE / Link `?r=&c=`) ────────────────────────
+
+export type InviteData = { url: string; claim: string }
+
+/** Parst einen Invite-Link `…/join?r=<relay>&c=<claim>` (Fallback: reine URL). */
+export const parseInviteLink = (invite: string): InviteData | undefined => {
+    try {
+        const params = new URL(invite).searchParams
+        const url = normalizeRelayUrl(params.get('r') ?? '')
+        if (isRelayUrl(url)) {
+            return { url, claim: params.get('c') ?? '' }
+        }
+    } catch {
+        // kein URL — als reine Relay-URL versuchen
+    }
+    const url = normalizeRelayUrl(invite)
+    return isRelayUrl(url) ? { url, claim: '' } : undefined
+}
+
+/** Holt den Invite-Claim (kind 28935 `["claim", …]`) vom Space-Relay ('' = keiner). */
+export const loadSpaceInviteClaim = async (url: string): Promise<string> => {
+    const events = (await load({ relays: [url], filters: [{ kinds: [RELAY_INVITE] }] })) as TrustedEvent[]
+    return getTagValue('claim', events[0]?.tags ?? []) ?? ''
+}

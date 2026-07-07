@@ -38,8 +38,8 @@ test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async 
 test('M2: Space-Wechsel liegt in den Einstellungen', async ({ page }) => {
     await login(page)
 
-    // Über das Zahnrad in die Einstellungen
-    await page.getByRole('link', { name: 'Space wechseln' }).click()
+    // Über die Bottom-Nav in die Einstellungen (Space-Wechsel liegt dort, §12)
+    await page.getByRole('link', { name: 'Einstellungen' }).click()
     await page.waitForURL('**/settings/space')
 
     await expect(page.getByText('Space wählen')).toBeVisible()
