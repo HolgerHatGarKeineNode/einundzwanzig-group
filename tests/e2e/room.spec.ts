@@ -209,6 +209,31 @@ test('M6: auf eine Nachricht antworten (Zitat)', async ({ page }) => {
     await expect(page.getByText(a, { exact: true })).toHaveCount(2)
 })
 
+/**
+ * B3 (Profil-Karte) — Klick auf den Autor-Namen im Chat öffnet eine Profil-Karte
+ * mit den kind-0-Tiefen-Feldern (about/website/lud16), die sonst brachliegen.
+ * Ein reicheres (neueres) kind-0 für den Admin wird vorab publiziert; deriveProfile
+ * lädt es beim Öffnen lazy nach.
+ */
+test('B3: Autor-Profil-Karte zeigt about/website/lud16', async ({ page }) => {
+    const bio = `E2E-Bio-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '0',
+        '-c', JSON.stringify({ name: 'Relay Admin', about: bio, website: 'https://profil-test.example', lud16: 'admin@ln.test' }),
+        'ws://localhost:3334',
+    ])
+
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    // Autor-Namen anklicken → Karte (Dialog) mit den Tiefen-Feldern.
+    await page.getByRole('button', { name: 'Relay Admin' }).first().click()
+    const card = page.getByRole('dialog')
+    await expect(card.getByText(bio)).toBeVisible({ timeout: 15_000 })
+    await expect(card.getByRole('link', { name: /profil-test\.example/ })).toBeVisible()
+    await expect(card.getByText('admin@ln.test')).toBeVisible()
+})
+
 /** Publiziert eine kind-9-Nachricht direkt in „scroll" (fremder Autor = ADMIN). */
 function publishToScroll(content: string): void {
     execFileSync(NAK, [

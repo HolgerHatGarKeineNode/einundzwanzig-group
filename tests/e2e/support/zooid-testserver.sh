@@ -24,6 +24,11 @@ HTTP=http://localhost:3334
 cd "$ZOOID_DIR" || exit 1
 [ -f bin/zooid ] || CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go
 
+# Frische SQLite je Lauf (DATA=./data, kein DATABASE_URL lokal). Ohne Reset
+# dupliziert der idempotente-Seed unten bei jedem Start in DIESELBE DB (welcome
+# wuchs 3→50+, WAL-Bloat) → Tests wurden zunehmend lahm/flaky. Löschen = pristin.
+rm -f data/db data/db-shm data/db-wal
+
 PORT=3334 ./bin/zooid &
 PID=$!
 trap 'kill $PID 2>/dev/null' EXIT INT TERM

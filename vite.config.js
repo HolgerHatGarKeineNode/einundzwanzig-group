@@ -22,6 +22,13 @@ export default defineConfig({
             ignored: ['**/storage/framework/views/**'],
         },
     },
+    // Local-Dev-Package NICHT pre-bundeln: sonst landet `@einundzwanzig/group`
+    // (Roh-TS via file:-Symlink) im optimizeDeps-Cache und liegt außerhalb des
+    // HMR-/Watch-Graphs → Package-JS-Änderungen erschienen erst nach Vite-Neustart.
+    // Ausgeschlossen folgt Vite dem Symlink und lädt die TS live (HMR).
+    optimizeDeps: {
+        exclude: ['@einundzwanzig/group'],
+    },
     build: {
         rollupOptions: {
             output: {
