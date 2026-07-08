@@ -84,8 +84,12 @@ test('M5: eigene Nachricht löschen', async ({ page }) => {
     const message = page.getByText(marker, { exact: true })
     await expect(message).toBeVisible({ timeout: 15_000 })
 
-    // Löschen-Button der eigenen Nachricht (in derselben Zeile).
-    await page.locator('div.group', { hasText: marker }).getByRole('button', { name: 'Nachricht löschen' }).click()
+    // Zeile antippen blendet die Aktionen ein (Touch/Tap-to-toggle), dann Löschen.
+    const row = page.locator('div.group', { hasText: marker })
+    await row.click()
+    await row.getByRole('button', { name: 'Nachricht löschen' }).click()
+    // Bestätigungs-Modal → erst der Klick auf „Löschen" publiziert den Tombstone.
+    await page.getByRole('button', { name: 'Löschen', exact: true }).click()
     await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
 })
 
@@ -140,8 +144,10 @@ test('M6: auf eine Nachricht antworten (Zitat)', async ({ page }) => {
     await page.getByRole('button', { name: 'Senden' }).click()
     await expect(page.getByText(a, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    // Auf A antworten → Reply-Kontext erscheint
-    await page.locator('div.group', { hasText: a }).getByRole('button', { name: 'Antworten' }).click()
+    // Auf A antworten → Zeile antippen (Aktionen einblenden), dann Antworten.
+    const rowA = page.locator('div.group', { hasText: a })
+    await rowA.click()
+    await rowA.getByRole('button', { name: 'Antworten' }).click()
     await expect(page.getByText('Antwort an')).toBeVisible()
 
     // Antwort B senden → B ist da UND zitiert A (Original + Zitat = 2× A)
@@ -215,4 +221,112 @@ test('D1: Unread-Zähler zählt Nachrichten, Jump springt ans Ende', async ({ pa
     // Jump → ans Ende, Zähler + Button verschwinden.
     await jumpBtn.click()
     await expect(jumpBtn).toBeHidden()
+})
+
+/**
+ * D2 (Shift+Enter) — der alte `.prevent` verschluckte JEDEN Enter, mehrzeilige
+ * Nachrichten waren unmöglich. Shift+Enter fügt jetzt einen Umbruch ein (kein
+ * Senden), Enter allein sendet.
+ */
+test('D2: Shift+Enter macht Umbruch, Enter sendet', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const marker = `ML-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await composer.click()
+    await page.keyboard.type(marker)
+    await page.keyboard.press('Shift+Enter')
+    await page.keyboard.type('zeile2')
+
+    // Shift+Enter: Umbruch bleibt, nichts gesendet.
+    await expect(composer).toHaveValue(`${marker}\nzeile2`)
+
+    // Enter ohne Shift: sendet → Composer leert, mehrzeilige Nachricht erscheint.
+    await page.keyboard.press('Enter')
+    await expect(composer).toHaveValue('')
+    await expect(page.getByText(marker)).toBeVisible({ timeout: 15_000 })
+})
+
+/**
+ * D2 (Zitat-Sprung) — die Zitat-Vorschau einer Antwort ist klickbar und springt
+ * zur zitierten Original-Nachricht, die kurz mit einem Brand-Ring hervorgehoben wird.
+ */
+test('D2: Klick aufs Zitat hebt die Original-Nachricht hervor', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const a = `Q-${Math.floor(Math.random() * 1e9)}`
+    const b = `R-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+
+    await composer.fill(a)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(a, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const rowA = page.locator('div.group', { hasText: a })
+    await rowA.click()
+    await rowA.getByRole('button', { name: 'Antworten' }).click()
+    await composer.fill(b)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Zitat-Vorschau in B (enthält A's Text) anklicken → Original hervorgehoben.
+    await page.getByRole('button').filter({ hasText: a }).first().click()
+    await expect(page.locator('[class*="ring-brand-500"]')).toBeVisible({ timeout: 3_000 })
+})
+
+/**
+ * D2 (Fehler-Retry) — lehnt der Relay die kind-9-Publikation ab, erscheint statt
+ * eines flüchtigen Toasts eine aktionable Hinweiszeile mit gefülltem Draft; die
+ * optimistische Nachricht wird zurückgenommen (kein Doppel), „Erneut senden" nach
+ * Freigabe des Relays sendet erfolgreich. Der Reject wird per WebSocket-Route
+ * erzwungen (nur kind-9-EVENTs, alles andere läuft durch).
+ */
+test('D2: Publish-Fehler zeigt Retry-Zeile, erneutes Senden räumt sie', async ({ page }) => {
+    await useZooid(page)
+
+    let blockKind9 = true
+    await page.routeWebSocket(/localhost:3334/, (ws) => {
+        const server = ws.connectToServer()
+        ws.onMessage((raw) => {
+            const s = typeof raw === 'string' ? raw : raw.toString()
+            if (blockKind9) {
+                try {
+                    const parsed = JSON.parse(s)
+                    if (parsed[0] === 'EVENT' && parsed[1]?.kind === 9) {
+                        ws.send(JSON.stringify(['OK', parsed[1].id, false, 'blocked: test']))
+                        return
+                    }
+                } catch {
+                    // Kein JSON → einfach durchreichen.
+                }
+            }
+            server.send(s)
+        })
+        server.onMessage((raw) => ws.send(raw))
+    })
+
+    await page.goto('/nostr-login')
+    await page.getByPlaceholder(/nsec1/).fill(NSEC)
+    await page.getByRole('button', { name: 'Anmelden' }).click()
+    await page.waitForURL('**/spaces')
+    await page.goto('/rooms/welcome')
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const marker = `Fail-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+
+    // Fehler-Zeile erscheint, Draft bleibt, optimistische Nachricht ist zurückgenommen.
+    await expect(page.getByRole('button', { name: 'Erneut senden' })).toBeVisible({ timeout: 15_000 })
+    await expect(composer).toHaveValue(marker)
+    await expect(page.getByText(marker, { exact: true })).toHaveCount(0)
+
+    // Relay freigeben und erneut senden → Nachricht kommt an, Fehler-Zeile weg.
+    blockKind9 = false
+    await page.getByRole('button', { name: 'Erneut senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Erneut senden' })).toBeHidden()
 })
