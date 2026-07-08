@@ -39,6 +39,8 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=welcome -t name=Willkommen -t about
 nak event --auth --sec "$ADMIN" -k 9007 -t h=general -t name=Allgemein -t about=Off-Topic "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$ADMIN" -k 9007 -t h=dev -t name=Dev -t about=Entwicklung "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$ADMIN" -k 9007 -t h=scroll -t name=Scroll -t about=Langer-Verlauf "$R" >/dev/null 2>&1 || true
+# Raum mit Bild + Zugriffs-Flag (B2): `picture` → Avatar, `private` (Presence-Tag) → Schloss-Badge.
+nak event --auth --sec "$ADMIN" -k 9007 -t h=vip -t name=VIP -t about=Privat -t picture=https://robohash.org/vip.png -t private "$R" >/dev/null 2>&1 || true
 
 # NIP-86-Management (HTTP + NIP-98, als ADMIN). MUSS vor allen USER-Events laufen:
 # Der Relay ist member-only (public_write=false, wie Prod), also darf der Test-User

@@ -31,6 +31,12 @@ test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async 
     await expect(page.getByText('Allgemein')).toBeVisible()
     await expect(page.getByText('Andere Räume')).toBeVisible()
     await expect(page.getByText('Dev')).toBeVisible()
+
+    // B2: Raum-`picture` (kind 39000) rendert als Avatar, `private` als Schloss.
+    const vip = page.getByRole('button').filter({ hasText: 'VIP' })
+    await expect(vip).toBeVisible()
+    await expect(vip.locator('img')).toHaveAttribute('src', /robohash\.org\/vip\.png/)
+    await expect(vip.locator('[aria-label="Privater Raum"]')).toBeVisible()
 })
 
 /**
