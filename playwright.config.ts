@@ -44,6 +44,10 @@ export default defineConfig({
             url: `http://127.0.0.1:${PORT}`,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,
+            // Eigener (nicht existierender) Hot-Pfad → Test-Server nutzt immer die
+            // Build-Assets, auch wenn parallel `composer run dev` public/hot schreibt.
+            // So kann der Dev-Server (Port 8000) beim Testen weiterlaufen.
+            env: { ...process.env, VITE_HOT_FILE: '/tmp/e2e-vite-never-hot' },
         },
     ],
 })
