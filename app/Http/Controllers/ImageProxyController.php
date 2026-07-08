@@ -45,7 +45,7 @@ class ImageProxyController extends Controller
         }
 
         $src = (string) $request->query('src', '');
-        if (! $this->isSafeUrl($src)) {
+        if ($src === '') {
             abort(400);
         }
 
@@ -59,10 +59,17 @@ class ImageProxyController extends Controller
 
         // GIFs bleiben GIF (Animation), sonst WebP — die Extension steht erst nach
         // dem Encode fest, darum beide Cache-Varianten prüfen (Hit ohne Fetch).
+        // WICHTIG: der SSRF-Check (DNS-Lookups) läuft NUR beim Miss — sonst würden
+        // 2 synchrone `dns_get_record` jeden Cache-Hit um hunderte ms verzögern.
         foreach (['webp' => 'image/webp', 'gif' => 'image/gif'] as $ext => $mime) {
             if ($disk->exists("$base.$ext")) {
                 return $this->respond($disk->get("$base.$ext"), $mime, $etag);
             }
+        }
+
+        // Cache-Miss → erst jetzt (vor dem ausgehenden Fetch) SSRF prüfen.
+        if (! $this->isSafeUrl($src)) {
+            abort(400);
         }
 
         $encoded = $this->fetchAndEncode($src, $spec);

@@ -77,6 +77,16 @@ it('keeps a gif as gif (animation), not webp', function () {
     Storage::disk('local')->assertExists('img-cache/msg/'.sha1($src).'.gif');
 });
 
+it('serves a cache hit without the SSRF/DNS check (hot path stays fast)', function () {
+    // Vorgecachte Datei direkt ablegen; kein Http-Fake → beweist: kein Fetch/DNS.
+    $src = 'https://1.1.1.1/cached.png';
+    Storage::disk('local')->put('img-cache/avatar/'.sha1($src).'.webp', 'RIFFfake');
+
+    $this->get('/img/avatar?src='.urlencode($src))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'image/webp');
+});
+
 it('returns 304 on matching ETag', function () {
     Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
 
