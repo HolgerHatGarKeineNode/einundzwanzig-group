@@ -37,3 +37,6 @@ yarn-error.log
 # Pest-Browsertests: Host-Chromium-Registry (Symlinks) + Screenshots
 /tests/Browser/browsers
 /tests/Browser/Screenshots
+
+# Editor-/Backup-Cruft — Git ist das Backup
+*.bak
