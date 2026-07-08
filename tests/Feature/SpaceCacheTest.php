@@ -30,7 +30,8 @@ test('Raum-Seite rendert gecachten Namen in Titel/Header und Beschreibung als OG
         ->assertOk()
         ->assertSee('# Willkommen')
         ->assertSee('Der Startraum')
-        ->assertSee('https://img/w.png');   // Raum-Avatar im Header
+        // IMG (PLAN4): Raum-Avatar im Header läuft über den Bild-Proxy.
+        ->assertSee('/img/avatar?src='.rawurlencode('https://img/w.png'));
 });
 
 test('Raum-Seite fällt bei Cache-Miss auf die rohe Raum-ID zurück', function () {

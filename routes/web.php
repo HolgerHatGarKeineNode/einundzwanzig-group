@@ -1,8 +1,14 @@
 <?php
 
+use App\Http\Controllers\ImageProxyController;
 use Illuminate\Support\Facades\Route;
 
 Route::livewire('/', 'pages::home')->name('home');
+
+// PLAN4 IMG — Bild-Proxy: schneidet remote Nostr-Bilder zu + WebP + cached.
+// Öffentlich (Mobile ruft den gehosteten Endpunkt cross-origin); `src` untrusted
+// → SSRF-Schutz im Controller. Preset im Pfad begrenzt die Cache-Kardinalität.
+Route::get('/img/{preset}', ImageProxyController::class)->name('img');
 
 // M0 — welshman Smoke-Test (Debug). Nur lokal — nicht öffentlich/indexierbar (D5).
 if (app()->environment('local')) {
