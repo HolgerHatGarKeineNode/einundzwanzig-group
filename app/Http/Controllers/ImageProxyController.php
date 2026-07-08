@@ -16,7 +16,7 @@ use Symfony\Component\Process\ExecutableFinder;
  * Bild-Proxy (PLAN4 IMG): lädt ein remote Nostr-Bild (Avatar, Raum-`picture`,
  * Space-`icon`), schneidet auf ein festes Preset zu und liefert WebP — gecacht
  * auf Platte. `src` ist untrusted → SSRF-Schutz ist Pflicht (nur https,
- * öffentliche Ziel-IPs, Content-Type image/*, Größen-/Zeit-Limit).
+ * öffentliche Ziel-IPs, Bildformat per Magic-Bytes, Größen-/Zeit-Limit).
  */
 class ImageProxyController extends Controller
 {
@@ -92,6 +92,21 @@ class ImageProxyController extends Controller
     }
 
     /**
+     * Bild an den Magic-Bytes erkennen (formatbasiert, header-unabhängig) — deckt
+     * PNG/JPEG/GIF/BMP/WebP/AVIF|HEIF ab. Nötig, weil Blossom & Co. Bilder auch als
+     * `application/octet-stream` ausliefern. Endgültiger Filter bleibt der Decode.
+     */
+    private static function isImageData(string $data): bool
+    {
+        return str_starts_with($data, "\x89PNG")
+            || str_starts_with($data, "\xFF\xD8\xFF")
+            || str_starts_with($data, 'GIF8')
+            || str_starts_with($data, 'BM')
+            || (str_starts_with($data, 'RIFF') && substr($data, 8, 4) === 'WEBP')
+            || (substr($data, 4, 4) === 'ftyp' && in_array(substr($data, 8, 4), ['avif', 'avis', 'heic', 'heix', 'mif1'], true));
+    }
+
+    /**
      * @param  array{w:int, h:int, fit:string}  $spec
      * @return array{0:string, 1:string}|null [Bytes, MIME]
      */
@@ -126,11 +141,12 @@ class ImageProxyController extends Controller
             if (! $response->successful()) {
                 return null;
             }
-            if (! str_starts_with(strtolower($response->header('Content-Type')), 'image/')) {
-                return null;
-            }
             $data = $response->body();
             if ($data === '' || strlen($data) > self::MAX_BYTES) {
+                return null;
+            }
+
+            if (! self::isImageData($data)) {
                 return null;
             }
 

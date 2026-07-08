@@ -97,8 +97,16 @@ it('returns 304 on matching ETag', function () {
         ->assertStatus(304);
 });
 
-it('rejects a non-image content-type', function () {
-    Http::fake(['*' => Http::response('<html>', 200, ['Content-Type' => 'text/html'])]);
+it('rejects non-image bytes (magic-byte sniff, not content-type)', function () {
+    Http::fake(['*' => Http::response('<html>not an image</html>', 200, ['Content-Type' => 'image/png'])]);
 
     $this->get('/img/avatar?src='.urlencode('https://1.1.1.1/a.png'))->assertStatus(502);
+});
+
+it('accepts image bytes served as application/octet-stream (Blossom)', function () {
+    Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'application/octet-stream'])]);
+
+    $this->get('/img/avatar?src='.urlencode('https://1.1.1.1/blossom.png'))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'image/webp');
 });
