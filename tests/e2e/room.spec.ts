@@ -82,6 +82,31 @@ test('IMG: Inline-Bild im Chat + Lightbox', async ({ page }) => {
 })
 
 /**
+ * PC (Profil-Cache) — der Seed vom /nostr/profiles-Endpunkt darf NIEMALS Nachrichten
+ * oder die Raum-Mitgliedschaft löschen (Regression: `repository.load` LEERT das
+ * Repository; korrekt ist `repository.publish`). Endpoint gestubbt, damit er ein
+ * echtes kind-0 liefert — genau der Fall, der auf Prod alles wegwischte.
+ */
+test('PC: Profil-Seed löscht weder Nachrichten noch Mitgliedschaft', async ({ page }) => {
+    const kind0 = execFileSync(NAK, [
+        'event', '--sec', ADMIN, '-k', '0',
+        '-c', '{"name":"Seeded Admin","picture":"https://robohash.org/seed.png"}',
+    ]).toString().trim()
+
+    await page.route('**/nostr/profiles*', (route) =>
+        route.fulfill({ contentType: 'application/json', body: JSON.stringify({ events: [JSON.parse(kind0)] }) }),
+    )
+
+    await openRoom(page)
+
+    // Nachrichten bleiben erhalten (load() hätte sie gewischt).
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Danke!', { exact: true })).toBeVisible()
+    // Mitgliedschaft bleibt: Composer sichtbar, kein „Beitreten"-Fallback.
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible()
+})
+
+/**
  * M5 (Senden) — der eingeloggte User ist Mitglied von „welcome", schreibt eine
  * Nachricht über den Composer; sie erscheint optimistisch im eigenen Verlauf,
  * der Composer wird geleert.
