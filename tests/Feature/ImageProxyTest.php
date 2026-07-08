@@ -43,6 +43,14 @@ it('proxies a public image to webp and caches it', function () {
     Http::assertSentCount(1);
 });
 
+it('sends a real user-agent (hosts like wikimedia 403 generic ones)', function () {
+    Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
+
+    $this->get('/img/avatar?src='.urlencode('https://1.1.1.1/a.png'));
+
+    Http::assertSent(fn ($request) => str_contains($request->header('User-Agent')[0] ?? '', 'EinundzwanzigImgProxy'));
+});
+
 it('proxies content presets (msg/full) to webp', function () {
     Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
 

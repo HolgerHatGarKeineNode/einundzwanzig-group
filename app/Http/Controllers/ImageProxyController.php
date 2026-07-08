@@ -93,7 +93,12 @@ class ImageProxyController extends Controller
         try {
             $response = Http::timeout(self::FETCH_TIMEOUT)
                 ->connectTimeout(self::FETCH_TIMEOUT)
-                ->withHeaders(['Accept' => 'image/*'])
+                // Echter UA + Kontakt: manche Hosts (z.B. Wikimedia) 403en generische
+                // Agents wie „GuzzleHttp/7". Mozilla-Prefix + Kontakt-URL passt deren Policy.
+                ->withHeaders([
+                    'Accept' => 'image/*',
+                    'User-Agent' => 'Mozilla/5.0 (compatible; EinundzwanzigImgProxy/1.0; +https://group.einundzwanzig.space)',
+                ])
                 ->withOptions([
                     'curl' => [CURLOPT_MAXFILESIZE => self::MAX_BYTES],
                     'allow_redirects' => [
@@ -151,18 +156,40 @@ class ImageProxyController extends Controller
      */
     private function optimizeGif(string $data, array $spec): string
     {
-        $gifsicle = (new ExecutableFinder)->find('gifsicle');
+        $gifsicle = $this->gifsiclePath();
         if ($gifsicle === null) {
             return $data;
         }
 
-        $result = Process::timeout(self::FETCH_TIMEOUT)
-            ->input($data)
-            ->run([$gifsicle, '-O3', '--lossy=80', '--resize-fit', $spec['w'].'x'.$spec['h'], '--no-warnings']);
+        try {
+            $result = Process::timeout(self::FETCH_TIMEOUT)
+                ->input($data)
+                ->run([$gifsicle, '-O3', '--lossy=80', '--resize-fit', $spec['w'].'x'.$spec['h'], '--no-warnings']);
 
-        $out = $result->output();
+            $out = $result->output();
+            if ($result->successful() && str_starts_with($out, 'GIF8')) {
+                return $out;
+            }
+        } catch (\Throwable) {
+            // proc_open/Timeout/… → Original durchreichen (animiert), nie 502.
+        }
 
-        return ($result->successful() && str_starts_with($out, 'GIF8')) ? $out : $data;
+        return $data;
+    }
+
+    /**
+     * gifsicle-Pfad: absolute Kandidaten zuerst — unter PHP-FPM ist `env[PATH]` oft
+     * leer (Forge kommentiert es aus), dann findet `ExecutableFinder` nichts.
+     */
+    private function gifsiclePath(): ?string
+    {
+        foreach (['/usr/bin/gifsicle', '/usr/local/bin/gifsicle'] as $path) {
+            if (is_executable($path)) {
+                return $path;
+            }
+        }
+
+        return (new ExecutableFinder)->find('gifsicle');
     }
 
     private function isSafeUrl(string $url): bool
