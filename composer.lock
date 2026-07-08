@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c3d42a4cc36c64125bd88b793922bac9",
+    "content-hash": "9ddeca9aa4aa8f2abe26b3d82cd516a4",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -769,8 +769,8 @@
             "version": "dev-master",
             "dist": {
                 "type": "path",
-                "url": "packages/nostr-chat",
-                "reference": "90eafec1ab53f8f29cb013fba2b1839f7704d855"
+                "url": "packages/einundzwanzig-group",
+                "reference": "d04222f13ab1dafcf1d8cd9a7c9f4e1dcad20642"
             },
             "require": {
                 "illuminate/console": "^13.0",
@@ -784,13 +784,13 @@
             "extra": {
                 "laravel": {
                     "providers": [
-                        "App\\Chat\\ChatServiceProvider"
+                        "Einundzwanzig\\Group\\GroupServiceProvider"
                     ]
                 }
             },
             "autoload": {
                 "psr-4": {
-                    "App\\Chat\\": "src/"
+                    "Einundzwanzig\\Group\\": "src/"
                 }
             },
             "license": [

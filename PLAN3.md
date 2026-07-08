@@ -8,7 +8,7 @@
 - **Scope = reine UX-/Design-Politur.** Nur der **bestehende kind-9 Text-Chat** wird perfektioniert. **KEINE neuen Nostr-Kinds/-Features** — kein Reactions (kind 7), kein Media-Upload (Blossom), keine Threads, keine Zaps, keine DMs. Diese bleiben wie in PLAN.md §1 ausgeschlossen.
 - **Design-Umfang = ganze App inkl. Web-Landing.** Community-Kern (Chat/Directory/Spaces/Settings/Login/Join) **plus** Web-Landing (`/`), Fehlerseiten und globale Flows.
 - **Mobile-Release bleibt außen vor.** Das Chat-Package läuft plattformblind (PLAN2); Design-Fixes hier gelten für Web **und** WebView, aber der NativePHP-Release-Pfad (PLAN2 P4) wird in diesem Plan **nicht** angefasst. Wo ein Fix mobil besonders greift (Safe-Area, `h-dvh`, Touch-Ziele, Tastatur), ist das vermerkt — es ist Design-Korrektheit, kein Release-Schritt.
-- **Design-System ist gesetzt (PLAN §12).** Inconsolata, Bitcoin-Brand-Ramp, Token/Utilities in `packages/nostr-chat/resources/css/theme.css`. **Farben/Fonts NICHT neu erfinden** — die Arbeit ist konsistente Anwendung, echte Zustände, Motion, A11y.
+- **Design-System ist gesetzt (PLAN §12).** Inconsolata, Bitcoin-Brand-Ramp, Token/Utilities in `packages/einundzwanzig-group/resources/css/theme.css`. **Farben/Fonts NICHT neu erfinden** — die Arbeit ist konsistente Anwendung, echte Zustände, Motion, A11y.
 - **Flux-Pflicht (PLAN §1)** bleibt bindend: kein rohes `<button>/<input>/<select>`, wo ein Flux-Pendant existiert.
 - **Web UND Native-Mobile aus denselben Views** — bindendes Grundprinzip, gilt für jede Design-Änderung in diesem Plan: eine Blade-Datei, plattform-spezifische Teile per Seam getrennt, **nicht** per Datei-Fork. Siehe **§Web+Mobile** unten; der Absatz „Konsequenz für die D-Phasen" markiert, welche Fixes Web-only, Mobile-besonders oder plattformneutral sind.
 
@@ -127,8 +127,8 @@ Der vom Auftraggeber betonte Kern („Auto-Scroll runter zur letzten Nachricht u
 | Gap | Ist-Zustand | Fix | Sev | Aufw |
 |---|---|---|---|---|
 | **Logout fehlt auf Settings-Tab** (`settings/⚡space.blade.php:12`) | Header hat nur `subtitle`, kein `nostrAuth`/Abmelden. Flow Home→Login→Space→Settings→Logout bricht; Logout nur im Räume-Header. | `x-data="nostrAuth"` + `actions`-Slot mit Abmelden-Button (analog `⚡spaces:22`). `doLogout()` existiert. | hoch | S |
-| **Bottom-Nav-Tabs mit Zurück-Pfeil aufeinander** (`⚡directory.blade.php:13`, `settings/⚡space.blade.php:12`) | `:back="route('chat.spaces')"` auf gleichrangigen Tabs signalisiert falsche Hierarchie (nur `⚡spaces` nutzt Brand-Header). | `:back` weglassen, Brand-Mark-Header wie `⚡spaces`. Bottom-Nav ist das Modell. | mittel | S |
-| **Keine Marken-Fehlerseiten** (`resources/views/errors` fehlt) | Kein `errors/`-Verzeichnis → 404/500/503 landen auf Laravels hell-weißer Default-Seite (App ist dark-only), ohne Rückweg. | `errors/{404,500,503}.blade.php` mit `chat::einundzwanzig`-Layout + `<x-chat::app-brand-mark>` + „Zurück zur Startseite" (`route('home')`, `wire:navigate`). | mittel | M |
+| **Bottom-Nav-Tabs mit Zurück-Pfeil aufeinander** (`⚡directory.blade.php:13`, `settings/⚡space.blade.php:12`) | `:back="route('group.spaces')"` auf gleichrangigen Tabs signalisiert falsche Hierarchie (nur `⚡spaces` nutzt Brand-Header). | `:back` weglassen, Brand-Mark-Header wie `⚡spaces`. Bottom-Nav ist das Modell. | mittel | S |
+| **Keine Marken-Fehlerseiten** (`resources/views/errors` fehlt) | Kein `errors/`-Verzeichnis → 404/500/503 landen auf Laravels hell-weißer Default-Seite (App ist dark-only), ohne Rückweg. | `errors/{404,500,503}.blade.php` mit `group::einundzwanzig`-Layout + `<x-group::app-brand-mark>` + „Zurück zur Startseite" (`route('home')`, `wire:navigate`). | mittel | M |
 | **Login-Buttons ohne Lade-Feedback** (`⚡nostr-login.blade.php:40-69`) | `::disabled="busy"` mit statischem Text; NIP-46/Bunker dauert Sekunden → toter Button. | `busy` an Label/Spinner koppeln (`x-text="busy ? 'Verbinde…' : …"`), konsistent zu Composer/Amber-Tab. | mittel | S |
 | **`nostr-smoke` öffentlich & off-brand** (`routes/web.php:8`) | Debug-Screen ohne Auth öffentlich/indexierbar, technische Copy. | Route entfernen **oder** hinter `auth`/`app()->environment('local')`. Kommentar markiert sie bereits als „temporär". | niedrig | S |
 | **Empty-Space-Liste ist Sackgasse** (`settings/⚡space.blade.php:21`) | Nur Icon+Text „Du bist noch keinem Space beigetreten." — keine CTA. | Primär-Aktion zum Vereinsbeitritt (`verein.einundzwanzig.space`) bzw. `route('home')`, analog `verein-gate`. | niedrig | S |
@@ -154,7 +154,7 @@ Der vom Auftraggeber betonte Kern („Auto-Scroll runter zur letzten Nachricht u
 | Unterschied ist… | Vorgehen | Beispiel |
 |---|---|---|
 | ein kleiner Block/Attribut | **Inline-Seam** `@mobile`/`@web` in **derselben** Datei | Safe-Area-Extra, native Share-Button vs. Web-Link |
-| native-gerenderte Chrome (`<native:*>`) | **dieselbe** Datei, `<native:*>` in `@mobile` + HTML/Flux in `@web` | native Bottom-Nav vs. `x-chat::bottom-nav` |
+| native-gerenderte Chrome (`<native:*>`) | **dieselbe** Datei, `<native:*>` in `@mobile` + HTML/Flux in `@web` | native Bottom-Nav vs. `x-group::bottom-nav` |
 | ganze Shell/Layout **+** Guard | **getrennte Dateien** (bereits erledigt) | `layouts/web` vs. Portal-`layouts/mobile`; NIP-98-Gate vs. lokales Präsenz-Gate |
 | PHP-Logik mit nativen Facades | **guarden**, nicht forken | `config('nativephp-internal.running')` (Server) · `function_exists('nativephp_call')` (Facade-Call) · `window.__nostrMobile` (JS) |
 

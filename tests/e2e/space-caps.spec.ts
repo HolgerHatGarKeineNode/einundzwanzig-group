@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { spaceSupportsRooms } from '../../packages/nostr-chat/js/relayCaps'
+import { spaceSupportsRooms } from '../../packages/einundzwanzig-group/js/relayCaps'
 
 /**
  * Space-Filter (NIP-29): nur Group-Relays dürfen in der Auswahl stehen. Reiner

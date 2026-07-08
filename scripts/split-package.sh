@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# split-package.sh — schneidet packages/nostr-chat als eigenständige Historie
+# split-package.sh — schneidet packages/einundzwanzig-group als eigenständige Historie
 # heraus (git subtree split) und pusht sie force in ein schlankes, read-only
 # Distributions-Repo. Nötig NUR, wenn ein Fremdhost das Package via Composer-VCS
 # (statt lokalem Path-Repo) beziehen soll — Composer kann kein Repo-Unterverzeichnis
@@ -18,7 +18,7 @@
 #
 set -euo pipefail
 
-PREFIX="packages/nostr-chat"
+PREFIX="packages/einundzwanzig-group"
 REMOTE="${1:-${SPLIT_REMOTE:-}}"
 BRANCH="${2:-main}"
 SPLIT_BRANCH="__nostr-chat-split"

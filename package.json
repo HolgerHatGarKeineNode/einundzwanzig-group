@@ -8,7 +8,7 @@
         "test:e2e": "playwright test"
     },
     "dependencies": {
-        "@einundzwanzig/nostr-chat-island": "file:packages/nostr-chat",
+        "@einundzwanzig/group": "file:packages/einundzwanzig-group",
         "@fontsource/inconsolata": "^5.2.8",
         "@laravel/passkeys": "^0.2.0",
         "@tailwindcss/vite": "^4.1.11",

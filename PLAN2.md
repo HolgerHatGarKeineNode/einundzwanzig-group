@@ -15,9 +15,9 @@
 | Phase | Status | Ergebnis / nächster Schritt |
 |---|---|---|
 | **Planung & Entscheidungen** | ✅ **fertig** | Strategie-Pivot (Chat-Package-Tab statt eigener App), Architektur, Verteil-Mechanik, Reibungspunkte & Portier-Inventar — dieses Dokument. |
-| **P0** — Package-Skelett + `App\Chat\`-Umzug | ✅ **fertig** | `packages/nostr-chat` (path-repo, `App\Chat\`, `chat::`-Views, `x-chat::`-Komponenten, `chat.*`-Routen). ChatServiceProvider (Routen+`web`+CSP, Views, Config-Merge, `nostr.auth`-Alias, warm-cache-Schedule). Web-Client dogfooded, Suite grün 48/48, Dev-Server läuft (CSP gibt Vite-Origin via `public/hot` frei). Commit `be186cd`. |
-| **P1** — Portal-Integration (lokal via Path-Repo) | ✅ **fertig** (Emulator-Run offen) | Package **`einundzwanzig/group`** (umbenannt, wie das Repo). Portal (`einundzwanzig-mobile-app`) requiret es via Composer **path-repo** auf den Nachbar-Ordner → 9 `chat.*`-Routen. Insel als `@einundzwanzig/nostr-chat-island` (`link:`, yarn-Symlink) + eigenes Portal-Vite-Entry/Theme + welshman-Chunk. Chat-Nav-Zeile (grid-cols-5), Vollbild-Layout mit host-konfigurierbarem Head (`chat::partials.head`), Zurück-Pfad via `route('home')`. `scripts/split-package.sh` geschrieben (für spätere VCS-Distribution, kein separates Repo nötig). SVG package-owned + `publishes`. `yarn build`/`npm run build` grün in beiden Repos, Chat-Login rendert. **Offen:** echter `native:run`-Emulator-Build (bewusst beim User — hier kein Emulator). Web-Client `4236f43`, Portal `dabc822`. |
-| **P2** — Integration härten | ✅ **fertig** (WebView-Verify offen) | **Reibung 1:** Theme dedupliziert — `packages/nostr-chat/resources/css/theme.css` ist jetzt die **einzige** Quelle (Inconsolata + Brand-Ramp + Tokens/Utilities); beide Hosts importieren sie nur noch (`app.css` via Package-Pfad, Portal-`nostr-chat.css` via `vendor/einundzwanzig/group`) — kein Drift mehr (schließt auch Reibung 7 für CSS). **Reibung 2:** Head/`__nostrSpace` verkabelt — Portal-`config('chat.space_url')` = `wss://group.einundzwanzig.space/` (`NOSTR_SPACE_URL` in Portal-`.env`+`.env.example`), `head_partial='chat::partials.head'` injiziert es vor `@vite`. **Reibung 3 (welshman-Lifecycle):** Design bestätigt — Vollbild-Takeover = eigenes Layout/`<head>` → welshman bootet je Chat-Öffnen neu, bleibt via `wire:navigate` nur *innerhalb* des Chats warm (akzeptiert, §4.3); echter WebView-Reconnect-Verify bleibt beim Emulator-Run (User). **Content-Globs:** `@source` auf `vendor/einundzwanzig/group/resources/views` verifiziert — `surface-card`/`pt-safe`/Brand-Token landen im Portal-Build (nicht gepurgt). `npm run build` grün in beiden Repos. |
+| **P0** — Package-Skelett + `Einundzwanzig\Group\`-Umzug | ✅ **fertig** | `packages/einundzwanzig-group` (path-repo, `Einundzwanzig\Group\`, `group::`-Views, `x-group::`-Komponenten, `chat.*`-Routen). GroupServiceProvider (Routen+`web`+CSP, Views, Config-Merge, `nostr.auth`-Alias, warm-cache-Schedule). Web-Client dogfooded, Suite grün 48/48, Dev-Server läuft (CSP gibt Vite-Origin via `public/hot` frei). Commit `be186cd`. |
+| **P1** — Portal-Integration (lokal via Path-Repo) | ✅ **fertig** (Emulator-Run offen) | Package **`einundzwanzig/group`** (umbenannt, wie das Repo). Portal (`einundzwanzig-mobile-app`) requiret es via Composer **path-repo** auf den Nachbar-Ordner → 9 `chat.*`-Routen. Insel als `@einundzwanzig/group` (`link:`, yarn-Symlink) + eigenes Portal-Vite-Entry/Theme + welshman-Chunk. Chat-Nav-Zeile (grid-cols-5), Vollbild-Layout mit host-konfigurierbarem Head (`group::partials.head`), Zurück-Pfad via `route('home')`. `scripts/split-package.sh` geschrieben (für spätere VCS-Distribution, kein separates Repo nötig). SVG package-owned + `publishes`. `yarn build`/`npm run build` grün in beiden Repos, Chat-Login rendert. **Offen:** echter `native:run`-Emulator-Build (bewusst beim User — hier kein Emulator). Web-Client `4236f43`, Portal `dabc822`. |
+| **P2** — Integration härten | ✅ **fertig** (WebView-Verify offen) | **Reibung 1:** Theme dedupliziert — `packages/einundzwanzig-group/resources/css/theme.css` ist jetzt die **einzige** Quelle (Inconsolata + Brand-Ramp + Tokens/Utilities); beide Hosts importieren sie nur noch (`app.css` via Package-Pfad, Portal-`group.css` via `vendor/einundzwanzig/group`) — kein Drift mehr (schließt auch Reibung 7 für CSS). **Reibung 2:** Head/`__nostrSpace` verkabelt — Portal-`config('group.space_url')` = `wss://group.einundzwanzig.space/` (`NOSTR_SPACE_URL` in Portal-`.env`+`.env.example`), `head_partial='group::partials.head'` injiziert es vor `@vite`. **Reibung 3 (welshman-Lifecycle):** Design bestätigt — Vollbild-Takeover = eigenes Layout/`<head>` → welshman bootet je Chat-Öffnen neu, bleibt via `wire:navigate` nur *innerhalb* des Chats warm (akzeptiert, §4.3); echter WebView-Reconnect-Verify bleibt beim Emulator-Run (User). **Content-Globs:** `@source` auf `vendor/einundzwanzig/group/resources/views` verifiziert — `surface-card`/`pt-safe`/Brand-Token landen im Portal-Build (nicht gepurgt). `npm run build` grün in beiden Repos. |
 | **P3** — Mobile-Signer (Workstream B) | ✅ **fertig** (Gerät-Verify offen) | **Bug behoben:** Auf Mobile ließ `EnsureNostrAuth` durch, aber es gab **kein** client-seitiges Gate → Chat rendete mit „Abmelden"-Kopf ohne Signer (leerer Screen, kein Login). **Fix:** Plattform-Flag `window.__nostrMobile` (aus `nativephp-internal.running`, in beiden Head-Partials); Insel-Präsenz-Gate in `session.ts` (kein pubkey → `/nostr-login`); mobiler Login/Logout überspringt den NIP-98-Handoff (`completeLogin`/`startConnect`/`doLogout`, §7) → direkt `/spaces`. **Signer-Pfade nutzbar:** NIP-46 Bunker + nsec + Amber via `nostrconnect://` (Rückkanal über Signer-Relays, kein Callback nötig — deckt Amber same-device ohne NIP-55-Intent). **Amber-Start = nativer Intent:** die WebView reicht `nostrconnect://` NICHT selbst an externe Apps weiter (ein `<a href>` verpufft) → `Browser::open()` (Plugin `nativephp/mobile-browser`, im Portal installiert) über eine Livewire-Methode (`openAmber`), `function_exists`-guarded (No-op im Web). Build grün beide Repos, Suite 51/51. **Offen (nur am Gerät baubar/testbar):** Verify, dass Android `nostrconnect://` per ACTION_VIEW an Amber routet (sonst echter NIP-55-Intent-Plugin nötig); nsec-Verschlüsselung im SecureStorage-Plugin + Biometrics; echter Emulator-Verify. |
 | **P4** — Release | ⬜ offen | `NATIVEPHP_*`-Env-Abgleich, signiertes AAB, Store-Vorbereitung. |
 
@@ -32,7 +32,7 @@
 | **App-Strategie** | **Nur Chat-in-Portal.** Der Chat wird ausschließlich als Tab in die bestehende Portal-App integriert. Die in PLAN.md geplante eigenständige Group-App (`space.einundzwanzig.group`) **entfällt**. |
 | **Chat-UX im Portal** | **Vollbild-Takeover.** Öffnet man den „Chat"-Tab, übernimmt der Chat den Screen mit **eigenem Layout + eigener Bottom-Nav** (Räume/Mitglieder/Einstellungen) + einem **„Zurück zum Portal"-Pfad**. Der Portal-Tab ist nur der Einstieg. |
 | **Identität / Signer** | **Getrennter Nostr-Login.** Der Nostr-Signer ist unabhängig von der Portal-Identität (Portal-Auth bleibt unberührt). = der echte, noch **ungebaute** M8-Kern. |
-| **Verteilung** | **Composer-/npm-Package, lokal via Path-Repo** (Stand P1, 2026-07-08). Package heißt **`einundzwanzig/group`** (wie das Repo `HolgerHatGarKeineNode/einundzwanzig-group`), lebt in `flotilla-einundzwanzig/packages/nostr-chat`. Web-Client **und** Portal ziehen es als Composer **path-repository** auf den Nachbar-Ordner (Insel als npm-`link:`/`file:`-Dep). Kein separates `einundzwanzig/nostr-chat`-Repo — `scripts/split-package.sh` liegt bereit, falls später VCS-Distribution nötig wird. „Immer wieder einpflegen" = `composer/yarn update` (bei co-located Repos automatisch über den Symlink). |
+| **Verteilung** | **Composer-/npm-Package, lokal via Path-Repo** (Stand P1, 2026-07-08). Package heißt **`einundzwanzig/group`** (wie das Repo `HolgerHatGarKeineNode/einundzwanzig-group`), lebt in `flotilla-einundzwanzig/packages/einundzwanzig-group`. Web-Client **und** Portal ziehen es als Composer **path-repository** auf den Nachbar-Ordner (Insel als npm-`link:`/`file:`-Dep). Kein separates `einundzwanzig/nostr-chat`-Repo — `scripts/split-package.sh` liegt bereit, falls später VCS-Distribution nötig wird. „Immer wieder einpflegen" = `composer/yarn update` (bei co-located Repos automatisch über den Symlink). |
 
 ---
 
@@ -61,49 +61,49 @@
 
 ```
 flotilla-einundzwanzig/                 ← Web-Client, Source of Truth, Konsument (Dogfooding)
-├── packages/nostr-chat/                ← NEU: Laravel-Package (Composer path-repo)
+├── packages/einundzwanzig-group/                ← NEU: Laravel-Package (Composer path-repo)
 │   ├── composer.json                   (einundzwanzig/nostr-chat, ServiceProvider, flux-pro-Repo!)
-│   ├── src/                            App\Chat\… — SpaceCache, WarmNostrCache, EnsureNostrAuth,
+│   ├── src/                            Einundzwanzig\Group\… — SpaceCache, WarmNostrCache, EnsureNostrAuth,
 │   │                                   NostrAuthController, ContentSecurityPolicy, ServiceProvider
-│   ├── routes/chat.php                 chat.*-Routen (loadRoutesFrom im Provider)
-│   ├── config/chat.php                 (mergeConfigFrom)
-│   ├── resources/views/                chat::-Namespace — pages, Vollbild-Layout, Komponenten
-│   └── resources/js/  ────────────────▶ eigenes npm-Package @einundzwanzig/nostr-chat-island
+│   ├── routes/group.php                 chat.*-Routen (loadRoutesFrom im Provider)
+│   ├── config/group.php                 (mergeConfigFrom)
+│   ├── resources/views/                group::-Namespace — pages, Vollbild-Layout, Komponenten
+│   └── resources/js/  ────────────────▶ eigenes npm-Package @einundzwanzig/group
 │                                        (bridge/core/session/groups/members/feeds/…)
 ├── scripts/split-package.sh            git subtree split → read-only Repo einundzwanzig/nostr-chat
-└── (Rest: Web-Client requiret packages/nostr-chat via path-repo)
+└── (Rest: Web-Client requiret packages/einundzwanzig-group via path-repo)
 
 einundzwanzig-mobile-app/               ← Portal-App, Host
 ├── composer.json      + require einundzwanzig/nostr-chat  (VCS → github einundzwanzig/nostr-chat)
-├── package.json       + @einundzwanzig/nostr-chat-island (git-Dep) + @welshman/* + svelte + qrcode
+├── package.json       + @einundzwanzig/group (git-Dep) + @welshman/* + svelte + qrcode
 ├── vite.config.js     + Island-Entry + manualChunks(welshman)
 ├── resources/css/app.css   + @import chat-Theme (gescopet)
 ├── routes/web.php     + require chat-Routen ODER Provider erledigt es
 └── resources/views/layouts/mobile.blade.php  + 1 Zeile:
-        <x-bottom-nav-item route="chat.spaces" icon="chat-bubble-left-right" :label="__('Chat')"/>
+        <x-bottom-nav-item route="group.spaces" icon="chat-bubble-left-right" :label="__('Chat')"/>
 ```
 
 **Verteil-Mechanik (Subtree-Split):** Composer kann kein Repo-Unterverzeichnis requiren. Deshalb:
-1. `packages/nostr-chat` lebt im Web-Client-Repo (dort editiert, dort getestet).
+1. `packages/einundzwanzig-group` lebt im Web-Client-Repo (dort editiert, dort getestet).
 2. Der Web-Client requiret es lokal via **Composer path-repository** (Dogfooding → jede Änderung sofort im Web verifiziert).
-3. `./scripts/split-package.sh` = `git subtree split --prefix=packages/nostr-chat` → force-push in ein schlankes read-only Repo `einundzwanzig/nostr-chat`.
+3. `./scripts/split-package.sh` = `git subtree split --prefix=packages/einundzwanzig-group` → force-push in ein schlankes read-only Repo `einundzwanzig/nostr-chat`.
 4. Portal requiret via **Composer VCS** (`"repositories": [{"type":"vcs","url":"…/einundzwanzig/nostr-chat"}]`) + versionstag/branch.
 5. JS-Insel analog: eigenes `package.json` im Split, Portal zieht als git-npm-Dep (oder GitHub Packages).
-6. Upgrade-Zyklus: im Web-Client entwickeln → `split-package.sh` → im Portal `composer update einundzwanzig/nostr-chat && yarn up @einundzwanzig/nostr-chat-island && yarn build`.
+6. Upgrade-Zyklus: im Web-Client entwickeln → `split-package.sh` → im Portal `composer update einundzwanzig/nostr-chat && yarn up @einundzwanzig/group && yarn build`.
 
 ---
 
 ## 4. Reibungspunkte / zu lösende Schwierigkeiten
 
 1. **Zwei Design-Systeme in einer App.** Portal: „Instrument Sans" + eigenes Theme. Chat: Inconsolata + Brand-Ramp + eigene Utilities. Tailwind v4 ist global → Chat-`--font-sans`/Utilities dürfen das Portal nicht überschreiben. **Lösung:** Chat-CSS als eigener `@layer`/gescopeter `@import`, wirksam nur im Chat-Teilbaum (geht dank Vollbild-Takeover). CSS ist der eine Teil, den ein Package **nicht** voll kapseln kann — Host muss `@import` setzen. Tailwind-**Content-Globs** des Portals müssen die Chat-Views/-Package-Pfade einschließen, sonst purged Tailwind die Chat-Klassen.
-2. **`partials/head.blade.php`-Kollision.** Der Web-Client injiziert `window.__nostrSpace` **vor** `@vite` in *seine* head-Partial; das Portal hat eine eigene. Das Package darf sie nicht überschreiben. **Lösung:** Der Vollbild-Chat bringt sein eigenes `<head>` über sein eigenes Layout mit (Island-`@vite` + `__nostrSpace`-Injektion aus `config('chat.space_url')`), statt in die Portal-head zu patchen.
+2. **`partials/head.blade.php`-Kollision.** Der Web-Client injiziert `window.__nostrSpace` **vor** `@vite` in *seine* head-Partial; das Portal hat eine eigene. Das Package darf sie nicht überschreiben. **Lösung:** Der Vollbild-Chat bringt sein eigenes `<head>` über sein eigenes Layout mit (Island-`@vite` + `__nostrSpace`-Injektion aus `config('group.space_url')`), statt in die Portal-head zu patchen.
 3. **welshman-Lifecycle beim Tab-Wechsel.** Portal navigiert per `wire:navigate`. Vollbild-Takeover mit *eigenem* Layout = harte Grenze → welshman re-initialisiert je Chat-Öffnen (WebSocket-Reconnect, NIP-42-AUTH-Neu-Handshake). „Warm bleiben" widerspräche dem eigenen Layout. **Für Mobile akzeptabel** (man ist entweder im Chat oder nicht) — dokumentieren, ggf. später optimieren.
 4. **`/`-Route & `nostr-smoke` gehören NICHT ins Package.** Web-only. Package shippt nur den Chat-Kern: `spaces`/`directory`/`room`/`join`/`settings.space` + `nostr-login` (+ die 3 `/nostr/*`-Handoff-Routen, auf Mobile faktisch tot → per Config abschaltbar).
 5. **Flux-Pro-Repo im Package.** `einundzwanzig/nostr-chat/composer.json` muss das `composer.fluxui.dev`-Repository deklarieren, sonst installiert es standalone nicht (auch wenn das Portal Flux schon hat).
 6. **Deep-Link-Scheme teilen.** Portal nutzt Scheme `einundzwanzig` / Host `portal.einundzwanzig.space` für Portal-Auth-Callbacks. NIP-46/`nostrconnect`- **und** NIP-55/Amber-Rückkanal wollen auch Deep-Links → über getrennte `deeplink_path_prefixes` koexistieren, sonst landet ein Signer-Callback im Portal-Auth-Handler.
 7. **Sync-Richtung/Drift.** Nur eine Richtung (Web-Client → Portal). Der Split ist read-only; Edits im Portal-`vendor` werden beim nächsten `composer update` überschrieben. Regel: **Chat-Code niemals im Portal editieren, immer upstream im Web-Client.**
 8. **Tests reisen nicht mit.** Die E2E booten einen hermetischen In-Process-zooid via `window.__nostrRelays`; Pest-Browser nutzt Host-Chromium. → Chat **upstream** testen, ins Portal nur das gebaute Artefakt shippen.
-9. **CSP-Middleware ist generisch benannt.** `App\Http\Middleware\ContentSecurityPolicy` → im Package auf `App\Chat\Http\Middleware\…` umbenennen und **nur auf Chat-Routen** anwenden (nicht global an die Portal-web-Group appenden).
+9. **CSP-Middleware ist generisch benannt.** `App\Http\Middleware\ContentSecurityPolicy` → im Package auf `Einundzwanzig\Group\Http\Middleware\…` umbenennen und **nur auf Chat-Routen** anwenden (nicht global an die Portal-web-Group appenden).
 
 ---
 
@@ -124,7 +124,7 @@ Unabhängig vom Package. Ohne mind. einen funktionierenden Pfad ist der Chat auf
 
 | Phase | Inhalt | Workstream | Aufwand |
 |---|---|---|---|
-| **P0** | Package-Skelett + `App\Chat\`-Namespace-Umzug + `chat::`-Views im Web-Client; ServiceProvider (Routen/Views/Config/Alias/Schedule/Assets); Web-Client dogfoodet via path-repo; **Suite grün halten**. | A | ~1 Tag |
+| **P0** | Package-Skelett + `Einundzwanzig\Group\`-Namespace-Umzug + `group::`-Views im Web-Client; ServiceProvider (Routen/Views/Config/Alias/Schedule/Assets); Web-Client dogfoodet via path-repo; **Suite grün halten**. | A | ~1 Tag |
 | **P1** | `split-package.sh` (subtree split → `einundzwanzig/nostr-chat`); Portal requiret Package; Chat-Tab (1 Nav-Zeile) + Vollbild-Layout + „Zurück"-Pfad; Build im Emulator. | A | ~1 Tag |
 | **P2** | CSS/Theme-Scoping (Reibung 1), `__nostrSpace`/Head-Integration (Reibung 2), welshman-Lifecycle im WebView verifizieren (Reibung 3), Tailwind-Content-Globs. | A | ~1 Tag |
 | **P3** | **Mobile-Signer**: NIP-46 (+ Deep-Link-Callback) → Amber/NIP-55 → nsec/SecureStorage+Biometrics. Deep-Link-Prefixes (Reibung 6). | B | mehrere Tage, größte Unbekannte |
@@ -136,7 +136,7 @@ Unabhängig vom Package. Ohne mind. einen funktionierenden Pfad ist der Chat auf
 
 ## 7. Offene Fragen / vor dem Bauen zu klären
 
-- ~~**Prod-Space-URL:**~~ ✅ **geklärt (P2):** `NOSTR_SPACE_URL=wss://group.einundzwanzig.space/` im Portal-`.env`+`.env.example`; `config('chat.space_url')` löst korrekt auf. Für den NativePHP-Build noch ins Bundle-`.env` übernehmen (P4).
+- ~~**Prod-Space-URL:**~~ ✅ **geklärt (P2):** `NOSTR_SPACE_URL=wss://group.einundzwanzig.space/` im Portal-`.env`+`.env.example`; `config('group.space_url')` löst korrekt auf. Für den NativePHP-Build noch ins Bundle-`.env` übernehmen (P4).
 - **npm-Insel-Distribution:** git-Dep vs. GitHub Packages vs. npm-Publish — beim ersten Portal-Pull entscheiden (git-Dep = am wenigsten Setup).
 - **Versionierung:** Package-Tags (semver) vs. Branch-Tracking beim Portal-`require`. Empfehlung: Branch (`main`) beim Split für schnelle Iteration, Tags erst ab Store-Release.
 - **iOS:** Amber (NIP-55) ist Android-only. iOS-Signer = NIP-46. iOS-Build nur auf macOS (`native:jump` aufs Gerät). Ist iOS überhaupt Zielplattform, oder Android-first?
@@ -146,25 +146,25 @@ Unabhängig vom Package. Ohne mind. einen funktionierenden Pfad ist der Chat auf
 
 ## 8. Portier-Inventar (Stand 2026-07-07)
 
-Was ins Package `packages/nostr-chat` wandert bzw. im Portal integriert wird. `App\Chat\`-Namespace + `chat::`-View-Namespace + `chat/`-JS-Verzeichnis eliminieren die meisten Kollisionen.
+Was ins Package `packages/einundzwanzig-group` wandert bzw. im Portal integriert wird. `Einundzwanzig\Group\`-Namespace + `group::`-View-Namespace + `chat/`-JS-Verzeichnis eliminieren die meisten Kollisionen.
 
 ### (a) Reine Feature-Dateien → ins Package (1:1, nur Namespace anpassen)
 - **JS-Insel:** `resources/js/nostr/{app.ts,core.ts,bridge.ts,session.ts,groups.ts,members.ts,feeds.ts,repository.ts,signer-health.ts,toast.ts,qrcode.d.ts}` → npm-Package. `bridge.ts` (1023 Z.) registriert 8 Alpine-Komponenten (`nostrSpaces`, `nostrDirectory`, `nostrRoomChat`, `nostrSpaceSettings`, `nostrInvite`, `nostrAuth`, `nostrSignerBanner`, `nostrSmoke`).
 - **PHP:** `app/Nostr/SpaceCache.php`, `app/Console/Commands/WarmNostrCache.php`, `app/Http/Middleware/EnsureNostrAuth.php`, `app/Http/Controllers/NostrAuthController.php` (NIP-98), `app/Http/Middleware/ContentSecurityPolicy.php` (⚠ umbenennen + route-scopen).
-- **Views:** `pages/⚡{spaces,directory,room,join,nostr-login}.blade.php`, `pages/settings/⚡space.blade.php`, `layouts/einundzwanzig.blade.php`, `components/{app-brand-mark,app-header,bottom-nav}.blade.php` (⚠ `app-header`/`bottom-nav` in `chat::`/`x-chat.*` umbenennen — Kollisionsrisiko mit Portal-Komponenten).
-- **Config:** `config/nostr.php` → `config/chat.php`.
+- **Views:** `pages/⚡{spaces,directory,room,join,nostr-login}.blade.php`, `pages/settings/⚡space.blade.php`, `layouts/einundzwanzig.blade.php`, `components/{app-brand-mark,app-header,bottom-nav}.blade.php` (⚠ `app-header`/`bottom-nav` in `group::`/`x-group.*` umbenennen — Kollisionsrisiko mit Portal-Komponenten).
+- **Config:** `config/nostr.php` → `config/group.php`.
 - **Asset:** `public/img/einundzwanzig-square.svg` (von `app-brand-mark` referenziert).
 - **NICHT ins Package:** `pages/⚡home.blade.php` (Web-Landing), `pages/⚡nostr-smoke.blade.php` (M0-Smoke) — bleiben Web-Client-only.
 
 ### (b) Merge/Integration im Portal (ServiceProvider erledigt das meiste)
 - `composer.json`: `require einundzwanzig/nostr-chat` (bringt `swentel/nostr-php` als Package-Dep mit).
-- `package.json`: `@einundzwanzig/nostr-chat-island` + `@welshman/{app,content,feeds,lib,net,router,signer,store,util}@^0.8.16` + `svelte@^5` + `qrcode` + `@fontsource/inconsolata`. (`nostr-tools` ist im Portal schon — Version gegen welshman prüfen.)
+- `package.json`: `@einundzwanzig/group` + `@welshman/{app,content,feeds,lib,net,router,signer,store,util}@^0.8.16` + `svelte@^5` + `qrcode` + `@fontsource/inconsolata`. (`nostr-tools` ist im Portal schon — Version gegen welshman prüfen.)
 - `vite.config.js`: Island-Entry in `input[]` + `manualChunks`-Block (welshman/nostr-tools → cache-stabiler ~700-KB-Chunk).
 - `resources/css/app.css`: `@import` des Chat-Themes (gescopet, Reibung 1).
-- `resources/views/layouts/mobile.blade.php`: **1 Zeile** `<x-bottom-nav-item route="chat.spaces" …>`.
+- `resources/views/layouts/mobile.blade.php`: **1 Zeile** `<x-bottom-nav-item route="group.spaces" …>`.
 - `routes/web.php` / ServiceProvider: Chat-Routen laden. Tailwind-Content-Globs um Package-Views erweitern.
 
 ### (c) Config / Env im Portal
-- `config/chat.php` (published) + `NOSTR_SPACE_URL`/`chat.space_url` = Prod-Relay.
+- `config/group.php` (published) + `NOSTR_SPACE_URL`/`chat.space_url` = Prod-Relay.
 - `NATIVEPHP_*`: bereits im Portal vorhanden — Werte abgleichen, nichts doppelt anlegen. Deep-Link-Prefixes für Signer-Callback ergänzen (Reibung 6).
 - Die zwei `nativephp-internal.running`-Weichen (`EnsureNostrAuth`, CSP) sind im Portal **sofort wirksam** — nur korrekt übernehmen.

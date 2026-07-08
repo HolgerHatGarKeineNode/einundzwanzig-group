@@ -41,17 +41,17 @@ test('challenge returns a nonce and the login url', function () {
     $this->getJson('/nostr/challenge')
         ->assertOk()
         ->assertJsonStructure(['challenge', 'url'])
-        ->assertJson(['url' => route('chat.nostr.login')]);
+        ->assertJson(['url' => route('group.nostr.login')]);
 });
 
 test('valid nip98 event authenticates the pubkey', function () {
     $challenge = 'challenge-'.str_repeat('a', 54);
-    $event = signHttpAuth(route('chat.nostr.login'), 'POST', $challenge);
+    $event = signHttpAuth(route('group.nostr.login'), 'POST', $challenge);
 
     $this->withSession([
         'nostr_challenge' => $challenge,
         'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('chat.nostr.login'), ['event' => $event])
+    ])->postJson(route('group.nostr.login'), ['event' => $event])
         ->assertOk()
         ->assertJson(['ok' => true, 'pubkey' => $event['pubkey']]);
 
@@ -60,32 +60,32 @@ test('valid nip98 event authenticates the pubkey', function () {
 
 test('tampered signature is rejected', function () {
     $challenge = 'challenge-'.str_repeat('b', 54);
-    $event = signHttpAuth(route('chat.nostr.login'), 'POST', $challenge);
+    $event = signHttpAuth(route('group.nostr.login'), 'POST', $challenge);
     $event['sig'] = str_repeat('0', 128);
 
     $this->withSession([
         'nostr_challenge' => $challenge,
         'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('chat.nostr.login'), ['event' => $event])
+    ])->postJson(route('group.nostr.login'), ['event' => $event])
         ->assertStatus(422);
 
     expect(session('nostr_pubkey'))->toBeNull();
 });
 
 test('wrong challenge is rejected', function () {
-    $event = signHttpAuth(route('chat.nostr.login'), 'POST', 'signed-with-other');
+    $event = signHttpAuth(route('group.nostr.login'), 'POST', 'signed-with-other');
 
     $this->withSession([
         'nostr_challenge' => 'server-expects-this',
         'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('chat.nostr.login'), ['event' => $event])
+    ])->postJson(route('group.nostr.login'), ['event' => $event])
         ->assertStatus(422);
 
     expect(session('nostr_pubkey'))->toBeNull();
 });
 
 test('gate redirects guests to login', function () {
-    $this->get('/spaces')->assertRedirect(route('chat.nostr-login'));
+    $this->get('/spaces')->assertRedirect(route('group.nostr-login'));
 });
 
 test('gate allows authenticated pubkey', function () {
@@ -115,14 +115,14 @@ test('nostr-login renders the client-side Amber flow (no server round-trip)', fu
     // (Browser.Open) geöffnet — kein Livewire-Roundtrip, der den ersten Tap
     // schluckte. Die SFC hat dafür bewusst KEINE Server-Methode mehr; die Seite
     // rendert die Amber-Option client-seitig.
-    Livewire::test('chat::nostr-login')
+    Livewire::test('group::nostr-login')
         ->assertOk()
         ->assertSee('Amber');
 });
 
 test('logout clears the session', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->postJson(route('chat.nostr.logout'))
+        ->postJson(route('group.nostr.logout'))
         ->assertOk();
 
     expect(session('nostr_pubkey'))->toBeNull();

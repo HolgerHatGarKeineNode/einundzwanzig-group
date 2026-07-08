@@ -9,7 +9,7 @@ declare(strict_types=1);
  * sind — nicht das JS-Verhalten (das deckt Playwright ab).
  */
 test('Space-Seite: First-Paint-Skeleton statt nackter Fläche + echter Räume-Empty-State', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('chat.spaces'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
 
     // Skeleton solange die Space-Meta fehlt (kein x-show="space" mehr am Wrapper).
     $res->assertSee('x-show="!space && loading"', false);
@@ -19,7 +19,7 @@ test('Space-Seite: First-Paint-Skeleton statt nackter Fläche + echter Räume-Em
 });
 
 test('Directory: list-stagger setzt --i pro Karte + Skeleton meldet aria-busy', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('chat.directory'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.directory'))->assertOk();
 
     $res->assertSee('list-stagger', false);
     $res->assertSee('--i:${idx}', false);
@@ -28,7 +28,7 @@ test('Directory: list-stagger setzt --i pro Karte + Skeleton meldet aria-busy', 
 });
 
 test('Raum: Inline-Fehler-Callout mit Retry + aria-busy am Verlauf', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('chat.room', ['h' => 'welcome']))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.room', ['h' => 'welcome']))->assertOk();
 
     // Persistenter Callout statt flüchtigem Toast, mit Retry-Aktion.
     $res->assertSee('x-if="error"', false);
@@ -40,7 +40,7 @@ test('Raum: Inline-Fehler-Callout mit Retry + aria-busy am Verlauf', function ()
 });
 
 test('Space-Einstellungen: ready-Guard verhindert Empty-Flash', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('chat.space.settings'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
 
     // Empty erst nach ready — Skeleton davor (Fix-A-Muster).
     $res->assertSee('x-if="!ready"', false);
@@ -49,7 +49,7 @@ test('Space-Einstellungen: ready-Guard verhindert Empty-Flash', function () {
 });
 
 test('Login: QR-Skeleton statt Plain-Text + Lade-Label an den Buttons', function () {
-    $res = $this->get(route('chat.nostr-login'))->assertOk();
+    $res = $this->get(route('group.nostr-login'))->assertOk();
 
     $res->assertSee('skeleton size-56', false);
     $res->assertSee('Verbinde…');

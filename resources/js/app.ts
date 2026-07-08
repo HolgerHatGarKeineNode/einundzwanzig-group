@@ -1,4 +1,4 @@
-import { registerNostrComponents } from '@einundzwanzig/nostr-chat-island'
+import { registerNostrComponents } from '@einundzwanzig/group'
 
 // Alpine bringt Livewire v4 mit. `alpine:init` feuert vor dem Start — hier
 // registrieren wir die Nostr-Komponenten, sodass `x-data="…"` sie kennt.

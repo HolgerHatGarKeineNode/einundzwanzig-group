@@ -2,10 +2,10 @@
 @import '../../vendor/livewire/flux/dist/flux.css';
 
 /* Chat-Theme: einzige Quelle im Package (PLAN2 Reibung 1). Muss NACH tailwindcss. */
-@import '../../packages/nostr-chat/resources/css/theme.css';
+@import '../../packages/einundzwanzig-group/resources/css/theme.css';
 
 @source '../views';
-@source '../../packages/nostr-chat/resources/views';
+@source '../../packages/einundzwanzig-group/resources/views';
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../vendor/livewire/flux-pro/stubs/**/*.blade.php';
 @source '../../vendor/livewire/flux/stubs/**/*.blade.php';

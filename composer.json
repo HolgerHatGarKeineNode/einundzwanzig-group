@@ -121,7 +121,7 @@
     "repositories": [
         {
             "type": "path",
-            "url": "packages/nostr-chat",
+            "url": "packages/einundzwanzig-group",
             "options": {
                 "symlink": true
             }

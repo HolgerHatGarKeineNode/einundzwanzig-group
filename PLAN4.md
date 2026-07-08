@@ -5,7 +5,7 @@
 
 ### Rahmen (Auftraggeber, 2026-07-08)
 
-- **Stufe 1 zuerst und blockierend:** Das Package `einundzwanzig/group` (heute `packages/nostr-chat/`, nur lokal per `path`-Repo) wird über GitHub via Composer beziehbar, **damit andere Developer ab jetzt mitmachen können.** Für lokales Dev bleibt der Symlink-Weg erhalten — eine **Weiche** wählt automatisch: lokaler Ordner da → Symlink (schnelles Dev), Ordner fehlt → von GitHub.
+- **Stufe 1 zuerst und blockierend:** Das Package `einundzwanzig/group` (heute `packages/einundzwanzig-group/`, nur lokal per `path`-Repo) wird über GitHub via Composer beziehbar, **damit andere Developer ab jetzt mitmachen können.** Für lokales Dev bleibt der Symlink-Weg erhalten — eine **Weiche** wählt automatisch: lokaler Ordner da → Symlink (schnelles Dev), Ordner fehlt → von GitHub.
 - **Danach Branding/Metadaten aus Nostr.** Nostr bleibt Source of Truth: Space-/Raum-Namen & -Bilder, Autor-Profile (Name/Avatar/Meta), NIP-05-Verifizierung, dynamische Head-/OG-/Favicon-Daten.
 - **Scope = nur Anzeige/Lesen.** Wie PLAN3 §Rahmen: **keine neuen publish-Kinds**, keine Zaps/Reactions/Media. Branding liest vorhandene Daten (kind 0, kind 39000, NIP-11-Relay-Info, NIP-05-Handles). NIP-05 ist **Lese-Verifizierung**, kein Schreiben.
 - **Web UND Native-Mobile aus denselben Views** (PLAN3-Grundprinzip) bleibt bindend: eine Blade-Datei, Seam statt Fork.
@@ -15,7 +15,7 @@
 
 | Phase | Fokus | Status | Kern-Inhalt |
 |---|---|---|---|
-| **P1** — Package-Öffnung: Composer/GitHub + Symlink-Weiche | **blockierend, zuerst** | ✅ **fertig** | Package in **eigenes Repo** `HolgerHatGarKeineNode/einundzwanzig-group-package` (Branch `master`, History via subtree split erhalten) ausgelagert. Root-`composer.json`: `path`-zuerst-`vcs`-danach, Require `einundzwanzig/group: dev-master`. Ordner `packages/nostr-chat` gitignored, lokal als eigenständiger Clone (Symlink-Dev). Beide Weichenstellungen verifiziert (path=Symlink lokal, vcs=`dev-master` bei Fremd-Clone trotz `minimum-stability: stable`). `CONTRIBUTING.md` erklärt das Setup. 16 Package-Tests grün, `npm run build` grün. |
+| **P1** — Package-Öffnung: Composer/GitHub + Symlink-Weiche | **blockierend, zuerst** | ✅ **fertig** | Package in **eigenes Repo** `HolgerHatGarKeineNode/einundzwanzig-group-package` (Branch `master`, History via subtree split erhalten) ausgelagert. Root-`composer.json`: `path`-zuerst-`vcs`-danach, Require `einundzwanzig/group: dev-master`. Ordner `packages/einundzwanzig-group` gitignored, lokal als eigenständiger Clone (Symlink-Dev). Beide Weichenstellungen verifiziert (path=Symlink lokal, vcs=`dev-master` bei Fremd-Clone trotz `minimum-stability: stable`). `CONTRIBUTING.md` erklärt das Setup. 16 Package-Tests grün, `npm run build` grün. |
 | **B1** — Space-Identität & -Branding | | ⬜ offen | Space-Name/-Icon aus **NIP-11**-Relay-Info statt nackter URL; Header „Space" → echter Name. |
 | **B2** — Raum-Metadaten vollständig (kind 39000) | | ⬜ offen | `picture`/Zugriffs-Flags aus `readRoomMeta` durchreichen (Client **und** Server-Cache); Raum-Avatar im Header & Raumliste; Zugriffs-Badges. |
 | **B3** — Autor-Profile: Lücken schließen | Kür | ⬜ offen | Profil-Karte bei Klick (about/website/banner/display_name); `deriveProfileDisplay` statt manuellem Join. |
@@ -29,10 +29,10 @@
 
 ## P1 — Package-Öffnung: Composer/GitHub + Symlink-Weiche  *(zuerst, blockierend)* — ✅ umgesetzt
 
-> **Ist-Umsetzung (Abweichung vom ursprünglichen Plan):** Der geplante „Package-Branch im selben Monorepo" ist mit Composer **nicht** möglich — ein `vcs`-Repo liefert genau **ein** Paket, benannt nach dem **Default-Branch**. Da dessen `master` die App (`laravel/livewire-starter-kit`) ist, wird ein Branch mit abweichendem Paketnamen still verworfen (verifiziert per `composer -vvv`: „Reading composer.json of laravel/livewire-starter-kit (master)"). Deshalb: **eigenes Repo** `HolgerHatGarKeineNode/einundzwanzig-group-package`, Default-Branch `master`, Composer-Require `dev-master`. Lokaler `packages/nostr-chat`-Ordner = eigenständiger **Clone** (nicht Worktree). Alles andere (path-zuerst-vcs-Weiche, gitignore, Symlink-Dev) wie geplant. Paketname bleibt `einundzwanzig/group`; PHP-Namespace `App\Chat\` unverändert.
+> **Ist-Umsetzung (Abweichung vom ursprünglichen Plan):** Der geplante „Package-Branch im selben Monorepo" ist mit Composer **nicht** möglich — ein `vcs`-Repo liefert genau **ein** Paket, benannt nach dem **Default-Branch**. Da dessen `master` die App (`laravel/livewire-starter-kit`) ist, wird ein Branch mit abweichendem Paketnamen still verworfen (verifiziert per `composer -vvv`: „Reading composer.json of laravel/livewire-starter-kit (master)"). Deshalb: **eigenes Repo** `HolgerHatGarKeineNode/einundzwanzig-group-package`, Default-Branch `master`, Composer-Require `dev-master`. Lokaler `packages/einundzwanzig-group`-Ordner = eigenständiger **Clone** (nicht Worktree). Alles andere (path-zuerst-vcs-Weiche, gitignore, Symlink-Dev) wie geplant. Paketname bleibt `einundzwanzig/group`; PHP-Namespace `Einundzwanzig\Group\` unverändert.
 
 **Ausgangslage (verifiziert):**
-- Package `einundzwanzig/group` (Namespace `App\Chat\`, Provider `App\Chat\ChatServiceProvider`) liegt in `packages/nostr-chat/`, **committed im Monorepo**, eingebunden per `path`-Repo mit `symlink: true` (`composer.json:121-128`), Root-Require `einundzwanzig/group: *` (`composer.json:13`).
+- Package `einundzwanzig/group` (Namespace `Einundzwanzig\Group\`, Provider `Einundzwanzig\Group\GroupServiceProvider`) liegt in `packages/einundzwanzig-group/`, **committed im Monorepo**, eingebunden per `path`-Repo mit `symlink: true` (`composer.json:121-128`), Root-Require `einundzwanzig/group: *` (`composer.json:13`).
 - **Kein** separates Package-Repo. `origin` des Haupt-Repos ist `git@github.com:HolgerHatGarKeineNode/einundzwanzig-group.git` — das ist die **ganze App** (`composer.json` name `laravel/livewire-starter-kit`, type `project`), **nicht** das Package.
 - `.gitignore` ignoriert bisher nur `/vendor`.
 
@@ -44,42 +44,42 @@
 composer.json (master / App):
   "require": { "einundzwanzig/group": "dev-package" , ... }
   "repositories": [
-    { "type": "path", "url": "packages/nostr-chat",           // 1) gewinnt WENN Ordner existiert
+    { "type": "path", "url": "packages/einundzwanzig-group",           // 1) gewinnt WENN Ordner existiert
       "options": { "symlink": true } },
     { "type": "vcs",  "url": "git@github.com:HolgerHatGarKeineNode/einundzwanzig-group.git" }, // 2) Fallback: Branch package → dev-package
     { "name": "flux", "type": "composer", "url": "https://composer.fluxui.dev" }
   ]
 
-.gitignore:  /packages/nostr-chat
+.gitignore:  /packages/einundzwanzig-group
 
-Lokal (Maintainer):  git worktree add packages/nostr-chat package   → Symlink-Dev, Commits direkt auf package-Branch
+Lokal (Maintainer):  git worktree add packages/einundzwanzig-group package   → Symlink-Dev, Commits direkt auf package-Branch
 Fremd-Dev / CI:      composer install  (kein Ordner)                → Package kommt als dev-package von GitHub
 ```
 
-**Warum das ohne Tag-Zwang trägt:** Ist `packages/nostr-chat` ein **git-Checkout des `package`-Branches** (Worktree/Clone), leitet Composer aus dem `path`-Repo automatisch die Version `dev-package` ab — dieselbe, die der `vcs`-Fallback liefert. Damit matcht das Require `dev-package` in **beiden** Weichenstellungen, ohne dass beim Package-Entwickeln getaggt oder ein `version`-Feld gepflegt werden muss. Änderungen sind lokal per Symlink sofort live; `git push origin package` macht sie auch für Fremd-Clones sichtbar.
+**Warum das ohne Tag-Zwang trägt:** Ist `packages/einundzwanzig-group` ein **git-Checkout des `package`-Branches** (Worktree/Clone), leitet Composer aus dem `path`-Repo automatisch die Version `dev-package` ab — dieselbe, die der `vcs`-Fallback liefert. Damit matcht das Require `dev-package` in **beiden** Weichenstellungen, ohne dass beim Package-Entwickeln getaggt oder ein `version`-Feld gepflegt werden muss. Änderungen sind lokal per Symlink sofort live; `git push origin package` macht sie auch für Fremd-Clones sichtbar.
 
 ### Schritte
 
 | # | Schritt | Befehl / Datei | Notiz |
 |---|---|---|---|
-| 1 | `package`-Branch mit History erzeugen | `git subtree split --prefix=packages/nostr-chat -b package` | Package-Dateien landen im **Root** des Branches, nur Commits, die `packages/nostr-chat` betreffen. |
-| 2 | `version`-Feld aus Package entfernen | `packages/nostr-chat/composer.json:5` (`"version": "0.1.0"` löschen) | Sonst überschreibt es die aus dem Branch abgeleitete `dev-package`-Version und bricht die Weiche. Muss **auf dem `package`-Branch** passieren. |
+| 1 | `package`-Branch mit History erzeugen | `git subtree split --prefix=packages/einundzwanzig-group -b package` | Package-Dateien landen im **Root** des Branches, nur Commits, die `packages/einundzwanzig-group` betreffen. |
+| 2 | `version`-Feld aus Package entfernen | `packages/einundzwanzig-group/composer.json:5` (`"version": "0.1.0"` löschen) | Sonst überschreibt es die aus dem Branch abgeleitete `dev-package`-Version und bricht die Weiche. Muss **auf dem `package`-Branch** passieren. |
 | 3 | Branch pushen | `git push origin package` | Ab jetzt ist `dev-package` über Composer beziehbar. |
 | 4 | Root-Require umstellen | `composer.json:13` → `"einundzwanzig/group": "dev-package"` | Root darf dev-Versionen direkt requiren (trotz `minimum-stability: stable`). **Verifizieren** (siehe Risiken). |
 | 5 | `vcs`-Repo ergänzen | `composer.json:121-128` (nach `path`, vor/neben `flux`) | URL = `git@github.com:HolgerHatGarKeineNode/einundzwanzig-group.git`. `path` MUSS zuerst stehen (Repository-Priorität = Reihenfolge). |
-| 6 | Package aus master-Tree lösen | `git rm -r --cached packages/nostr-chat` + `.gitignore` → `/packages/nostr-chat` | Dateien bleiben lokal (nur untracked); master trägt das Package nicht mehr. |
-| 7 | Lokalen Symlink-Checkout einrichten | Ordner leeren, dann `git worktree add packages/nostr-chat package` | Worktree auf `package`-Branch; gitignored im master, aber eigenes HEAD. Alternative: `git clone --single-branch -b package <url> packages/nostr-chat`. |
-| 8 | Auflösen & prüfen | `composer update einundzwanzig/group -W` | Erwartung: Symlink in `vendor/einundzwanzig/group` → `packages/nostr-chat`. Danach in `/tmp` gegenprobieren: frischer Clone **ohne** Ordner zieht `dev-package` von GitHub. |
+| 6 | Package aus master-Tree lösen | `git rm -r --cached packages/einundzwanzig-group` + `.gitignore` → `/packages/einundzwanzig-group` | Dateien bleiben lokal (nur untracked); master trägt das Package nicht mehr. |
+| 7 | Lokalen Symlink-Checkout einrichten | Ordner leeren, dann `git worktree add packages/einundzwanzig-group package` | Worktree auf `package`-Branch; gitignored im master, aber eigenes HEAD. Alternative: `git clone --single-branch -b package <url> packages/einundzwanzig-group`. |
+| 8 | Auflösen & prüfen | `composer update einundzwanzig/group -W` | Erwartung: Symlink in `vendor/einundzwanzig/group` → `packages/einundzwanzig-group`. Danach in `/tmp` gegenprobieren: frischer Clone **ohne** Ordner zieht `dev-package` von GitHub. |
 | 9 | Kurzanleitung | `CONTRIBUTING.md` (Root, neu — nur hier explizit erlaubt) | „Package lokal entwickeln" (Worktree-Setup) vs. „nur App bauen" (nichts tun, Composer zieht GitHub). |
 
 ### Tests / Verifikation
-- **Pest:** `einundzwanzig/group`-Provider lädt (`ChatServiceProvider`), Chat-Routen/Views auflösbar — beweist, dass das Package nach der Umstellung (egal ob Symlink oder vendor) korrekt registriert ist.
+- **Pest:** `einundzwanzig/group`-Provider lädt (`GroupServiceProvider`), Chat-Routen/Views auflösbar — beweist, dass das Package nach der Umstellung (egal ob Symlink oder vendor) korrekt registriert ist.
 - **Manuell (dokumentieren, nicht als Test committen):** frischer `git clone` des Haupt-Repos in `/tmp` **ohne** `package`-Worktree → `composer install` → App bootet mit Package aus `vendor/` (dev-package). Das ist der eigentliche Weichen-Beweis.
 
 ### Risiken / zu verifizieren
 - **`dev-package` + `prefer-stable`:** Root-Require mit expliziter dev-Constraint ist erlaubt; falls Composer dennoch meckert, Inline-Alias `"dev-package as 0.1.x-dev"` verwenden. **Vor Schritt 4 testen.**
 - **Composer-VCS-Cache:** dasselbe Repo als App **und** als Package-Quelle — Composer scannt alle Branches. Bei „package not found" `composer clear-cache` und `composer.lock` neu auflösen.
-- **Worktree im gitignorten Pfad:** funktioniert (eigenes HEAD), ist aber ungewohnt — in `CONTRIBUTING.md` erklären, dass Package-Git-Ops in `packages/nostr-chat` laufen, App-Ops im Root.
+- **Worktree im gitignorten Pfad:** funktioniert (eigenes HEAD), ist aber ungewohnt — in `CONTRIBUTING.md` erklären, dass Package-Git-Ops in `packages/einundzwanzig-group` laufen, App-Ops im Root.
 - **`native:*`-Builds:** NativePHP bündelt `vendor/` — nach Umstellung einen `yarn build --mode=android` + `native:run`-Rauchtest, dass das Package im Bundle landet (Symlink vs. echter Ordner).
 
 ---
@@ -132,7 +132,7 @@ Name+Avatar sind schon sauber über welshman verdrahtet (`feeds.ts:113-160`, `me
 
 ## B5 — Favicon / OG / Head dynamisch
 
-Web-Host-Head ist reich (`resources/views/partials/head.blade.php`: Favicons `/favicon.{ico,svg}`, `apple-touch-icon.png`, statisches `og.png`; Titel **pro Raum** dynamisch, `ogDescription` pro Raum via `View::share`). Der **Chat-Package-Head** (Fremdhost/Portal, `packages/nostr-chat/resources/views/partials/head.blade.php`) hat **keine** Favicons/OG (bewusst: „Host regelt selbst").
+Web-Host-Head ist reich (`resources/views/partials/head.blade.php`: Favicons `/favicon.{ico,svg}`, `apple-touch-icon.png`, statisches `og.png`; Titel **pro Raum** dynamisch, `ogDescription` pro Raum via `View::share`). Der **Chat-Package-Head** (Fremdhost/Portal, `packages/einundzwanzig-group/resources/views/partials/head.blade.php`) hat **keine** Favicons/OG (bewusst: „Host regelt selbst").
 
 | Gap | Ist-Zustand | Fix | Sev | Aufw |
 |---|---|---|---|---|
@@ -161,7 +161,7 @@ Fundstücke aus welshman, die heute brachliegen. **Nicht** pauschal bauen — nu
 
 1. **P1 zuerst** (blockierend) — schafft die Grundlage fürs Mitmachen; danach entsteht Branding-Code direkt auf dem `package`-Branch (Symlink-Dev).
 2. **B1 → B2** (Space/Raum-Identität, größter sichtbarer Sprung) → **B4** (NIP-05, mittel, eigenständig) → **B5** (Head/OG, hängt an B1/B2) → **B3/B6** (Kür).
-3. Branding-Änderungen liegen fast alle im Package (`packages/nostr-chat/js/*`, `resources/views/*`, `src/Nostr/SpaceCache.php`) → nach P1 alle auf `package`-Branch, `git push origin package` nach jedem Commit (Memory: Push-nach-jedem-Commit).
+3. Branding-Änderungen liegen fast alle im Package (`packages/einundzwanzig-group/js/*`, `resources/views/*`, `src/Nostr/SpaceCache.php`) → nach P1 alle auf `package`-Branch, `git push origin package` nach jedem Commit (Memory: Push-nach-jedem-Commit).
 
 ## Offene Fragen an den Auftraggeber
 - **P1 Schritt 4/Risiko:** Falls `dev-package` mit `prefer-stable` zickt — Inline-Alias `dev-package as 0.1.x-dev` ok, oder lieber doch Tag-basiert (`^0.1`, dann Tag-Pflege bei jedem Release)?

@@ -10,7 +10,7 @@ if (app()->environment('local')) {
 }
 
 // Chat-Kern (Login, Spaces, Räume, Directory, Join, Space-Einstellungen) liefert
-// das einundzwanzig/nostr-chat-Package unter dem `chat.`-Namen (routes/chat.php).
+// das einundzwanzig/nostr-chat-Package unter dem `chat.`-Namen (routes/group.php).
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');

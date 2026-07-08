@@ -30,8 +30,8 @@
 
 {{-- Prod-Default-Space: setzt die Vereins-Relay-URL VOR dem welshman-Boot.
      Muss VOR @vite stehen (das ES-Modul-Bundle liest window.__nostrSpace beim Init). --}}
-@if (config('chat.space_url'))
-    <script>window.__nostrSpace = @js(config('chat.space_url'));</script>
+@if (config('group.space_url'))
+    <script>window.__nostrSpace = @js(config('group.space_url'));</script>
 @endif
 
 {{-- Plattform-Flag: auf dem Gerät gated die Insel client-seitig (kein NIP-98). --}}

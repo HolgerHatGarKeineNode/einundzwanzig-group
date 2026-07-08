@@ -14,7 +14,7 @@
 <body class="min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
     <main class="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 py-10 pt-safe text-center">
         <a href="{{ route('home') }}" aria-label="Startseite" class="pressable">
-            <x-chat::app-brand-mark class="size-16 shadow-pop" />
+            <x-group::app-brand-mark class="size-16 shadow-pop" />
         </a>
 
         <p class="mt-6 font-mono text-6xl font-bold text-brand-500">@yield('code')</p>
