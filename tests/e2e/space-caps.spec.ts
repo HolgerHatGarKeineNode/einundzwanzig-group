@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { spaceSupportsRooms, spaceBranding } from '../../packages/einundzwanzig-group/js/relayCaps'
+import { spaceSupportsRooms, spaceBranding, hasNip70 } from '../../packages/einundzwanzig-group/js/relayCaps'
 
 /**
  * Space-Filter (NIP-29): nur Group-Relays dürfen in der Auswahl stehen. Reiner
@@ -43,6 +43,25 @@ test.describe('spaceBranding', () => {
     test('fällt auf die gekürzte URL zurück, wenn kein Name da ist', () => {
         expect(spaceBranding('localhost:3334', undefined)).toEqual({ label: 'localhost:3334', icon: '', description: '', banner: '' })
         expect(spaceBranding('localhost:3334', { name: '   ' })).toEqual({ label: 'localhost:3334', icon: '', description: '', banner: '' })
+    })
+})
+
+/**
+ * NIP-70 (C0): steuert das `["-"]` PROTECTED-Tag jeder schreibenden Room-Aktion
+ * (`roomTags`). Reiner Logiktest des welshman-freien Kerns — kein Browser.
+ */
+test.describe('hasNip70', () => {
+    test('true, wenn supported_nips die 70 führt (zooid Test-Space)', () => {
+        expect(hasNip70({ supported_nips: ['1', '11', '42', '70', '29'] })).toBe(true)
+    })
+
+    test('false ohne 70', () => {
+        expect(hasNip70({ supported_nips: ['1', '11', '29'] })).toBe(false)
+    })
+
+    test('false, solange das NIP-11-Profil fehlt (kein PROTECTED beim Boot)', () => {
+        expect(hasNip70(undefined)).toBe(false)
+        expect(hasNip70({})).toBe(false)
     })
 })
 

@@ -97,7 +97,7 @@ test('gate allows authenticated pubkey', function () {
 test('mobile flag is false on the web', function () {
     $this->get('/nostr-login')
         ->assertOk()
-        ->assertSee('window.__nostrMobile = false', false);
+        ->assertSee('window.__nostrMobile = window.__nostrMobile ?? false', false);
 });
 
 test('mobile flag is true and gate passes through when nativephp runs', function () {
@@ -107,7 +107,7 @@ test('mobile flag is true and gate passes through when nativephp runs', function
 
     $this->get('/spaces')
         ->assertOk()
-        ->assertSee('window.__nostrMobile = true', false);
+        ->assertSee('window.__nostrMobile = window.__nostrMobile ?? true', false);
 });
 
 test('nostr-login renders the client-side Amber flow (no server round-trip)', function () {

@@ -6,6 +6,19 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
+type RelayEvent = { kind: number; content: string; tags: string[][] }
+
+/** Fragt das Test-zooid (member-only → mit AUTH) nach dem ersten passenden Event. */
+function queryRelayEvent(pred: (e: RelayEvent) => boolean, h = 'welcome'): RelayEvent | undefined {
+    const out = execFileSync(NAK, ['req', '-k', '9', '-t', `h=${h}`, '--auth', '--sec', NSEC, 'ws://localhost:3334']).toString()
+    return out
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as RelayEvent)
+        .find(pred)
+}
+
 /** Loggt via nsec ein und öffnet den Chat eines Raums (default „welcome"). */
 async function openRoom(page: Page, h = 'welcome'): Promise<void> {
     await useZooid(page)
@@ -228,6 +241,92 @@ test('M6: auf eine Nachricht antworten (Zitat)', async ({ page }) => {
     await page.getByRole('button', { name: 'Senden' }).click()
     await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(a, { exact: true })).toHaveCount(2)
+})
+
+/**
+ * C0 (Reply-Härtung) — die gesendete Antwort trägt am Relay exakt die Tag-/
+ * Content-Form des Referenz-Clients: `q`+`p`+`h` plus `["-"]` (PROTECTED, da das
+ * Test-zooid NIP-70 meldet) und ein vorangestelltes `nostr:nevent…` im Content.
+ */
+test('C0: Antwort trägt am Relay q/p/h/PROTECTED + nevent-Präfix', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const a = `CQ-${Math.floor(Math.random() * 1e9)}`
+    const b = `CA-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+
+    await composer.fill(a)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(a, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const rowA = page.locator('div.group', { hasText: a })
+    await rowA.click()
+    await rowA.getByRole('button', { name: 'Antworten' }).click()
+    await expect(page.getByText('Antwort an')).toBeVisible()
+
+    await composer.fill(b)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Am Relay: das kind-9, dessen Text auf B endet, trägt Reply- + PROTECTED-Tags.
+    // Poll: der Relay-Roundtrip kann dem optimistischen UI kurz hinterherhängen.
+    let found: RelayEvent | undefined
+    await expect
+        .poll(() => (found = queryRelayEvent((e) => e.content.endsWith(b))) !== undefined, { timeout: 15_000 })
+        .toBe(true)
+    const reply = found as RelayEvent
+    expect(reply.content).toMatch(/^nostr:nevent1[0-9a-z]+\n\n/)
+    const tag = (name: string) => reply.tags.find((t) => t[0] === name)
+    expect(tag('q')?.[1]).toBeTruthy() // zitiert A
+    expect(tag('p')).toBeTruthy() // Autor von A
+    expect(tag('h')?.[1]).toBe('welcome') // NIP-29 Group
+    expect(tag('-')).toBeTruthy() // NIP-70 PROTECTED (zooid meldet 70)
+})
+
+/**
+ * C0 (Interaktions-Menü, Web) — das „…"-Menü ist der gemeinsame Andockpunkt für
+ * alle Folge-Aktionen. Web = Popover (flux:dropdown) an der Zeile mit „Antworten".
+ */
+test('C0: Interaktions-Menü öffnet als Popover (Web)', async ({ page }) => {
+    await openRoom(page)
+    const row = page.locator('div.group', { hasText: 'Willkommen im Space!' })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+
+    await row.hover()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await expect(page.getByRole('menuitem', { name: 'Antworten' })).toBeVisible()
+
+    // Eintrag setzt den Antwort-Kontext (identisch zur Inline-Aktion).
+    await page.getByRole('menuitem', { name: 'Antworten' }).click()
+    await expect(page.getByText('Antwort an')).toBeVisible()
+})
+
+/**
+ * C0 (Interaktions-Menü, native App) — dieselbe View, Seam auf `isMobile`
+ * (`__nostrMobile`): auf dem Gerät öffnet das „…"-Menü ein Vollbild-Modal.
+ */
+test('C0: Interaktions-Menü öffnet als Modal (native App)', async ({ page }) => {
+    // Web einloggen (der native Login-Pfad hat kein Server-Gate, §7) …
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+    // … dann auf „native App" umschalten und den Raum neu laden: die Insel bootet
+    // mit dem Modal-Seam, die welshman-Session überlebt (localStorage, gleiche Origin).
+    await page.addInitScript(() => {
+        ;(window as unknown as { __nostrMobile: boolean }).__nostrMobile = true
+    })
+    await page.goto('/rooms/welcome')
+    const row = page.locator('div.group', { hasText: 'Willkommen im Space!' })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+
+    await row.click() // Touch: Tap blendet die Aktionen ein
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+
+    const modal = page.locator('dialog[data-modal="message-menu"]')
+    await expect(modal).toBeVisible()
+    await expect(modal.getByText('Nachricht')).toBeVisible()
+    await modal.getByRole('button', { name: 'Antworten' }).click()
+    await expect(page.getByText('Antwort an')).toBeVisible()
 })
 
 /**
