@@ -5,6 +5,9 @@
 @php
     $pageTitle = filled($title ?? null) ? $title.' – '.config('app.name') : config('app.name');
     $ogDescription ??= 'Die Bitcoin-Community auf Nostr.';
+    // B5: per-Raum/-Space OG-Bild (Raum-picture bzw. Space-icon, proxifiziert)
+    // wird von den SFCs via View::share('ogImage') gesetzt; Fallback = Marken-OG.
+    $ogImageUrl = filled($ogImage ?? null) ? $ogImage : asset('og.png');
 @endphp
 
 <title>{{ $pageTitle }}</title>
@@ -16,13 +19,13 @@
 <meta property="og:site_name" content="{{ config('app.name') }}" />
 <meta property="og:title" content="{{ $pageTitle }}" />
 <meta property="og:description" content="{{ $ogDescription }}" />
-<meta property="og:image" content="{{ asset('og.png') }}" />
+<meta property="og:image" content="{{ $ogImageUrl }}" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="{{ $pageTitle }}" />
 <meta name="twitter:description" content="{{ $ogDescription }}" />
-<meta name="twitter:image" content="{{ asset('og.png') }}" />
+<meta name="twitter:image" content="{{ $ogImageUrl }}" />
 
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
