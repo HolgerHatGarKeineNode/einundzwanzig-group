@@ -407,3 +407,37 @@ test('D2: Publish-Fehler zeigt Retry-Zeile, erneutes Senden räumt sie', async (
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('button', { name: 'Erneut senden' })).toBeHidden()
 })
+
+/**
+ * B4 (NIP-05) — der Admin bekommt ein kind-0 mit `nip05`; der nostr.json-Fetch wird
+ * gestubbt, sodass der Handle auf genau seine pubkey zeigt (Match). Die Profil-Karte
+ * zeigt dann das verifizierte Häkchen samt Handle. Die Verifizierung ist Netz-I/O,
+ * darum der Route-Stub — kein echter `.well-known`-Abruf.
+ */
+test('B4: verifizierter NIP-05-Handle zeigt Häkchen in der Profil-Karte', async ({ page }) => {
+    const handle = 'admin@nip05-test.example'
+    // ADMIN ist der SECRET; die zugehörige Autor-pubkey im Chat ist SELF (Relay-Owner).
+    const SELF = 'da99fbe39247109327ac8504750d0227d50a8f84049ac8bd2f6c7ad0806ed76d'
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '0',
+        '-c', JSON.stringify({ name: 'Relay Admin', nip05: handle }),
+        'ws://localhost:3334',
+    ])
+    // welshman löst NIP-05 privacy-schonend über dufflepud auf (kein direkter
+    // .well-known-Abruf) — Stub liefert den Handle mit GENAU der Autor-pubkey (Match).
+    await page.route('**/handle/info', (route) =>
+        route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: [{ handle, info: { pubkey: SELF, nip05: handle } }] }),
+        }),
+    )
+
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    await page.getByRole('button', { name: 'Relay Admin' }).first().click()
+    const card = page.getByRole('dialog')
+    // Häkchen (Titel „NIP-05 verifiziert: …") + Handle-Text erscheinen nur bei Match.
+    await expect(card.getByText(handle)).toBeVisible({ timeout: 15_000 })
+    await expect(card.getByTitle(`NIP-05 verifiziert: ${handle}`)).toBeVisible()
+})
