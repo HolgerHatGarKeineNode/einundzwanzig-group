@@ -39,6 +39,24 @@ test.describe('Nostr-Login (E2E)', () => {
         await expect(page.locator('body')).toContainText(npub)
     })
 
+    test('Reauth: verlorene Server-Session wird auf der Login-Seite automatisch wiederhergestellt', async ({ page, context }) => {
+        const { npub } = testKeys()
+
+        // Regulär anmelden → Client-Session (localStorage) + Laravel-Session.
+        await page.goto('/nostr-login')
+        await page.getByPlaceholder(/nsec1/).fill(NSEC)
+        await page.getByRole('button', { name: /Trotzdem anmelden/ }).click()
+        await page.waitForURL('**/spaces')
+
+        // Reboot/Ablauf simulieren: Server-Session (Cookies) weg, Client-Session bleibt.
+        await context.clearCookies()
+
+        // /spaces → Gate wirft auf /nostr-login → Auto-Reauth (NIP-98) → zurück zu /spaces.
+        await page.goto('/spaces')
+        await page.waitForURL('**/spaces', { timeout: 15_000 })
+        await expect(page.locator('body')).toContainText(npub)
+    })
+
     test('NIP-46-Bunker-Login meldet über den lokalen Relay im Gate an', async ({ page }) => {
         const { sk, npub } = testKeys()
         const relay = await startRelay()
