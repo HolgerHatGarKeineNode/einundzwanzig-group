@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ImageProxyController;
+use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 
 Route::livewire('/', 'pages::home')->name('home');
@@ -9,6 +10,10 @@ Route::livewire('/', 'pages::home')->name('home');
 // Öffentlich (Mobile ruft den gehosteten Endpunkt cross-origin); `src` untrusted
 // → SSRF-Schutz im Controller. Preset im Pfad begrenzt die Cache-Kardinalität.
 Route::get('/img/{preset}', ImageProxyController::class)->name('img');
+
+// PLAN4 — geteilter Profil-Cache (kind 0) für flicker-armen First-Paint der Insel.
+// Öffentlich (kind 0 ist public); Mobile ruft den gehosteten Endpunkt (Hybrid).
+Route::get('/nostr/profiles', ProfileController::class)->name('profiles');
 
 // M0 — welshman Smoke-Test (Debug). Nur lokal — nicht öffentlich/indexierbar (D5).
 if (app()->environment('local')) {

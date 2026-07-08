@@ -145,6 +145,12 @@ Heute hat ein Space **keinen echten Namen**: angezeigt wird die nackte Relay-URL
 
 ---
 
+## PC — Geteilter Profil-Cache (kind 0) gegen Namens-/Avatar-Flackern — ✅ umgesetzt
+
+> **Problem (2026-07-08):** Autor-Namen/Avatare flackerten, weil welshman sie bei jedem Seitenaufruf neu von Relays auflöst (keine Client-Persistenz). **Entscheidung Auftraggeber:** Laravel-**Backend**-Cache statt Client-IndexedDB — weil er (a) über ALLE Nutzer/Geräte **geteilt** ist (kein Cold-Start pro Browser), (b) **Web + Mobile** identisch bedient (Mobile ruft den gehosteten Endpunkt, Hybrid wie der Bild-Proxy), (c) die bestehende Infra nutzt (`SpaceCache`/`swentel/nostr-php` holen schon Events per WS). Client-IndexedDB später nur, falls Offline/Repeat-Speed nötig (YAGNI).
+>
+> **Ist-Umsetzung:** `Einundzwanzig\Group\Nostr\ProfileCache::get(pubkeys)` — kind-0 je pubkey aus Laravel-Cache (`false` = bekannt-abwesend, weil Laravel `null` nicht von „nicht gecacht" trennt; TTL 1 Tag); Misses via kurzlebiger WS von **purplepag.es + Space-Relay** (neuestes je pubkey). Host-Route `GET /nostr/profiles?pubkeys=…` (öffentlich, kein AUTH, cap 100). Client `profiles.ts::warmProfiles()` — Endpoint holen, jedes Event `verifyEvent`-**prüfen** (Trust-Boundary: Relay-Daten untrusted), `verifiedSymbol` setzen, `repository.load()` → welshman leitet `profilesByPubkey` ab → `deriveRoomChat` zeigt Namen/Bilder sofort. **welshman bleibt Live-Truth** und überschreibt. Verdrahtet in `feeds.ts` (Autoren der geladenen Nachrichten, dedupliziert via `seeded`-Set, fire-and-forget). Fällt bei Endpoint-/Relay-Ausfall lautlos auf die welshman-Live-Auflösung zurück. Tests: 5 Pest (Cache-Hit/Abwesenheit/Validierung/Endpoint) + realer WS-Fetch (fiatjaf-kind-0) verifiziert. **Offen/Kür:** Directory-Members analog seeden; echte SSR-`@js()`-Injection im `mount()` für Zero-First-Paint (heute: schneller geteilter Seed, nicht literal-zero).
+
 ## B3 — Autor-Profile: Lücken schließen  *(Kür)*
 
 Name+Avatar sind schon sauber über welshman verdrahtet (`feeds.ts:113-160`, `members.ts:162-170`, `loadMemberProfiles` `members.ts:369`, dedupliziert). Offen ist die **Tiefe**.
