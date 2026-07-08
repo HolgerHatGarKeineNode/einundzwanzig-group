@@ -1,9 +1,9 @@
 <?php
 
-test('smoke page renders the nostr island mount point', function () {
-    $response = $this->get('/nostr-smoke');
+test('smoke page is gated to local and not publicly routable', function () {
+    // D5: Debug-Screen nur unter app()->environment('local') registriert. Im
+    // Test-Env (nicht local) existiert die Route nicht → nicht öffentlich/indexierbar.
+    expect(app()->environment('local'))->toBeFalse();
 
-    $response->assertOk();
-    // Der wire:ignore-Mount-Point, in den die welshman-Insel rendert.
-    $response->assertSee('x-data="nostrSmoke"', false);
+    $this->get('/nostr-smoke')->assertNotFound();
 });
