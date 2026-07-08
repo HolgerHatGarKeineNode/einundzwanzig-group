@@ -55,6 +55,33 @@ test('M4: neue Nachricht erscheint live', async ({ page }) => {
 })
 
 /**
+ * IMG (PLAN4) — eine Bild-URL im Nachrichtentext rendert als Inline-Bild über den
+ * Bild-Proxy (Preset `msg`), Klick öffnet die Lightbox (Preset `full`), Esc schließt.
+ */
+test('IMG: Inline-Bild im Chat + Lightbox', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const url = `https://robohash.org/e2e-${Math.floor(Math.random() * 1e9)}.png`
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome',
+        '-c', `Bild: ${url}`, 'ws://localhost:3334',
+    ])
+
+    // Inline-Bild läuft über den Proxy (msg-Preset), nicht als Text-Link.
+    const inline = page.locator('img.chat-image').last()
+    await expect(inline).toBeVisible({ timeout: 15_000 })
+    await expect(inline).toHaveAttribute('src', /\/img\/msg\?src=.*robohash/)
+
+    // Klick → Lightbox (full-Preset), Esc schließt wieder.
+    await inline.click()
+    const lightbox = page.locator('img[src*="/img/full"]')
+    await expect(lightbox).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(lightbox).toBeHidden()
+})
+
+/**
  * M5 (Senden) — der eingeloggte User ist Mitglied von „welcome", schreibt eine
  * Nachricht über den Composer; sie erscheint optimistisch im eigenen Verlauf,
  * der Composer wird geleert.

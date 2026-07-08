@@ -118,6 +118,10 @@ Heute hat ein Space **keinen echten Namen**: angezeigt wird die nackte Relay-URL
 
 > **Ist-Umsetzung:** Öffentliche Host-Route `GET /img/{preset}?src=` (`ImageProxyController`, invokable). Named Presets im Pfad (nur `avatar` = 96² `cover`, Retina — begrenzt die Cache-Kardinalität; neues Preset = eine Zeile). Fetch via `Http`-Facade (fake-bar in Tests); **SSRF**: `https`-only, alle via `dns_get_record` aufgelösten IPs müssen öffentlich sein, Content-Type `image/*`, `MAX_BYTES`/Timeout, Redirects nur `https` mit re-validiertem Zielhost. Encode: Intervention **v4** (`ImageManager`+`Gd\Driver`→`cover()`→`WebpEncoder(80)`). Datei-Cache `storage/app/private/img-cache/{preset}/{sha1(src)}.webp`, `Cache-Control: immutable` + ETag/304; wöchentlicher Prune >30 Tage (`routes/console.php`). Client `proxifyImage()` in `core.ts` (Web relativ, Mobile absolut) als Alpine-Magic `$img`; PHP-Pendant `ImageProxy::url()` (mobile-aware via `nativephp-internal.running`) fürs server-gerenderte Header-Avatar. `onerror` an der Raum-Kachel zweistufig (Proxy→Original→#-Chip); Flux-Avatare fallen bei Proxy-Fehler auf Initialen. **Bewusst weggelassen** (YAGNI): LRU/Max-Größe-Eviction (mtime-Prune reicht für Single-Space); IP-Pinning gegen DNS-Rebinding (Rest-Risiko im Code kommentiert); zusätzliche Presets (kommen mit B5-OG/`banner`).
 
+> **Nachtrag — Inline-Bilder im Chat + Lightbox (2026-07-08):** welshman/content parst Bild-URLs als `Link` und rendert sie per Default als **Text-Anker** (`renderLink` → `<a>`) — Bilder wurden also nicht als Bild gezeigt. Fix: `renderLink`-Override in `feeds.ts` (`renderMessageLink`) — URL mit Bild-Extension (`jpe?g|png|gif|webp`) → `<img class="chat-image">` über den Proxy (Preset **`msg`** = `scaleDown` 600², `data-full` = **`full`** 1600²), alles andere bleibt ein `sanitizeUrl`-Anker (Escaping via `document.createElement`). Klick auf ein Inline-Bild (delegiert, da `x-html`-Inhalt) öffnet eine **Lightbox** (`lightboxSrc` im `nostrRoomChat`-State; Overlay in `⚡room.blade.php`, Klick/Esc schließt, `onerror`→Original). Zwei neue `scale`-Presets im Controller (`cover` vs. `scale`-Modus). `.chat-image`-Styles in `theme.css` (max 20rem, `cursor: zoom-in`). Tests: Pest `msg`/`full`→WebP + E2E `room` (Inline-`img` über `/img/msg`, Klick→Lightbox `/img/full`, Esc schließt) grün.
+>
+> **Proxy-ready Backlog** (nutzen denselben Proxy, sobald ihr Render-Surface existiert — heute bewusst nicht gebaut): NIP-11-Space-`icon` (→ B5-OG/Favicon), Profil-`banner`/`picture`-Detail (→ B3-Profil-Karte), Custom-Emoji NIP-30 als Inline-`<img>` statt Shortcode (→ B6). Jeweils `proxifyImage()`/`$img` bzw. neues Preset.
+
 **Warum nach B2:** Erst mit B2 werden Raum-`picture`-URLs real gerendert (Autor-Avatare gibt es schon, NIP-11-Icon aus B1 kommt in B5). Dann lohnt der Proxy — ein Durchleit-Dienst, der jedes externe Nostr-Bild **serverseitig zuschneidet + als WebP komprimiert + cached**, statt megabyteschwere Originale in Avatar-Größe zu laden. Ziel: Performance (Listen mit vielen Avataren, Raum-/Space-Bilder).
 
 **Entscheidungen (Auftraggeber, 2026-07-08):**
@@ -186,6 +190,7 @@ Fundstücke aus welshman, die heute brachliegen. **Nicht** pauschal bauen — nu
 - `RoomMeta.livekit` → Voice/Video-Raum-Indikator — **out of scope**, nur vermerkt.
 - `RoomMeta.pictureMeta` (blurhash) → Ladeplatzhalter (B2, Kür).
 - NIP-11 `banner`/`limitation` → Space-Kopfbild bzw. Hinweise (B1-Erweiterung).
+- **Custom-Emoji (NIP-30)** → welshman rendert `:shortcode:` heute als Text (`renderEmoji`→`addText`). Optional: `emoji`-Tag-URL als kleines Inline-`<img>` über den Bild-Proxy. Nur wenn im Vereins-Chat real genutzt.
 
 ---
 

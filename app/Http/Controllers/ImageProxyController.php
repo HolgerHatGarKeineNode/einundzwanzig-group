@@ -20,12 +20,15 @@ class ImageProxyController extends Controller
 {
     /**
      * Feste Zuschnitte (begrenzt die Cache-Kardinalität — kein beliebiges w/h).
-     * Neues Preset = eine Zeile. Retina-96px deckt alle heutigen Avatar-Größen ab.
+     * Neues Preset = eine Zeile. `cover` = quadratischer Zuschnitt (Avatare);
+     * `scale` = proportional in die Box verkleinert (Inhaltsbilder, nie hoch).
      *
-     * @var array<string, array{w:int, h:int}>
+     * @var array<string, array{w:int, h:int, fit:string}>
      */
     private const PRESETS = [
-        'avatar' => ['w' => 96, 'h' => 96],
+        'avatar' => ['w' => 96, 'h' => 96, 'fit' => 'cover'],
+        'msg' => ['w' => 600, 'h' => 600, 'fit' => 'scale'],
+        'full' => ['w' => 1600, 'h' => 1600, 'fit' => 'scale'],
     ];
 
     private const MAX_BYTES = 8 * 1024 * 1024;
@@ -68,7 +71,7 @@ class ImageProxyController extends Controller
     }
 
     /**
-     * @param  array{w:int, h:int}  $spec
+     * @param  array{w:int, h:int, fit:string}  $spec
      */
     private function fetchAndEncode(string $url, array $spec): ?string
     {
@@ -104,7 +107,10 @@ class ImageProxyController extends Controller
                 return null;
             }
 
-            $image = (new ImageManager(new Driver))->decode($data)->cover($spec['w'], $spec['h']);
+            $image = (new ImageManager(new Driver))->decode($data);
+            $image = $spec['fit'] === 'cover'
+                ? $image->cover($spec['w'], $spec['h'])
+                : $image->scaleDown($spec['w'], $spec['h']);
 
             return (string) $image->encode(new WebpEncoder(quality: 80));
         } catch (\Throwable) {

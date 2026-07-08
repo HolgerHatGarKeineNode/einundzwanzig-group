@@ -43,6 +43,16 @@ it('proxies a public image to webp and caches it', function () {
     Http::assertSentCount(1);
 });
 
+it('proxies content presets (msg/full) to webp', function () {
+    Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
+
+    foreach (['msg', 'full'] as $preset) {
+        $this->get('/img/'.$preset.'?src='.urlencode('https://1.1.1.1/pic.png'))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/webp');
+    }
+});
+
 it('returns 304 on matching ETag', function () {
     Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
 
