@@ -18,6 +18,7 @@
 | **P1** — Package-Öffnung: Composer/GitHub + Symlink-Weiche | **blockierend, zuerst** | ✅ **fertig** | Package in **eigenes Repo** `HolgerHatGarKeineNode/einundzwanzig-group-package` (Branch `master`, History via subtree split erhalten) ausgelagert. Root-`composer.json`: `path`-zuerst-`vcs`-danach, Require `einundzwanzig/group: dev-master`. Ordner `packages/einundzwanzig-group` gitignored, lokal als eigenständiger Clone (Symlink-Dev). Beide Weichenstellungen verifiziert (path=Symlink lokal, vcs=`dev-master` bei Fremd-Clone trotz `minimum-stability: stable`). `CONTRIBUTING.md` erklärt das Setup. 16 Package-Tests grün, `npm run build` grün. |
 | **B1** — Space-Identität & -Branding | | ✅ **fertig** | Space-Name + Beschreibung aus **NIP-11**-Relay-Info (`name`/`description`) statt nackter URL — im Header (dynamischer Titel via `titleExpr`, Fallback „Space") und in der Space-Auswahl (Einstellungen). Doppelten Namen aus der Space-Karte entfernt (Identität lebt nur im Header). Pure `spaceBranding()`-Logik (welshman-frei) + `ensureRelayProfile()`-Helper (lädt NIP-11 lazy, cached). `SpaceView.icon` durchgereicht (Render später B5-OG). Tests: 2 Logik + 2 E2E grün. |
 | **B2** — Raum-Metadaten vollständig (kind 39000) | | ⬜ offen | `picture`/Zugriffs-Flags aus `readRoomMeta` durchreichen (Client **und** Server-Cache); Raum-Avatar im Header & Raumliste; Zugriffs-Badges. |
+| **IMG** — Bilder-Proxy (WebP/Crop) | nach B2 | ⬜ offen | Eigener Laravel-Bild-Proxy: Zuschnitt + WebP-Kompression aller remote Nostr-Bilder für Performance. **Erst nach B2**, weil dort die Bild-URLs (Raum-`picture`) real werden. Entscheidungen (2026-07-08): **Hybrid** (Web hostet den Proxy; Mobile ruft den gehosteten Proxy, offline Fallback Original), **Intervention Image v3 + eigene Route**, **alle** remote Nostr-Bilder mit SSRF-Schutz. |
 | **B3** — Autor-Profile: Lücken schließen | Kür | ⬜ offen | Profil-Karte bei Klick (about/website/banner/display_name); `deriveProfileDisplay` statt manuellem Join. |
 | **B4** — NIP-05-Verifizierung | | ⬜ offen | `@welshman/app/handles` aktivieren: verifizierter Handle → Häkchen an Autor/Directory/Profil-Karte. |
 | **B5** — Favicon / OG / Head dynamisch | | ⬜ offen | Titel pro Space/Directory dynamisch; per-Space/Raum-OG (Raum-`picture` bzw. generiert); Portal-Head-Partial optional um Favicons/OG ergänzen. |
@@ -111,6 +112,29 @@ Heute hat ein Space **keinen echten Namen**: angezeigt wird die nackte Relay-URL
 
 ---
 
+## IMG — Bilder-Proxy (WebP/Crop)  *(nach B2)*
+
+**Warum nach B2:** Erst mit B2 werden Raum-`picture`-URLs real gerendert (Autor-Avatare gibt es schon, NIP-11-Icon aus B1 kommt in B5). Dann lohnt der Proxy — ein Durchleit-Dienst, der jedes externe Nostr-Bild **serverseitig zuschneidet + als WebP komprimiert + cached**, statt megabyteschwere Originale in Avatar-Größe zu laden. Ziel: Performance (Listen mit vielen Avataren, Raum-/Space-Bilder).
+
+**Entscheidungen (Auftraggeber, 2026-07-08):**
+- **Hybrid Web/Mobile:** Der Proxy läuft als Laravel-Route auf dem **Web-Host** (`group.einundzwanzig.space`). Die **NativePHP-Mobile-App** ruft **denselben gehosteten** Endpunkt (kein On-Device-WebP-Encoding, kein Cache im knappen App-Speicher, echter Boost auch mobil). **Offline/Fehler → Fallback auf die Original-URL** (WebView lädt direkt). Begründung: On-Device-Encoding kostet CPU/Akku ohne echten Gewinn; der gehostete Cache bedient alle Clients.
+- **Intervention Image v3 + eigene Route** (nicht Glide): volle Hoheit über SSRF-Schutz, Cache-Keys und Eviction. GD-Treiber (Imagick im PHP-Runtime nicht vorausgesetzt — **vor Bau prüfen**, welche Extensions Web-Host bzw. NativePHP-Runtime bündeln; da der Proxy nur web-seitig rechnet, zählt der Web-Host).
+- **Scope: alle remote Nostr-Bilder** — Autor-Avatare (kind-0 `picture`), Raum-`picture` (B2), NIP-11-Space-`icon` (B1/B5), später `banner` (B3/B6).
+
+**Bausteine:**
+| Teil | Inhalt |
+|---|---|
+| **Route** | z.B. `GET /img?src=<url>&w=&h=&fit=cover&q=` → Intervention lädt `src`, cropt/resized, encodet WebP, streamt mit `Cache-Control`/`ETag`. Antwort aus Datei-Cache, wenn vorhanden. |
+| **SSRF-Schutz** (Pflicht — `src` ist untrusted) | Nur `https`; DNS auf **öffentliche** IPs auflösen (private/loopback/link-local block); Content-Type `image/*`; Max-Bytes + Fetch-Timeout; erlaubte Zielmaße whitelisten (feste `w/h/fit`-Presets statt beliebiger Werte → begrenzt Cache-Kardinalität). Rate-Limit. **Kein** Client-HMAC als „Secret" (JS-Bundle ist öffentlich) — Verteidigung ist die Validierung. |
+| **Cache** | `storage/app/img-cache`, Key = Hash(`src`,Preset). Eviction: TTL + Max-Größe (LRU), per Scheduled Command. |
+| **Client-Helper** | `proxifyImage(url, preset)` in der Insel (`core.ts`/`bridge.ts`): baut die Proxy-URL gegen den **festen Web-Host** (Web = relativ, Mobile = absolute `group.einundzwanzig.space`). Alle `::src` (Avatare, Raum-`picture`, Space-`icon`) laufen darüber; `onerror` → Original-URL (Offline-Fallback). |
+
+**Tests:** Route/SSRF-Validierung/Cache-Key/Eviction → **Pest** (u.a. private-IP-`src` wird abgelehnt, WebP-Content-Type, Cache-Hit zweiter Request). Rendering/`onerror`-Fallback → **E2E**.
+
+**Offen bis Umsetzung:** feste Preset-Liste (welche `w/h/fit`); GD-Verfügbarkeit auf dem Forge-Web-Host bestätigen; Cache-Budget/TTL.
+
+---
+
 ## B3 — Autor-Profile: Lücken schließen  *(Kür)*
 
 Name+Avatar sind schon sauber über welshman verdrahtet (`feeds.ts:113-160`, `members.ts:162-170`, `loadMemberProfiles` `members.ts:369`, dedupliziert). Offen ist die **Tiefe**.
@@ -164,7 +188,7 @@ Fundstücke aus welshman, die heute brachliegen. **Nicht** pauschal bauen — nu
 ## Reihenfolge & Abhängigkeiten
 
 1. **P1 zuerst** (blockierend) — schafft die Grundlage fürs Mitmachen; danach entsteht Branding-Code direkt auf dem `package`-Branch (Symlink-Dev).
-2. **B1 → B2** (Space/Raum-Identität, größter sichtbarer Sprung) → **B4** (NIP-05, mittel, eigenständig) → **B5** (Head/OG, hängt an B1/B2) → **B3/B6** (Kür).
+2. **B1 ✅ → B2** (Space/Raum-Identität, größter sichtbarer Sprung) → **IMG** (Bilder-Proxy, sobald B2 die Raum-Bilder liefert) → **B4** (NIP-05, mittel, eigenständig) → **B5** (Head/OG, hängt an B1/B2) → **B3/B6** (Kür).
 3. Branding-Änderungen liegen fast alle im Package (`packages/einundzwanzig-group/js/*`, `resources/views/*`, `src/Nostr/SpaceCache.php`) → nach P1 alle auf `package`-Branch, `git push origin package` nach jedem Commit (Memory: Push-nach-jedem-Commit).
 
 ## Offene Fragen an den Auftraggeber
