@@ -770,7 +770,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/einundzwanzig-group",
-                "reference": "2d2bfde3326843b20541e42bc30fb46eaa07bcab"
+                "reference": "d3eab16f1e47e80be879c9abcccf04680e958b84"
             },
             "require": {
                 "illuminate/console": "^13.0",
