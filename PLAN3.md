@@ -17,7 +17,7 @@
 | Phase | Fokus | Status | Kern-Inhalt |
 |---|---|---|---|
 | **D0** — Audit | Ist-Analyse | ✅ **fertig** | 5-Dimensionen-Multi-Agent-Audit (chat-scroll, composer, design-states, a11y, landing/nav) → **48 verifizierte Gaps**, je gegen den echten Code belegt. Grundlage dieses Plans. |
-| **D1** — Chat-Bühne: Scroll & Message-Handling | **Priorität** | ⬜ offen | Auto-Scroll robust, korrekter Unread-Zähler, generischer Jump-to-Bottom, `h-dvh`+Tastatur, First-Paint-Gate, Auto-Load-Older, `role="log"`, Last-Read-Divider. |
+| **D1** — Chat-Bühne: Scroll & Message-Handling | **Priorität** | ✅ **fertig** | Auto-Scroll robust, korrekter Unread-Zähler (Fremd-Append, kein Prepend/eigene), generischer Jump-to-Bottom, `h-dvh`+`visualViewport`+Composer-Focus, First-Paint-Gate, Auto-Load-Older, `role="log"`/`aria-live`, Last-Read-Divider (localStorage). Virtualisierung bewusst ausgelassen (Beobachtung, nicht dringend). E2E: Unread-Zählung + Jump + Auto-Load-Older grün (8 room-Tests). |
 | **D2** — Composer & Interaktion | **Priorität** | ⬜ offen | Shift+Enter-Fix, Auto-Grow, Send-Busy/Retry/Failed-States, Fokus-Rückgabe, Zeitstempel/Hover, klickbares Zitat, Touch-erreichbare Aktionen, Löschen-Bestätigung. |
 | **D3** — Zustände & System-Konsistenz | | ⬜ offen | Skeletons statt nackter Fläche, echte Empty-States, Inline-Error-Callouts, `ready`-Guards (Fix-A-Muster), `list-stagger`-`--i`, `surface-card`-Drift, Flux-Pflicht, Fehler-Übersetzung. |
 | **D4** — A11y & Responsive | | ⬜ offen | Sichtbarer Keyboard-Focus, Kontrast (zinc-500→400), 44px-Tap-Ziele, `reduced-motion`-Lücken, Modal-Fokus-Rückgabe, **Desktop-Split-Layout**. |

@@ -33,17 +33,19 @@ done
 nak event --auth --sec "$ADMIN" -k 9007 -t h=welcome -t name=Willkommen -t about=Startkanal "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$ADMIN" -k 9007 -t h=general -t name=Allgemein -t about=Off-Topic "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$ADMIN" -k 9007 -t h=dev -t name=Dev -t about=Entwicklung "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$ADMIN" -k 9007 -t h=scroll -t name=Scroll -t about=Langer-Verlauf "$R" >/dev/null 2>&1 || true
 
 # Profile (kind 0) für lesbare Namen im Directory (M3) — AUTH nötig zum Schreiben.
 nak event --auth --sec "$ADMIN" -k 0 -c '{"name":"Relay Admin"}' "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER"  -k 0 -c '{"name":"Alice Test"}'  "$R" >/dev/null 2>&1 || true
 
-# Raum-Mitgliedschaft (NIP-29, M5): Test-User tritt welcome + general bei (9021).
+# Raum-Mitgliedschaft (NIP-29, M5): Test-User tritt welcome + general + scroll bei (9021).
 # Offene Räume → zooid genehmigt automatisch und pflegt die 39002-Members-Liste.
 # „dev" bleibt ausgespart (für den Join/Leave-E2E-Test). Idempotent: ist der User
 # bereits Mitglied, lehnt zooid das 9021 als „duplicate" ab (ignoriert).
 nak event --auth --sec "$USER" -k 9021 -t h=welcome "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=general "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$USER" -k 9021 -t h=scroll "$R" >/dev/null 2>&1 || true
 
 # Directory (M3): 2 Rollen (33534, HSL-Farbe) + Zuweisungen über NIP-86
 # (HTTP + NIP-98). `assignrole` legt den Member automatisch in der 13534 an.
@@ -72,6 +74,16 @@ if [ "$(nak req -k 9 -t h=welcome --auth --sec "$ADMIN" "$R" 2>/dev/null | grep 
     nak event --auth --sec "$USER"  -k 9 -t h=welcome -c 'Willkommen im Space! 👋' "$R" >/dev/null 2>&1 || true
     nak event --auth --sec "$ADMIN" -k 9 -t h=welcome -c 'Schön, dass du da bist. Infos: https://einundzwanzig.space' "$R" >/dev/null 2>&1 || true
     nak event --auth --sec "$USER"  -k 9 -t h=welcome -c 'Danke!' "$R" >/dev/null 2>&1 || true
+fi
+
+# „scroll": 60 Fremd-Nachrichten (vom ADMIN, gestaffelte created_at) für die D1-
+# Scroll-Tests — genug für Overflow (Jump/Unread) und >limit (50 → Auto-Load-Older).
+# Gestaffelte Zeitstempel, damit die `until`-Pagination echte ältere Seiten liefert.
+if [ "$(nak req -k 9 -t h=scroll --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -c '"kind":9')" -eq 0 ]; then
+    NOW=$(date +%s)
+    for i in $(seq 1 60); do
+        nak event --auth --sec "$ADMIN" -k 9 -t h=scroll --ts $((NOW - 60 + i)) -c "Zeile $i" "$R" >/dev/null 2>&1 || true
+    done
 fi
 
 wait $PID

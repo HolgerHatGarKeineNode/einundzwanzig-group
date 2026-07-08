@@ -150,3 +150,69 @@ test('M6: auf eine Nachricht antworten (Zitat)', async ({ page }) => {
     await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(a, { exact: true })).toHaveCount(2)
 })
+
+/** Publiziert eine kind-9-Nachricht direkt in „scroll" (fremder Autor = ADMIN). */
+function publishToScroll(content: string): void {
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=scroll',
+        '-c', content, 'ws://localhost:3334',
+    ])
+}
+
+/**
+ * D1 (Auto-Load-Older) — „scroll" hat 60 Nachrichten, initial werden nur die
+ * jüngsten 50 geladen (Zeile 11–60). Am oberen Rand lädt der Verlauf die ältere
+ * Seite automatisch nach; „Zeile 1" erscheint, ohne den Button zu klicken.
+ */
+test('D1: Ältere laden automatisch beim Hochscrollen', async ({ page }) => {
+    await openRoom(page, 'scroll')
+    await expect(page.getByText('Zeile 60', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Älteste Nachricht ist initial nicht geladen (jenseits des 50er-Limits).
+    await expect(page.getByText('Zeile 1', { exact: true })).toHaveCount(0)
+
+    // Wiederholt an den oberen Rand scrollen, bis die ältere Seite nachgeladen ist.
+    // (toPass fängt den seltenen Fall ab, dass ein Live-Emit im 50-ms-Scroll-Debounce
+    // kurz ans Ende zurückspringt.)
+    const log = page.locator('[role=log]')
+    await expect(async () => {
+        await log.hover()
+        await page.mouse.wheel(0, -6000)
+        await expect(page.getByText('Zeile 1', { exact: true })).toBeVisible({ timeout: 1500 })
+    }).toPass({ timeout: 25_000 })
+})
+
+/**
+ * D1 (Unread-Zähler + Jump) — hochgescrollt erscheint der Zurück-ans-Ende-Button;
+ * zwei live eintreffende Fremd-Nachrichten ergeben „2 neue" (der alte Zähler
+ * addierte pro Emit statt echte Nachrichten). Der Klick springt ans Ende und
+ * blendet Zähler + Button aus.
+ */
+test('D1: Unread-Zähler zählt Nachrichten, Jump springt ans Ende', async ({ page }) => {
+    await openRoom(page, 'scroll')
+    await expect(page.getByText('Zeile 60', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const jumpBtn = page.getByRole('button', { name: 'Zum Ende springen' })
+    // Am Ende → kein Jump-Button.
+    await expect(jumpBtn).toBeHidden()
+
+    // Robust hochscrollen, bis der Jump-Button hält (siehe Auto-Load-Test). Löst
+    // evtl. Auto-Load älterer Seiten aus — die dürfen den Unread-Zähler NICHT
+    // hochtreiben.
+    const log = page.locator('[role=log]')
+    await expect(async () => {
+        await log.hover()
+        await page.mouse.wheel(0, -1200)
+        await expect(jumpBtn).toBeVisible({ timeout: 1500 })
+    }).toPass({ timeout: 15_000 })
+
+    // Zwei Live-Nachrichten → Zähler = 2 (nicht am Ende → wird nicht mitgescrollt).
+    const marker = `Zaehl-${Math.floor(Math.random() * 1e9)}`
+    publishToScroll(`${marker}-a`)
+    publishToScroll(`${marker}-b`)
+    await expect(page.getByText('2 neue')).toBeVisible({ timeout: 15_000 })
+
+    // Jump → ans Ende, Zähler + Button verschwinden.
+    await jumpBtn.click()
+    await expect(jumpBtn).toBeHidden()
+})
