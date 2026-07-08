@@ -75,8 +75,9 @@ test.describe('Nostr-Login (E2E)', () => {
     test('Amber-QR (nostrconnect) wird erzeugt und angezeigt', async ({ page }) => {
         await page.goto('/nostr-login')
         await page.getByRole('tab', { name: 'Amber' }).click()
-        await page.getByRole('button', { name: /QR-Code für Amber/ }).click()
+        await page.getByRole('button', { name: 'Mit Amber verbinden' }).click()
 
+        // Desktop-Web: kein nativer Intent → QR zum Scannen mit Amber.
         // Deckt die ganze Kette ab: startConnect → makeNostrconnectUrl → QR-Render.
         // Der Handshake selbst nutzt dieselben Primitive wie der Bunker-Login (dort getestet).
         const qr = page.getByAltText('nostrconnect QR-Code')
