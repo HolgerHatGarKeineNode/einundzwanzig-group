@@ -9,8 +9,8 @@ if (app()->environment('local')) {
     Route::livewire('/nostr-smoke', 'pages::nostr-smoke')->name('nostr-smoke');
 }
 
-// Chat-Kern (Login, Spaces, Räume, Directory, Join, Space-Einstellungen) liefert
-// das einundzwanzig/nostr-chat-Package unter dem `chat.`-Namen (routes/group.php).
+// Group-Kern (Login, Spaces, Räume, Directory, Join, Space-Einstellungen) liefert
+// das einundzwanzig/group-Package unter dem `group.`-Namen (routes/group.php).
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');

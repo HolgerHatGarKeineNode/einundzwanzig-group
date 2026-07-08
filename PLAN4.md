@@ -38,7 +38,9 @@
 
 **Entscheidung Auftraggeber:** Kein zweites Repo — das Package lebt in einem **eigenen Branch `package`** desselben GitHub-Repos. Composer liest die `composer.json` **pro Branch** aus dessen Wurzel; der `package`-Branch trägt das Package im Root (`name: einundzwanzig/group`) → Composer bietet es als Version `dev-package` an, der `master`-Branch (die App) wird dabei ignoriert. History via `git subtree split` erhalten.
 
-### Zielbild der Weiche
+> ⚠️ **ÜBERHOLT — der folgende Ursprungsplan (Package-Branch im selben Repo) wurde verworfen.** Maßgeblich ist die „Ist-Umsetzung" oben (eigenes Repo `…-package`, `dev-master`, Clone) und `CONTRIBUTING.md`. Der Block bleibt nur als Entscheidungs-Historie stehen.
+
+### Zielbild der Weiche (historisch)
 
 ```
 composer.json (master / App):
