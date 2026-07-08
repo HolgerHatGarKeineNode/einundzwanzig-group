@@ -4,11 +4,13 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Drivers\Gd\Driver;
 use Intervention\Image\Encoders\WebpEncoder;
 use Intervention\Image\ImageManager;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Process\ExecutableFinder;
 
 /**
  * Bild-Proxy (PLAN4 IMG): lädt ein remote Nostr-Bild (Avatar, Raum-`picture`,
@@ -53,18 +55,30 @@ class ImageProxyController extends Controller
         }
 
         $disk = Storage::disk('local');
-        $cacheKey = 'img-cache/'.$preset.'/'.sha1($src).'.webp';
+        $base = 'img-cache/'.$preset.'/'.sha1($src);
 
-        if (! $disk->exists($cacheKey)) {
-            $webp = $this->fetchAndEncode($src, $spec);
-            if ($webp === null) {
-                abort(502);
+        // GIFs bleiben GIF (Animation), sonst WebP — die Extension steht erst nach
+        // dem Encode fest, darum beide Cache-Varianten prüfen (Hit ohne Fetch).
+        foreach (['webp' => 'image/webp', 'gif' => 'image/gif'] as $ext => $mime) {
+            if ($disk->exists("$base.$ext")) {
+                return $this->respond($disk->get("$base.$ext"), $mime, $etag);
             }
-            $disk->put($cacheKey, $webp);
         }
 
-        return response($disk->get($cacheKey), 200, [
-            'Content-Type' => 'image/webp',
+        $encoded = $this->fetchAndEncode($src, $spec);
+        if ($encoded === null) {
+            abort(502);
+        }
+        [$bytes, $mime] = $encoded;
+        $disk->put($base.($mime === 'image/gif' ? '.gif' : '.webp'), $bytes);
+
+        return $this->respond($bytes, $mime, $etag);
+    }
+
+    private function respond(string $body, string $mime, string $etag): Response
+    {
+        return response($body, 200, [
+            'Content-Type' => $mime,
             'Cache-Control' => 'public, max-age=31536000, immutable',
             'ETag' => $etag,
         ]);
@@ -72,8 +86,9 @@ class ImageProxyController extends Controller
 
     /**
      * @param  array{w:int, h:int, fit:string}  $spec
+     * @return array{0:string, 1:string}|null [Bytes, MIME]
      */
-    private function fetchAndEncode(string $url, array $spec): ?string
+    private function fetchAndEncode(string $url, array $spec): ?array
     {
         try {
             $response = Http::timeout(self::FETCH_TIMEOUT)
@@ -107,15 +122,47 @@ class ImageProxyController extends Controller
                 return null;
             }
 
+            // GIF (Magic-Bytes) → animiert lassen, nur optimieren. Sonst WebP.
+            if (str_starts_with($data, 'GIF8')) {
+                return [$this->optimizeGif($data, $spec), 'image/gif'];
+            }
+
             $image = (new ImageManager(new Driver))->decode($data);
             $image = $spec['fit'] === 'cover'
                 ? $image->cover($spec['w'], $spec['h'])
                 : $image->scaleDown($spec['w'], $spec['h']);
 
-            return (string) $image->encode(new WebpEncoder(quality: 80));
+            return [(string) $image->encode(new WebpEncoder(quality: 80)), 'image/webp'];
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Animierte GIFs mit `gifsicle` verlustbehaftet optimieren + auf die Preset-Box
+     * verkleinern (Animation bleibt erhalten). `-O3` = maximale Optimierung,
+     * `--lossy=80` = aggressive LZW-Kompression (aus der Praxis der beste Trade-off),
+     * `--resize-fit` skaliert nur herunter. Ohne gifsicle oder bei Fehler: Original
+     * durchreichen (animiert, unkomprimiert) — nie schlechter als vorher.
+     *
+     * ponytail: Preset-Level `--lossy=80` fix; falls Qualität leidet, runter (30–60).
+     *
+     * @param  array{w:int, h:int, fit:string}  $spec
+     */
+    private function optimizeGif(string $data, array $spec): string
+    {
+        $gifsicle = (new ExecutableFinder)->find('gifsicle');
+        if ($gifsicle === null) {
+            return $data;
+        }
+
+        $result = Process::timeout(self::FETCH_TIMEOUT)
+            ->input($data)
+            ->run([$gifsicle, '-O3', '--lossy=80', '--resize-fit', $spec['w'].'x'.$spec['h'], '--no-warnings']);
+
+        $out = $result->output();
+
+        return ($result->successful() && str_starts_with($out, 'GIF8')) ? $out : $data;
     }
 
     private function isSafeUrl(string $url): bool

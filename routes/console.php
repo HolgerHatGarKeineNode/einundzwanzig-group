@@ -9,6 +9,12 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+// Bild-Proxy-Cache komplett leeren (z.B. nach geänderten Encode-Parametern).
+Artisan::command('img:clear-cache', function () {
+    Storage::disk('local')->deleteDirectory('img-cache');
+    $this->info('Bild-Proxy-Cache geleert.');
+})->purpose('Leert den Bild-Proxy-Cache (storage/app/private/img-cache)');
+
 // PLAN4 IMG — Bild-Cache beschneiden: Dateien > 30 Tage raus (bounded Disk).
 Schedule::call(function () {
     $disk = Storage::disk('local');

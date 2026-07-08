@@ -53,6 +53,22 @@ it('proxies content presets (msg/full) to webp', function () {
     }
 });
 
+it('keeps a gif as gif (animation), not webp', function () {
+    $img = imagecreatetruecolor(20, 20);
+    ob_start();
+    imagegif($img);
+    $gif = (string) ob_get_clean();
+
+    Http::fake(['*' => Http::response($gif, 200, ['Content-Type' => 'image/gif'])]);
+
+    $src = 'https://1.1.1.1/anim.gif';
+    $response = $this->get('/img/msg?src='.urlencode($src));
+
+    $response->assertOk()->assertHeader('Content-Type', 'image/gif');
+    expect(str_starts_with($response->getContent(), 'GIF8'))->toBeTrue();
+    Storage::disk('local')->assertExists('img-cache/msg/'.sha1($src).'.gif');
+});
+
 it('returns 304 on matching ETag', function () {
     Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
 
