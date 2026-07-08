@@ -10,7 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
-        "einundzwanzig/group": "*",
+        "einundzwanzig/group": "dev-master",
         "laravel/chisel": "^0.1.0",
         "laravel/fortify": "^1.37.2",
         "laravel/framework": "^13.17",
@@ -125,6 +125,10 @@
             "options": {
                 "symlink": true
             }
+        },
+        {
+            "type": "vcs",
+            "url": "git@github.com:HolgerHatGarKeineNode/einundzwanzig-group-package.git"
         },
         {
             "name": "flux",

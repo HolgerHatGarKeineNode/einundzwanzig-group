@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "d60ffebe781cfb94c8c1b1f0e89b696f",
+    "content-hash": "c3d42a4cc36c64125bd88b793922bac9",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -766,11 +766,11 @@
         },
         {
             "name": "einundzwanzig/group",
-            "version": "0.1.0",
+            "version": "dev-master",
             "dist": {
                 "type": "path",
                 "url": "packages/nostr-chat",
-                "reference": "6ebb7a73268d506cfc2c76da9e6588dc64369dea"
+                "reference": "90eafec1ab53f8f29cb013fba2b1839f7704d855"
             },
             "require": {
                 "illuminate/console": "^13.0",
@@ -1669,16 +1669,16 @@
         },
         {
             "name": "laravel/framework",
-            "version": "v13.18.1",
+            "version": "v13.19.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/framework.git",
-                "reference": "7d66044819e269f05924793a6800022dc181d850"
+                "reference": "514502b38e11bd676ecf83b271c9452cc7500f16"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/framework/zipball/7d66044819e269f05924793a6800022dc181d850",
-                "reference": "7d66044819e269f05924793a6800022dc181d850",
+                "url": "https://api.github.com/repos/laravel/framework/zipball/514502b38e11bd676ecf83b271c9452cc7500f16",
+                "reference": "514502b38e11bd676ecf83b271c9452cc7500f16",
                 "shasum": ""
             },
             "require": {
@@ -1889,7 +1889,7 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2026-07-02T18:35:20+00:00"
+            "time": "2026-07-07T14:13:33+00:00"
         },
         {
             "name": "laravel/passkeys",
@@ -14819,7 +14819,9 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "einundzwanzig/group": 20
+    },
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

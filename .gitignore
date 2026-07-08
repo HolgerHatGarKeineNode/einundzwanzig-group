@@ -30,6 +30,10 @@ yarn-error.log
 # NativePHP build artifacts (ephemer, 400+ MB)
 /nativephp
 
+# Chat-Package: lebt im Branch `package` (Composer-Weiche path↔vcs, siehe PLAN4 P1).
+# Lokal als git-worktree des package-Branches einhängen → Composer nutzt Symlink.
+/packages/nostr-chat
+
 # Pest-Browsertests: Host-Chromium-Registry (Symlinks) + Screenshots
 /tests/Browser/browsers
 /tests/Browser/Screenshots

@@ -15,7 +15,7 @@
 
 | Phase | Fokus | Status | Kern-Inhalt |
 |---|---|---|---|
-| **P1** — Package-Öffnung: Composer/GitHub + Symlink-Weiche | **blockierend, zuerst** | ⬜ offen | `package`-Branch (subtree split, History erhalten) im bestehenden Repo · `path`-zuerst-`vcs`-danach im Root-`composer.json` · Ordner gitignored · `git worktree` als lokaler Symlink-Checkout · CONTRIBUTING-Kurzanleitung. |
+| **P1** — Package-Öffnung: Composer/GitHub + Symlink-Weiche | **blockierend, zuerst** | ✅ **fertig** | Package in **eigenes Repo** `HolgerHatGarKeineNode/einundzwanzig-group-package` (Branch `master`, History via subtree split erhalten) ausgelagert. Root-`composer.json`: `path`-zuerst-`vcs`-danach, Require `einundzwanzig/group: dev-master`. Ordner `packages/nostr-chat` gitignored, lokal als eigenständiger Clone (Symlink-Dev). Beide Weichenstellungen verifiziert (path=Symlink lokal, vcs=`dev-master` bei Fremd-Clone trotz `minimum-stability: stable`). `CONTRIBUTING.md` erklärt das Setup. 16 Package-Tests grün, `npm run build` grün. |
 | **B1** — Space-Identität & -Branding | | ⬜ offen | Space-Name/-Icon aus **NIP-11**-Relay-Info statt nackter URL; Header „Space" → echter Name. |
 | **B2** — Raum-Metadaten vollständig (kind 39000) | | ⬜ offen | `picture`/Zugriffs-Flags aus `readRoomMeta` durchreichen (Client **und** Server-Cache); Raum-Avatar im Header & Raumliste; Zugriffs-Badges. |
 | **B3** — Autor-Profile: Lücken schließen | Kür | ⬜ offen | Profil-Karte bei Klick (about/website/banner/display_name); `deriveProfileDisplay` statt manuellem Join. |
@@ -27,7 +27,9 @@
 
 ---
 
-## P1 — Package-Öffnung: Composer/GitHub + Symlink-Weiche  *(zuerst, blockierend)*
+## P1 — Package-Öffnung: Composer/GitHub + Symlink-Weiche  *(zuerst, blockierend)* — ✅ umgesetzt
+
+> **Ist-Umsetzung (Abweichung vom ursprünglichen Plan):** Der geplante „Package-Branch im selben Monorepo" ist mit Composer **nicht** möglich — ein `vcs`-Repo liefert genau **ein** Paket, benannt nach dem **Default-Branch**. Da dessen `master` die App (`laravel/livewire-starter-kit`) ist, wird ein Branch mit abweichendem Paketnamen still verworfen (verifiziert per `composer -vvv`: „Reading composer.json of laravel/livewire-starter-kit (master)"). Deshalb: **eigenes Repo** `HolgerHatGarKeineNode/einundzwanzig-group-package`, Default-Branch `master`, Composer-Require `dev-master`. Lokaler `packages/nostr-chat`-Ordner = eigenständiger **Clone** (nicht Worktree). Alles andere (path-zuerst-vcs-Weiche, gitignore, Symlink-Dev) wie geplant. Paketname bleibt `einundzwanzig/group`; PHP-Namespace `App\Chat\` unverändert.
 
 **Ausgangslage (verifiziert):**
 - Package `einundzwanzig/group` (Namespace `App\Chat\`, Provider `App\Chat\ChatServiceProvider`) liegt in `packages/nostr-chat/`, **committed im Monorepo**, eingebunden per `path`-Repo mit `symlink: true` (`composer.json:121-128`), Root-Require `einundzwanzig/group: *` (`composer.json:13`).
