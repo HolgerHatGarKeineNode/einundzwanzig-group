@@ -110,12 +110,14 @@ test('mobile flag is true and gate passes through when nativephp runs', function
         ->assertSee('window.__nostrMobile = true', false);
 });
 
-test('openAmber is a safe no-op without the native runtime', function () {
-    // Ohne NativePHP-Extension (Web/Test) darf die Methode nicht crashen — der
-    // Amber-Button ist dort ohnehin aus.
+test('nostr-login renders the client-side Amber flow (no server round-trip)', function () {
+    // Amber wird auf dem Gerät direkt aus der Insel über die NativePHP-Bridge
+    // (Browser.Open) geöffnet — kein Livewire-Roundtrip, der den ersten Tap
+    // schluckte. Die SFC hat dafür bewusst KEINE Server-Methode mehr; die Seite
+    // rendert die Amber-Option client-seitig.
     Livewire::test('chat::nostr-login')
-        ->call('openAmber', 'nostrconnect://relay?x=1')
-        ->assertOk();
+        ->assertOk()
+        ->assertSee('Amber');
 });
 
 test('logout clears the session', function () {
