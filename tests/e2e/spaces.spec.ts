@@ -21,8 +21,10 @@ async function login(page: import('@playwright/test').Page): Promise<void> {
 test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async ({ page }) => {
     await login(page)
 
-    // Der eine aktive Space (Relay-URL als Label)
-    await expect(page.getByText('localhost:3334')).toBeVisible({ timeout: 15_000 })
+    // Der eine aktive Space — Name + Untertitel aus NIP-11 (B1), nicht die URL.
+    // Der Test-Relay meldet name="Zooid Test Space", description="local verify relay".
+    await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('local verify relay')).toBeVisible()
 
     // Beigetretene Räume (39002-Mitglied) + der entdeckbare `dev` unter „Andere Räume"
     await expect(page.getByText('Willkommen')).toBeVisible({ timeout: 15_000 })
@@ -43,5 +45,6 @@ test('M2: Space-Wechsel liegt in den Einstellungen', async ({ page }) => {
     await page.waitForURL('**/settings/space')
 
     await expect(page.getByText('Space wählen')).toBeVisible()
-    await expect(page.getByText('localhost:3334')).toBeVisible({ timeout: 15_000 })
+    // Space-Auswahl zeigt den NIP-11-Namen (B1), nicht die nackte URL.
+    await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
 })

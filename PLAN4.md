@@ -16,7 +16,7 @@
 | Phase | Fokus | Status | Kern-Inhalt |
 |---|---|---|---|
 | **P1** — Package-Öffnung: Composer/GitHub + Symlink-Weiche | **blockierend, zuerst** | ✅ **fertig** | Package in **eigenes Repo** `HolgerHatGarKeineNode/einundzwanzig-group-package` (Branch `master`, History via subtree split erhalten) ausgelagert. Root-`composer.json`: `path`-zuerst-`vcs`-danach, Require `einundzwanzig/group: dev-master`. Ordner `packages/einundzwanzig-group` gitignored, lokal als eigenständiger Clone (Symlink-Dev). Beide Weichenstellungen verifiziert (path=Symlink lokal, vcs=`dev-master` bei Fremd-Clone trotz `minimum-stability: stable`). `CONTRIBUTING.md` erklärt das Setup. 16 Package-Tests grün, `npm run build` grün. |
-| **B1** — Space-Identität & -Branding | | ⬜ offen | Space-Name/-Icon aus **NIP-11**-Relay-Info statt nackter URL; Header „Space" → echter Name. |
+| **B1** — Space-Identität & -Branding | | ✅ **fertig** | Space-Name + Beschreibung aus **NIP-11**-Relay-Info (`name`/`description`) statt nackter URL — im Header (dynamischer Titel via `titleExpr`, Fallback „Space") und in der Space-Auswahl (Einstellungen). Doppelten Namen aus der Space-Karte entfernt (Identität lebt nur im Header). Pure `spaceBranding()`-Logik (welshman-frei) + `ensureRelayProfile()`-Helper (lädt NIP-11 lazy, cached). `SpaceView.icon` durchgereicht (Render später B5-OG). Tests: 2 Logik + 2 E2E grün. |
 | **B2** — Raum-Metadaten vollständig (kind 39000) | | ⬜ offen | `picture`/Zugriffs-Flags aus `readRoomMeta` durchreichen (Client **und** Server-Cache); Raum-Avatar im Header & Raumliste; Zugriffs-Badges. |
 | **B3** — Autor-Profile: Lücken schließen | Kür | ⬜ offen | Profil-Karte bei Klick (about/website/banner/display_name); `deriveProfileDisplay` statt manuellem Join. |
 | **B4** — NIP-05-Verifizierung | | ⬜ offen | `@welshman/app/handles` aktivieren: verifizierter Handle → Häkchen an Autor/Directory/Profil-Karte. |
@@ -86,7 +86,9 @@ Fremd-Dev / CI:      composer install  (kein Ordner)                → Package 
 
 ---
 
-## B1 — Space-Identität & -Branding
+## B1 — Space-Identität & -Branding — ✅ umgesetzt
+
+> **Ist-Umsetzung:** Space-`name`/`description` aus NIP-11 (`ensureRelayProfile` lädt lazy via welshman `loadRelay`, cached). Anzeige NUR im Header (`app-header` bekam optionalen `titleExpr`-Prop → `x-text` auf der Überschrift; Fallback „Space" vor Hydrate) — der zunächst doppelte Name in der Space-Karte wurde auf Wunsch entfernt (Single-Space-Fokus: eine Identität pro Ansicht). Beschreibung als Header-Untertitel über der npub-Zeile. Space-Auswahl (`nostrSpaceSettings`) zeigt denselben NIP-11-Namen. Reine `spaceBranding()`-Logik in `relayCaps.ts` (testbar). `SpaceView.icon` wird geparst/durchgereicht, aber noch nicht gerendert (Ziel: B5-OG-Fallback).
 
 Heute hat ein Space **keinen echten Namen**: angezeigt wird die nackte Relay-URL, der Seiten-Header ist hart „Space".
 

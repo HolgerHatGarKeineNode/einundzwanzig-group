@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { spaceSupportsRooms } from '../../packages/einundzwanzig-group/js/relayCaps'
+import { spaceSupportsRooms, spaceBranding } from '../../packages/einundzwanzig-group/js/relayCaps'
 
 /**
  * Space-Filter (NIP-29): nur Group-Relays dürfen in der Auswahl stehen. Reiner
@@ -23,6 +23,25 @@ test.describe('spaceSupportsRooms', () => {
     test('filtert geladene Relays OHNE NIP-29 (nostr.einundzwanzig.space)', () => {
         // reale supported_nips von nostr.einundzwanzig.space (kein 29)
         expect(spaceSupportsRooms(false, { supported_nips: ['1', '2', '9', '11', '40'] })).toBe(false)
+    })
+})
+
+/**
+ * Space-Branding aus NIP-11 (B1): Name/Icon/Description mit URL-Fallback. Reiner
+ * Logiktest — kein Browser, keine welshman-Runtime.
+ */
+test.describe('spaceBranding', () => {
+    test('nimmt NIP-11 name/icon/description, wenn vorhanden', () => {
+        expect(spaceBranding('localhost:3334', { name: 'Zooid Test Space', icon: 'https://x/i.png', description: 'hi' })).toEqual({
+            label: 'Zooid Test Space',
+            icon: 'https://x/i.png',
+            description: 'hi',
+        })
+    })
+
+    test('fällt auf die gekürzte URL zurück, wenn kein Name da ist', () => {
+        expect(spaceBranding('localhost:3334', undefined)).toEqual({ label: 'localhost:3334', icon: '', description: '' })
+        expect(spaceBranding('localhost:3334', { name: '   ' })).toEqual({ label: 'localhost:3334', icon: '', description: '' })
     })
 })
 
