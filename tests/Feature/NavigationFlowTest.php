@@ -26,6 +26,22 @@ test('Bottom-Nav-Tabs tragen den Brand-Mark-Header, keinen Zurück-Pfeil', funct
     }
 });
 
+test('Native-Host (config group.exit): Vollbild-Chat zeigt sichtbaren Rücksprung statt Brand-Mark', function () {
+    // Host (z.B. Mobile-App) reicht eine Rücksprung-Route + Label — der Chat ist
+    // ein Vollbild-Takeover, ohne Ausgang säße der Nutzer fest. 'home' als
+    // Test-Ziel (im Web-Repo existent; die Mobile-App setzt 'meetups').
+    config(['group.exit' => ['route' => 'home', 'label' => 'Meetups']]);
+
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
+
+    // Sichtbarer „‹ Meetups"-Ausgang, der DIREKT zur Host-Route springt …
+    $res->assertSee('Meetups');
+    $res->assertSee('aria-label="Zurück zu Meetups"', false);
+    $res->assertSee('href="'.route('home').'"', false);
+    // … statt des (für einen App-Tab sinnlosen) Brand-Marks.
+    $res->assertDontSee('aria-label="Startseite"', false);
+});
+
 test('Empty-Space-Liste ist keine Sackgasse: CTA zur Startseite', function () {
     $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
 
