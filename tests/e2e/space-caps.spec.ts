@@ -31,17 +31,18 @@ test.describe('spaceSupportsRooms', () => {
  * Logiktest — kein Browser, keine welshman-Runtime.
  */
 test.describe('spaceBranding', () => {
-    test('nimmt NIP-11 name/icon/description, wenn vorhanden', () => {
-        expect(spaceBranding('localhost:3334', { name: 'Zooid Test Space', icon: 'https://x/i.png', description: 'hi' })).toEqual({
+    test('nimmt NIP-11 name/icon/description/banner, wenn vorhanden', () => {
+        expect(spaceBranding('localhost:3334', { name: 'Zooid Test Space', icon: 'https://x/i.png', description: 'hi', banner: 'https://x/b.png' })).toEqual({
             label: 'Zooid Test Space',
             icon: 'https://x/i.png',
             description: 'hi',
+            banner: 'https://x/b.png',
         })
     })
 
     test('fällt auf die gekürzte URL zurück, wenn kein Name da ist', () => {
-        expect(spaceBranding('localhost:3334', undefined)).toEqual({ label: 'localhost:3334', icon: '', description: '' })
-        expect(spaceBranding('localhost:3334', { name: '   ' })).toEqual({ label: 'localhost:3334', icon: '', description: '' })
+        expect(spaceBranding('localhost:3334', undefined)).toEqual({ label: 'localhost:3334', icon: '', description: '', banner: '' })
+        expect(spaceBranding('localhost:3334', { name: '   ' })).toEqual({ label: 'localhost:3334', icon: '', description: '', banner: '' })
     })
 })
 

@@ -82,6 +82,27 @@ test('IMG: Inline-Bild im Chat + Lightbox', async ({ page }) => {
 })
 
 /**
+ * B6 (PLAN4) — ein NIP-30 Custom-Emoji (`:shortcode:` + `emoji`-Tag) rendert als
+ * kleines Inline-`<img>` über den Bild-Proxy (avatar-Preset), nicht als Text.
+ */
+test('B6: Custom-Emoji (NIP-30) rendert als Inline-Bild', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    const code = `pepe${Math.floor(Math.random() * 1e9)}`
+    const url = `https://robohash.org/${code}.png`
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome',
+        '-t', `emoji=${code};${url}`, '-c', `Gruß :${code}:`, 'ws://localhost:3334',
+    ])
+
+    const emoji = page.locator('img.chat-emoji').last()
+    await expect(emoji).toBeVisible({ timeout: 15_000 })
+    await expect(emoji).toHaveAttribute('src', new RegExp(`/img/avatar\\?src=.*robohash.*${code}`))
+    await expect(emoji).toHaveAttribute('alt', `:${code}:`)
+})
+
+/**
  * PC (Profil-Cache) — der Seed vom /nostr/profiles-Endpunkt darf NIEMALS Nachrichten
  * oder die Raum-Mitgliedschaft löschen (Regression: `repository.load` LEERT das
  * Repository; korrekt ist `repository.publish`). Endpoint gestubbt, damit er ein

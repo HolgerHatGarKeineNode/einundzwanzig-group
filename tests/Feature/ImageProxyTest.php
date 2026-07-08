@@ -51,10 +51,10 @@ it('sends a real user-agent (hosts like wikimedia 403 generic ones)', function (
     Http::assertSent(fn ($request) => str_contains($request->header('User-Agent')[0] ?? '', 'EinundzwanzigImgProxy'));
 });
 
-it('proxies content presets (msg/full) to webp', function () {
+it('proxies content presets (banner/msg/full) to webp', function () {
     Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
 
-    foreach (['msg', 'full'] as $preset) {
+    foreach (['banner', 'msg', 'full'] as $preset) {
         $this->get('/img/'.$preset.'?src='.urlencode('https://1.1.1.1/pic.png'))
             ->assertOk()
             ->assertHeader('Content-Type', 'image/webp');
