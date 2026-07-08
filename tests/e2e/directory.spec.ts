@@ -32,9 +32,12 @@ test('M3: Directory zeigt Members + Rollen, ohne Flackern', async ({ page }) => 
     await expect(page.getByText('Alice Test')).toBeVisible()
 
     // Rollen-Badges aus 33534 (exakt — „Mitglied" ≠ Überschrift „Mitglieder").
-    // `.first()`: dieselben Labels stehen auch in den (versteckten) Admin-Modals.
-    await expect(page.getByText('Moderator', { exact: true }).first()).toBeVisible()
-    await expect(page.getByText('Mitglied', { exact: true }).first()).toBeVisible()
+    // Auf das sichtbare Member-Grid begrenzt: dieselben Labels stehen auch in den
+    // (versteckten) Admin-Modals — ein blindes `.first()` könnte auf ein solches
+    // Modal-Badge fallen und wäre dann fälschlich „hidden".
+    const grid = page.locator('.list-stagger')
+    await expect(grid.getByText('Moderator', { exact: true })).toBeVisible()
+    await expect(grid.getByText('Mitglied', { exact: true })).toBeVisible()
 
     // Fix A: der „leere" Zustand darf nie erscheinen (self war vor dem Filter da)
     await expect(page.getByText('Noch keine Mitglieder')).toBeHidden()
@@ -68,7 +71,7 @@ test('M3: Directory überlebt Reload ohne Flackern', async ({ page }) => {
     await page.reload()
 
     await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Moderator', { exact: true }).first()).toBeVisible()
+    await expect(page.locator('.list-stagger').getByText('Moderator', { exact: true })).toBeVisible()
     await expect(page.getByText('Noch keine Mitglieder')).toBeHidden()
 })
 

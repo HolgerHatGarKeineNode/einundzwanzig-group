@@ -58,6 +58,12 @@ mgmt() {
 mgmt '{"method":"createrole","params":["mod","Moderator","",["210","0.7","0.5"],"1"]}'
 mgmt '{"method":"createrole","params":["member","Mitglied","",["150","0.6","0.45"],"2"]}'
 mgmt "{\"method\":\"assignrole\",\"params\":[\"$SELF\",\"mod\"]}"
+# VIEWER erst als Space-Member zulassen, DANN die Rolle zuweisen. Auf einem
+# frischen Relay legt das erste `assignrole` den (noch fehlenden) Member zwar an,
+# verwirft aber die Rolle — der Member landet ohne Badge in der 13534. Vorheriges
+# `allowpubkey` stellt sicher, dass die Rollen-Zuweisung an einem bestehenden
+# Member greift.
+mgmt "{\"method\":\"allowpubkey\",\"params\":[\"$VIEWER\"]}"
 mgmt "{\"method\":\"assignrole\",\"params\":[\"$VIEWER\",\"member\"]}"
 
 # Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
