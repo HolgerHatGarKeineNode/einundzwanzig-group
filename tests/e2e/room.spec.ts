@@ -355,7 +355,9 @@ test('C1: Reaktion erzeugt kind-7 (e/k/h/PROTECTED), Toggle löscht via kind-5',
     const row = page.locator('div.group', { hasText: marker })
     await row.hover()
     await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
-    await page.getByRole('button', { name: 'Mit 👍 reagieren' }).click()
+    // MRU-Reihe ist beim ersten Gebrauch leer → 👍 über die Suche wählen.
+    await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('daumen')
+    await page.getByRole('button', { name: 'Mit Daumen hoch reagieren' }).click({ timeout: 15_000 })
 
     // Chip erscheint mit eigenem Zustand (aria-pressed).
     const chip = row.locator('button[aria-pressed="true"]')
@@ -371,7 +373,9 @@ test('C1: Reaktion erzeugt kind-7 (e/k/h/PROTECTED), Toggle löscht via kind-5',
         .poll(
             () =>
                 (reaction = queryRelayEvent(
-                    (e) => e.content === '👍' && e.tags.some((t) => t[0] === 'e' && t[1] === parentId),
+                    // Der Picker sendet das emojibase-Zeichen inkl. Variation-Selector
+                    // (👍️) — wie Flotilla; `includes` ist robust gegen das VS-Suffix.
+                    (e) => e.content.includes('👍') && e.tags.some((t) => t[0] === 'e' && t[1] === parentId),
                     'react',
                     7,
                 )) !== undefined,
@@ -429,6 +433,104 @@ test('C1: Custom-Emoji-Reaction rendert als Chip-Inline-Bild', async ({ page }) 
 })
 
 /**
+ * C1 (volles Panel, Suche) — der Picker bietet nicht nur die Schnell-Reihe, sondern
+ * das komplette Standard-Set: über die Suche wird ein Emoji AUSSERHALB der sechs
+ * Schnell-Reaktionen gefunden (🦄) und erzeugt eine reguläre kind-7.
+ */
+test('C1: Suche im Emoji-Panel wählt aus dem vollen Set (kind-7)', async ({ page }) => {
+    await openRoom(page, 'react')
+
+    const marker = `SR-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
+    // 🦄 ist NICHT in der Schnell-Reihe → nur über Suche + Grid erreichbar.
+    await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('einhorn')
+    await page.getByRole('button', { name: 'Mit Einhorn reagieren' }).click({ timeout: 15_000 })
+
+    const chip = row.locator('button[aria-pressed="true"]')
+    await expect(chip).toContainText('🦄', { timeout: 15_000 })
+
+    let parent: RelayEvent | undefined
+    await expect.poll(() => (parent = queryRelayEvent((e) => e.content === marker, 'react')) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect
+        .poll(
+            () =>
+                queryRelayEvent(
+                    (e) => e.content === '🦄' && e.tags.some((t) => t[0] === 'e' && t[1] === (parent as RelayEvent).id),
+                    'react',
+                    7,
+                ) !== undefined,
+            { timeout: 15_000 },
+        )
+        .toBe(true)
+})
+
+/**
+ * C1 (Custom-Emoji-Auswahl, NIP-30) — der Kern-Wunsch: der Picker zieht die eigene
+ * kind-10030-Liste (User Emoji List) und bietet sie als „Deine Emojis"-Tab an. Ein
+ * dort gewähltes Emoji erzeugt eine kind-7 mit `:shortcode:` + `["emoji", code, url]`.
+ */
+test('C1: Custom-Emoji aus dem Profil-Tab reagiert (:shortcode: + emoji-Tag)', async ({ page }) => {
+    // Eigene User-Emoji-Liste (kind 10030) VOR dem Öffnen seeden — daraus baut der
+    // Picker den „Deine Emojis"-Tab. Der Raum-Init wärmt sie vor (loadUserCustomEmojis),
+    // solange die Verbindung frisch AUTH'd ist. --auth + eigener nsec: member-only zooid.
+    const code = `frog${Math.floor(Math.random() * 1e9)}`
+    const url = `https://robohash.org/${code}.png`
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', NSEC, '-k', '10030',
+        '-t', `emoji=${code};${url}`, '-c', '', 'ws://localhost:3334',
+    ])
+
+    await openRoom(page, 'react')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `CP-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Picker (erst hier lädt loadUserCustomEmojis) → „Deine Emojis"-Tab → Custom-Emoji.
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
+    const tab = page.getByRole('tab', { name: 'Deine Emojis' })
+    await expect(tab).toBeVisible({ timeout: 15_000 })
+    await tab.click()
+    // Custom-Emojis erscheinen progressiv, sobald ihr Bild geladen ist.
+    const customBtn = page.getByRole('button', { name: `Mit :${code}: reagieren` })
+    await expect(customBtn).toBeVisible({ timeout: 15_000 })
+    await customBtn.click()
+
+    // Chip als Inline-Bild (Custom-Emoji, avatar-Proxy).
+    await expect(row.locator(`img.chat-emoji[alt=":${code}:"]`)).toBeVisible({ timeout: 15_000 })
+
+    // Am Relay: kind-7 mit `:code:` + rohem emoji-Tag (Original-URL, nicht proxifiziert).
+    let parent: RelayEvent | undefined
+    await expect.poll(() => (parent = queryRelayEvent((e) => e.content === marker, 'react')) !== undefined, { timeout: 15_000 }).toBe(true)
+    let reaction: RelayEvent | undefined
+    await expect
+        .poll(
+            () =>
+                (reaction = queryRelayEvent(
+                    (e) => e.content === `:${code}:` && e.tags.some((t) => t[0] === 'e' && t[1] === (parent as RelayEvent).id),
+                    'react',
+                    7,
+                )) !== undefined,
+            { timeout: 15_000 },
+        )
+        .toBe(true)
+    expect((reaction as RelayEvent).tags.find((t) => t[0] === 'emoji')).toEqual(['emoji', code, url])
+})
+
+/**
  * C1 (Reaktion, native App) — dieselbe View, Seam auf `isMobile`: auf dem Gerät
  * reagiert man über die Emoji-Reihe im „…"-Vollbild-Modal (kein Zeilen-Popover).
  */
@@ -454,10 +556,69 @@ test('C1: Reaktion über das native Modal', async ({ page }) => {
 
     const modal = page.locator('dialog[data-modal="message-menu"]')
     await expect(modal).toBeVisible()
-    await modal.getByRole('button', { name: 'Mit 🎉 reagieren' }).click()
+    // MRU-Reihe ist beim ersten Gebrauch leer → 🎉 über die Suche im Modal-Panel.
+    await modal.getByRole('searchbox', { name: 'Emoji suchen' }).fill('konfetti')
+    await modal.getByRole('button', { name: 'Mit Konfettibombe reagieren' }).click({ timeout: 15_000 })
 
     // Chip erscheint (Modal schließt via react()).
     await expect(row.locator('button[aria-pressed="true"]')).toContainText('🎉', { timeout: 15_000 })
+})
+
+/**
+ * C1 (MRU) — die obere Reihe zeigt „zuletzt benutzt": beim ersten Gebrauch leer,
+ * nach einer Reaktion steht das Emoji dort. Persistiert clientseitig (localStorage).
+ */
+test('C1: benutztes Emoji erscheint in „Zuletzt benutzt" (MRU)', async ({ page }) => {
+    await openRoom(page, 'react')
+
+    const marker = `MRU-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
+    // Beim ersten Gebrauch keine MRU-Reihe.
+    await expect(page.getByRole('group', { name: 'Zuletzt benutzt' })).toHaveCount(0)
+    // Über die Suche reagieren → Picker schließt.
+    await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('rakete')
+    await page.getByRole('button', { name: 'Mit Rakete reagieren' }).click({ timeout: 15_000 })
+
+    // Erneut öffnen → 🚀 steht jetzt in der „Zuletzt benutzt"-Reihe.
+    await row.hover()
+    await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
+    await expect(
+        page.getByRole('group', { name: 'Zuletzt benutzt' }).getByRole('button', { name: 'Mit Rakete reagieren' }),
+    ).toBeVisible({ timeout: 15_000 })
+})
+
+/**
+ * C1 (Chip-Tooltip) — der Reaction-Chip trägt als `title` die Nostr-Namen der
+ * Reagierenden (kommagetrennt), NICHT das Datum der Nachricht.
+ */
+test('C1: Reaction-Chip-Tooltip zeigt den Reagierenden-Namen', async ({ page }) => {
+    await openRoom(page, 'react')
+
+    const marker = `TT-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
+    await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('rakete')
+    await page.getByRole('button', { name: 'Mit Rakete reagieren' }).click({ timeout: 15_000 })
+
+    // Tooltip = Name des eingeloggten Reagierenden („Alice Test"), kein Datum.
+    const chip = row.locator('button[aria-pressed="true"]')
+    await expect(chip).toBeVisible({ timeout: 15_000 })
+    await expect(chip).toHaveAttribute('title', 'Alice Test')
 })
 
 /**
@@ -712,7 +873,7 @@ test('D2: Klick aufs Zitat hebt die Original-Nachricht hervor', async ({ page })
 
     // Zitat-Vorschau in B (enthält A's Text) anklicken → Original hervorgehoben.
     await page.getByRole('button').filter({ hasText: a }).first().click()
-    await expect(page.locator('[class*="ring-brand-500"]')).toBeVisible({ timeout: 3_000 })
+    await expect(page.locator('div.group[class*="ring-brand-500"]')).toBeVisible({ timeout: 3_000 })
 })
 
 /**
