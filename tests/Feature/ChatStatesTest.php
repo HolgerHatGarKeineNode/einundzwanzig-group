@@ -106,6 +106,24 @@ test('Raum-Menü (C4): Mention-Popover + Kopier-/Info-Einträge + Info-Modal —
     $res->assertSee('infoFor.seenOn.length', false);
 });
 
+test('Raum (C5): Poll-Karte rendert Optionen/Vote + Erstellen-Trigger + Create-Modal', function () {
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.room', ['h' => 'welcome']))->assertOk();
+
+    // Poll-Karte: nur bei m.poll, Optionen mit Balken (pct) + Vote-Klick.
+    $res->assertSee('x-if="m.poll"', false);
+    $res->assertSee('votePoll(m, opt.id)', false);
+    $res->assertSee('width:${opt.pct}%', false);
+    $res->assertSee('m.poll.voters', false);
+
+    // Erstellen-Trigger am Composer + Poll-Formular-Modal (Flux data-modal="create-poll").
+    $res->assertSee('openPollCreate()', false);
+    $res->assertSee('data-modal="create-poll"', false);
+    $res->assertSee('x-model="pollTitle"', false);
+    $res->assertSee('addPollOption()', false);
+    $res->assertSee('submitPoll()', false);
+    $res->assertSee('Mehrfachwahl');
+});
+
 test('Space-Einstellungen: ready-Guard verhindert Empty-Flash', function () {
     $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
 

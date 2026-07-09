@@ -7,6 +7,8 @@ const NAK = '/home/user/go/bin/nak'
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 // Pubkey des „Relay Admin" (ADMIN ist dessen Secret) — Ziel-Pubkey der @-Mention (C4).
 const SELF = 'da99fbe39247109327ac8504750d0227d50a8f84049ac8bd2f6c7ad0806ed76d'
+// Pubkey des eingeloggten Test-Users (= pub von NOSTR_TEST_NSEC) — Autor der Poll-Votes (C5).
+const VIEWER = '2dbaf5f4f86a1eed0948852ad48fa40aae2e48d5e347a77fac2ac936d6c94e7b'
 
 type RelayEvent = { id: string; pubkey: string; kind: number; content: string; tags: string[][]; created_at: number }
 
@@ -1315,4 +1317,157 @@ test('C4: natives Modal zeigt Kopieren + Info', async ({ page }) => {
     await expect(modal.getByRole('button', { name: 'npub kopieren' })).toBeVisible()
     await expect(modal.getByRole('button', { name: 'JSON kopieren' })).toBeVisible()
     await expect(modal.getByRole('button', { name: 'Info' })).toBeVisible()
+})
+
+/**
+ * C5 (Poll-Erstellen, NIP-88 kind 1068) — der Composer-Trigger öffnet das Formular;
+ * Frage + zwei Optionen + Einfachwahl erzeugen eine kind-1068 am Relay (option/
+ * polltype/relay/h/PROTECTED); die Poll erscheint sofort als Karte im Verlauf.
+ */
+test('C5: Poll erstellen erzeugt kind-1068 (option/polltype/h/PROTECTED) + Karte', async ({ page }) => {
+    await openRoom(page, 'poll')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+
+    const q = `PQ-${Math.floor(Math.random() * 1e9)}`
+    await page.getByRole('button', { name: 'Umfrage erstellen' }).click()
+    const modal = page.locator('dialog[data-modal="create-poll"]')
+    await expect(modal).toBeVisible()
+    await modal.getByPlaceholder('Was möchtest du fragen?').fill(q)
+    await modal.getByPlaceholder('Option 1').fill('Apfel')
+    await modal.getByPlaceholder('Option 2').fill('Birne')
+    await modal.getByRole('button', { name: 'Erstellen' }).click()
+
+    // Poll-Karte im Verlauf (Frage als Titel + beide Optionen als Vote-Buttons).
+    await expect(page.getByText(q, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const card = page.locator('div.group', { hasText: q })
+    await expect(card.getByRole('radio', { name: /Apfel/ })).toBeVisible()
+    await expect(card.getByRole('radio', { name: /Birne/ })).toBeVisible()
+
+    // Am Relay: kind-1068 mit option (id+label)/polltype/relay/h/PROTECTED.
+    let poll: RelayEvent | undefined
+    await expect.poll(() => (poll = queryRelayEvent((e) => e.content === q, 'poll', 1068)) !== undefined, { timeout: 15_000 }).toBe(true)
+    const p = poll as RelayEvent
+    expect(p.tags.filter((t) => t[0] === 'option').map((t) => t[2])).toEqual(['Apfel', 'Birne'])
+    expect(p.tags.find((t) => t[0] === 'polltype')?.[1]).toBe('singlechoice')
+    expect(p.tags.find((t) => t[0] === 'h')?.[1]).toBe('poll')
+    expect(p.tags.find((t) => t[0] === '-')).toBeTruthy() // PROTECTED (zooid meldet NIP-70)
+})
+
+/**
+ * C5 (Poll-Vote, kind 1018) — auf die geseedete Poll „Lieblingsfarbe?" abstimmen:
+ * Klick erzeugt eine kind-1018 (e=pollId, response=optId, h, PROTECTED), der eigene
+ * Vote wird markiert (●); eine zweite Wahl ersetzt die Stimme (Einfachwahl).
+ */
+test('C5: Abstimmen erzeugt kind-1018 (e/response/h/PROTECTED), Umwahl ersetzt', async ({ page }) => {
+    await openRoom(page, 'poll')
+    const card = page.locator('div.group', { hasText: 'Lieblingsfarbe?' })
+    await expect(card).toBeVisible({ timeout: 15_000 })
+
+    const pollId = queryRelayEvent((e) => e.content === 'Lieblingsfarbe?', 'poll', 1068)?.id as string
+    expect(pollId).toBeTruthy()
+
+    // „Rot" wählen → eigener Vote markiert (aria-checked + ● statt ○).
+    const rot = card.getByRole('radio', { name: /Rot/ })
+    await rot.click()
+    await expect(rot).toHaveAttribute('aria-checked', 'true', { timeout: 15_000 })
+
+    // Am Relay: kind-1018 mit e=pollId, response=Rot, h=poll, PROTECTED.
+    let vote: RelayEvent | undefined
+    await expect
+        .poll(
+            () =>
+                (vote = queryRelayEvent(
+                    (e) => e.tags.some((t) => t[0] === 'e' && t[1] === pollId) && e.tags.some((t) => t[0] === 'response' && t[1] === 'Rot'),
+                    'poll',
+                    1018,
+                )) !== undefined,
+            { timeout: 15_000 },
+        )
+        .toBe(true)
+    const v = vote as RelayEvent
+    expect(v.tags.find((t) => t[0] === 'e')?.[1]).toBe(pollId)
+    expect(v.tags.find((t) => t[0] === 'response')?.[1]).toBe('Rot')
+    expect(v.tags.find((t) => t[0] === 'h')?.[1]).toBe('poll')
+    expect(v.tags.find((t) => t[0] === '-')).toBeTruthy()
+
+    // Umwahl (Einfachwahl): „Blau" → neue kind-1018, Blau markiert, Rot nicht mehr.
+    const blau = card.getByRole('radio', { name: /Blau/ })
+    await blau.click()
+    await expect(blau).toHaveAttribute('aria-checked', 'true', { timeout: 15_000 })
+    await expect(rot).toHaveAttribute('aria-checked', 'false')
+    await expect
+        .poll(
+            () =>
+                queryRelayEvent(
+                    (e) => e.tags.some((t) => t[0] === 'e' && t[1] === pollId) && e.tags.some((t) => t[0] === 'response' && t[1] === 'Blau'),
+                    'poll',
+                    1018,
+                ) !== undefined,
+            { timeout: 15_000 },
+        )
+        .toBe(true)
+})
+
+/**
+ * C5 (Mehrfachwahl, kind 1018) — auf die geseedete multiplechoice-Poll „Lieblingsobst?"
+ * mehrere Optionen an-/abwählen: Toggle-Add trägt beide `response`-Tags, Toggle-Remove
+ * schrumpft die Auswahl, und das komplette Abwählen sendet KEINE leere Response (Guard).
+ */
+test('C5: Mehrfachwahl toggelt Optionen (Add/Remove) + kein Empty-Vote', async ({ page }) => {
+    await openRoom(page, 'poll')
+    const card = page.locator('div.group', { hasText: 'Lieblingsobst?' })
+    await expect(card).toBeVisible({ timeout: 15_000 })
+
+    const pollId = queryRelayEvent((e) => e.content === 'Lieblingsobst?', 'poll', 1068)?.id as string
+    expect(pollId).toBeTruthy()
+    // Jüngste eigene kind-1018 auf diese Poll (die Umwahl produziert mehrere).
+    const latestResponse = (): RelayEvent | undefined =>
+        execFileSync(NAK, ['req', '-k', '1018', '-t', 'h=poll', '--auth', '--sec', NSEC, ZOOID_WS])
+            .toString()
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map((l) => JSON.parse(l) as RelayEvent)
+            .filter((e) => e.pubkey === VIEWER && e.tags.some((t) => t[0] === 'e' && t[1] === pollId))
+            .sort((a, b) => b.created_at - a.created_at)[0]
+
+    // Zwei Optionen anwählen → beide markiert (Checkbox-Rolle).
+    const apfel = card.getByRole('checkbox', { name: /Apfel/ })
+    const birne = card.getByRole('checkbox', { name: /Birne/ })
+    await apfel.click()
+    await expect(apfel).toHaveAttribute('aria-checked', 'true', { timeout: 15_000 })
+    await birne.click()
+    await expect(birne).toHaveAttribute('aria-checked', 'true', { timeout: 15_000 })
+
+    // Jüngste eigene kind-1018 trägt beide response-Tags (Toggle-Add summiert).
+    await expect
+        .poll(
+            () => {
+                const resp = latestResponse()?.tags.filter((t) => t[0] === 'response').map((t) => t[1]) ?? []
+                return resp.includes('Apfel') && resp.includes('Birne')
+            },
+            { timeout: 15_000 },
+        )
+        .toBe(true)
+
+    // „Apfel" wieder abwählen → nur noch „Birne" markiert + in der Response.
+    await apfel.click()
+    await expect(apfel).toHaveAttribute('aria-checked', 'false', { timeout: 15_000 })
+    await expect(birne).toHaveAttribute('aria-checked', 'true')
+    await expect
+        .poll(
+            () => {
+                const resp = latestResponse()?.tags.filter((t) => t[0] === 'response').map((t) => t[1]) ?? []
+                return resp.length === 1 && resp[0] === 'Birne'
+            },
+            { timeout: 15_000 },
+        )
+        .toBe(true)
+
+    // Letzte Option abwählen → Guard: keine leere Response, „Birne" bleibt markiert.
+    const before = latestResponse()?.id
+    await birne.click()
+    await page.waitForTimeout(1500)
+    await expect(birne).toHaveAttribute('aria-checked', 'true')
+    expect(latestResponse()?.id).toBe(before) // keine neue kind-1018 gesendet
 })
