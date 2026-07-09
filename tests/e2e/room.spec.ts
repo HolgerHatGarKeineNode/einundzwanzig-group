@@ -785,16 +785,16 @@ test('C3: Bearbeiten republisht mit gleicher created_at (Delete + kind-9)', asyn
 })
 
 /**
- * C3 (Bearbeiten-Grenze) — eine über 5 Minuten alte eigene Nachricht bietet kein
+ * C3 (Bearbeiten-Grenze) — eine über 30 Minuten alte eigene Nachricht bietet kein
  * „Bearbeiten" mehr (canEdit-Zeitfenster), wohl aber „Zitieren" und „Löschen".
  */
-test('C3: >5 min alte Nachricht bietet kein Bearbeiten', async ({ page }) => {
+test('C3: >30 min alte Nachricht bietet kein Bearbeiten', async ({ page }) => {
     await openRoom(page, 'edit')
     await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
 
-    // Eigene, 10 min alte Nachricht seeden (als Test-User → m.mine, aber außerhalb des Fensters).
+    // Eigene, 40 min alte Nachricht seeden (als Test-User → m.mine, aber außerhalb des Fensters).
     const marker = `OLD-${Math.floor(Math.random() * 1e9)}`
-    const oldTs = Math.floor(Date.now() / 1000) - 600
+    const oldTs = Math.floor(Date.now() / 1000) - 2400
     execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '9', '-t', 'h=edit', '--ts', String(oldTs), '-c', marker, ZOOID_WS])
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
 
