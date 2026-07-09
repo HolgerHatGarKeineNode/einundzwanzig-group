@@ -122,6 +122,11 @@ test('Raum (C5): Poll-Karte rendert Optionen/Vote + Erstellen-Trigger + Create-M
     $res->assertSee('addPollOption()', false);
     $res->assertSee('submitPoll()', false);
     $res->assertSee('Mehrfachwahl');
+
+    // Optionen per Griff umsortieren (natives DnD): draggable Griff + Reorder-Handler.
+    $res->assertSee('draggable="true"', false);
+    $res->assertSee('pollDragStart(opt.id)', false);
+    $res->assertSee('pollReorder(opt.id)', false);
 });
 
 test('Space-Einstellungen: ready-Guard verhindert Empty-Flash', function () {

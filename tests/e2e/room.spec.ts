@@ -1409,17 +1409,31 @@ test('C5: Abstimmen erzeugt kind-1018 (e/response/h/PROTECTED), Umwahl ersetzt',
 })
 
 /**
- * C5 (Mehrfachwahl, kind 1018) — auf die geseedete multiplechoice-Poll „Lieblingsobst?"
- * mehrere Optionen an-/abwählen: Toggle-Add trägt beide `response`-Tags, Toggle-Remove
- * schrumpft die Auswahl, und das komplette Abwählen sendet KEINE leere Response (Guard).
+ * C5 (Mehrfachwahl, kind 1018) — Toggle ist zustandsabhängig, darum eine EIGENE frische
+ * multiplechoice-Poll erstellen (deterministischer Nullzustand, kein Seed-Reuse-Bloat).
+ * Zwei Optionen an-: beide `response`-Tags; eine ab-: Auswahl schrumpft; komplett ab-:
+ * KEINE leere Response (Empty-Guard).
  */
 test('C5: Mehrfachwahl toggelt Optionen (Add/Remove) + kein Empty-Vote', async ({ page }) => {
     await openRoom(page, 'poll')
-    const card = page.locator('div.group', { hasText: 'Lieblingsobst?' })
-    await expect(card).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
 
-    const pollId = queryRelayEvent((e) => e.content === 'Lieblingsobst?', 'poll', 1068)?.id as string
-    expect(pollId).toBeTruthy()
+    // Eigene Mehrfachwahl-Poll mit zwei Optionen anlegen (frisch → nichts vorgewählt).
+    const q = `PM-${Math.floor(Math.random() * 1e9)}`
+    await page.getByRole('button', { name: 'Umfrage erstellen' }).click()
+    const modal = page.locator('dialog[data-modal="create-poll"]')
+    await expect(modal).toBeVisible()
+    await modal.getByPlaceholder('Was möchtest du fragen?').fill(q)
+    await modal.getByPlaceholder('Option 1').fill('Apfel')
+    await modal.getByPlaceholder('Option 2').fill('Birne')
+    await modal.getByLabel('Auswahl').selectOption('multiplechoice')
+    await modal.getByRole('button', { name: 'Erstellen' }).click()
+
+    const card = page.locator('div.group', { hasText: q })
+    await expect(card).toBeVisible({ timeout: 15_000 })
+    let pollId = ''
+    await expect.poll(() => (pollId = queryRelayEvent((e) => e.content === q, 'poll', 1068)?.id ?? ''), { timeout: 15_000 }).not.toBe('')
+
     // Jüngste eigene kind-1018 auf diese Poll (die Umwahl produziert mehrere).
     const latestResponse = (): RelayEvent | undefined =>
         execFileSync(NAK, ['req', '-k', '1018', '-t', 'h=poll', '--auth', '--sec', NSEC, ZOOID_WS])
@@ -1439,30 +1453,17 @@ test('C5: Mehrfachwahl toggelt Optionen (Add/Remove) + kein Empty-Vote', async (
     await birne.click()
     await expect(birne).toHaveAttribute('aria-checked', 'true', { timeout: 15_000 })
 
-    // Jüngste eigene kind-1018 trägt beide response-Tags (Toggle-Add summiert).
-    await expect
-        .poll(
-            () => {
-                const resp = latestResponse()?.tags.filter((t) => t[0] === 'response').map((t) => t[1]) ?? []
-                return resp.includes('Apfel') && resp.includes('Birne')
-            },
-            { timeout: 15_000 },
-        )
-        .toBe(true)
+    // UI-erstellte Polls haben UUID-Options-IDs (nicht Label==ID) → am Relay die ANZAHL
+    // der response-Tags prüfen; die label-basierten aria-checked-Checks oben belegen, DASS
+    // die richtigen Optionen gewählt sind. Jüngste kind-1018 trägt beide (Toggle-Add summiert).
+    const respCount = (): number => latestResponse()?.tags.filter((t) => t[0] === 'response').length ?? 0
+    await expect.poll(respCount, { timeout: 15_000 }).toBe(2)
 
-    // „Apfel" wieder abwählen → nur noch „Birne" markiert + in der Response.
+    // „Apfel" wieder abwählen → nur noch „Birne" markiert + eine response.
     await apfel.click()
     await expect(apfel).toHaveAttribute('aria-checked', 'false', { timeout: 15_000 })
     await expect(birne).toHaveAttribute('aria-checked', 'true')
-    await expect
-        .poll(
-            () => {
-                const resp = latestResponse()?.tags.filter((t) => t[0] === 'response').map((t) => t[1]) ?? []
-                return resp.length === 1 && resp[0] === 'Birne'
-            },
-            { timeout: 15_000 },
-        )
-        .toBe(true)
+    await expect.poll(respCount, { timeout: 15_000 }).toBe(1)
 
     // Letzte Option abwählen → Guard: keine leere Response, „Birne" bleibt markiert.
     const before = latestResponse()?.id
@@ -1470,4 +1471,40 @@ test('C5: Mehrfachwahl toggelt Optionen (Add/Remove) + kein Empty-Vote', async (
     await page.waitForTimeout(1500)
     await expect(birne).toHaveAttribute('aria-checked', 'true')
     expect(latestResponse()?.id).toBe(before) // keine neue kind-1018 gesendet
+})
+
+/**
+ * C5 (Poll-Erstellen, Optionen umsortieren) — der Drag-Griff sortiert die Optionen im
+ * Formular per HTML5-DnD um; die erstellte kind-1068 trägt die `option`-Tags in der
+ * neuen Reihenfolge. DnD wird über dispatchEvent gefeuert (verlässlich, keine Physik).
+ */
+test('C5: Optionen im Formular per Drag umsortieren, Reihenfolge landet in kind-1068', async ({ page }) => {
+    await openRoom(page, 'poll')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+
+    const q = `PO-${Math.floor(Math.random() * 1e9)}`
+    await page.getByRole('button', { name: 'Umfrage erstellen' }).click()
+    const modal = page.locator('dialog[data-modal="create-poll"]')
+    await expect(modal).toBeVisible()
+    await modal.getByPlaceholder('Was möchtest du fragen?').fill(q)
+    await modal.getByPlaceholder('Option 1').fill('Eins')
+    await modal.getByPlaceholder('Option 2').fill('Zwei')
+    await modal.getByRole('button', { name: 'Option hinzufügen' }).click()
+    await modal.getByPlaceholder('Option 3').fill('Drei')
+
+    // „Eins" (Griff 1) auf Position 3 („Drei") ziehen → Reihenfolge: Zwei, Drei, Eins.
+    await modal.getByLabel('Option 1 verschieben').dispatchEvent('dragstart')
+    await modal.getByLabel('Option 3 verschieben').dispatchEvent('dragover', { bubbles: true })
+    await modal.getByLabel('Option 3 verschieben').dispatchEvent('drop', { bubbles: true })
+    await expect(modal.getByPlaceholder('Option 1')).toHaveValue('Zwei')
+    await expect(modal.getByPlaceholder('Option 2')).toHaveValue('Drei')
+    await expect(modal.getByPlaceholder('Option 3')).toHaveValue('Eins')
+
+    await modal.getByRole('button', { name: 'Erstellen' }).click()
+    await expect(page.getByText(q, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Am Relay: option-Tags in der umsortierten Reihenfolge.
+    let poll: RelayEvent | undefined
+    await expect.poll(() => (poll = queryRelayEvent((e) => e.content === q, 'poll', 1068)) !== undefined, { timeout: 15_000 }).toBe(true)
+    expect((poll as RelayEvent).tags.filter((t) => t[0] === 'option').map((t) => t[2])).toEqual(['Zwei', 'Drei', 'Eins'])
 })
