@@ -8,10 +8,14 @@ const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
 type RelayEvent = { id: string; pubkey: string; kind: number; content: string; tags: string[][] }
 
-/** Fragt das Test-zooid (member-only → mit AUTH) nach dem ersten passenden Event des Kinds. */
-function queryRelayEvent(pred: (e: RelayEvent) => boolean, h = 'welcome', kind = 9): RelayEvent | undefined {
-    const out = execFileSync(NAK, ['req', '-k', String(kind), '-t', `h=${h}`, '--auth', '--sec', NSEC, 'ws://localhost:3334']).toString()
-    return out
+/**
+ * Fragt das Test-zooid (member-only → mit AUTH) nach dem ersten passenden Event des
+ * Kinds. `h=null` lässt den `#h`-Filter weg (für Events ohne Group-Tag, z.B. kind-1984 Report).
+ */
+function queryRelayEvent(pred: (e: RelayEvent) => boolean, h: string | null = 'welcome', kind = 9): RelayEvent | undefined {
+    const args = ['req', '-k', String(kind), ...(h ? ['-t', `h=${h}`] : []), '--auth', '--sec', NSEC, 'ws://localhost:3334']
+    return execFileSync(NAK, args)
+        .toString()
         .trim()
         .split('\n')
         .filter(Boolean)
@@ -454,6 +458,117 @@ test('C1: Reaktion über das native Modal', async ({ page }) => {
 
     // Chip erscheint (Modal schließt via react()).
     await expect(row.locator('button[aria-pressed="true"]')).toContainText('🎉', { timeout: 15_000 })
+})
+
+/**
+ * C2 (Löschen über das Menü) — die eigene Nachricht lässt sich über das „…"-Menü
+ * (nicht nur den Inline-Trash) löschen: Menüeintrag „Löschen" → Bestätigung →
+ * kind-5-Tombstone am Relay, Zeile verschwindet. Dedizierter „mod"-Raum.
+ */
+test('C2: Löschen über das „…"-Menü entfernt die Nachricht (kind-5)', async ({ page }) => {
+    await openRoom(page, 'mod')
+    const marker = `MD-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Parent-id am Relay festhalten, bevor der Tombstone die Nachricht verdeckt.
+    let parent: RelayEvent | undefined
+    await expect.poll(() => (parent = queryRelayEvent((e) => e.content === marker, 'mod')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const parentId = (parent as RelayEvent).id
+
+    // „…"-Menü → Löschen (nur bei eigener Nachricht) → Bestätigungs-Modal.
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await page.getByRole('menuitem', { name: 'Löschen' }).click()
+    await page.getByRole('button', { name: 'Löschen', exact: true }).click()
+
+    await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+    // Am Relay: kind-5 auf die Marker-Nachricht.
+    await expect
+        .poll(() => queryRelayEvent((e) => e.tags.some((t) => t[0] === 'e' && t[1] === parentId), 'mod', 5) !== undefined, {
+            timeout: 15_000,
+        })
+        .toBe(true)
+})
+
+/**
+ * C2 (Melden) — eine fremde Nachricht (ADMIN) melden: „…"-Menü → Melden → der
+ * Default-Grund („spam") wird als kind-1984 (NIP-56) publiziert, mit `["p", autor]`
+ * und `["e", id, reason]`, OHNE `h`/PROTECTED (keine Group-Message).
+ */
+test('C2: Melden erzeugt kind-1984 (p + e,reason)', async ({ page }) => {
+    await openRoom(page, 'mod')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+
+    // Fremde Nachricht (ADMIN) als Meldeziel — der Melden-Eintrag zeigt sich nur bei !m.mine.
+    const marker = `RP-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=mod', '-c', marker, 'ws://localhost:3334'])
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    let target: RelayEvent | undefined
+    await expect.poll(() => (target = queryRelayEvent((e) => e.content === marker, 'mod')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const t = target as RelayEvent
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await page.getByRole('menuitem', { name: 'Melden' }).click()
+    // Modal offen (Default-Grund „spam") → Melden.
+    await page.getByRole('button', { name: 'Melden', exact: true }).click()
+
+    // Am Relay: kind-1984 auf die Zielnachricht, p = Autor, e trägt den reason.
+    let report: RelayEvent | undefined
+    await expect
+        .poll(() => (report = queryRelayEvent((e) => e.tags.some((tg) => tg[0] === 'e' && tg[1] === t.id), null, 1984)) !== undefined, {
+            timeout: 15_000,
+        })
+        .toBe(true)
+    const rep = report as RelayEvent
+    expect(rep.tags.find((tg) => tg[0] === 'p')?.[1]).toBe(t.pubkey)
+    expect(rep.tags.find((tg) => tg[0] === 'e' && tg[1] === t.id)?.[2]).toBe('spam')
+    expect(rep.tags.some((tg) => tg[0] === 'h')).toBe(false) // Report ist keine Group-Message
+})
+
+/**
+ * C2 (native App) — dieselbe View, Seam auf `isMobile`: im „…"-Vollbild-Modal zeigt
+ * sich „Löschen" bei eigener, „Melden" bei fremder Nachricht.
+ */
+test('C2: native Modal zeigt Löschen (eigen) und Melden (fremd)', async ({ page }) => {
+    await openRoom(page, 'mod')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+    await page.addInitScript(() => {
+        ;(window as unknown as { __nostrMobile: boolean }).__nostrMobile = true
+    })
+    await page.goto('/rooms/mod')
+
+    // Eigene frische Nachricht → Modal zeigt „Löschen", nicht „Melden".
+    const own = `NM-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(own)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(own, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const ownRow = page.locator('div.group', { hasText: own })
+    await ownRow.click()
+    await ownRow.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    const modal = page.locator('dialog[data-modal="message-menu"]')
+    await expect(modal.getByRole('button', { name: 'Löschen' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'Melden' })).toBeHidden()
+    await modal.getByRole('button', { name: 'Antworten' }).click() // Modal schließen
+
+    // Fremde (ADMIN) Nachricht → Modal zeigt „Melden", nicht „Löschen".
+    const foreign = `NF-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=mod', '-c', foreign, 'ws://localhost:3334'])
+    await expect(page.getByText(foreign, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const foreignRow = page.locator('div.group', { hasText: foreign })
+    await foreignRow.click()
+    await foreignRow.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await expect(modal.getByRole('button', { name: 'Melden' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'Löschen' })).toBeHidden()
 })
 
 /**

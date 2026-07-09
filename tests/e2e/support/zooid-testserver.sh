@@ -51,6 +51,9 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=vip -t name=VIP -t about=Privat -t 
 # 50er-Fenster bleiben, sonst reißt M4). Jeder C1-Test sendet seine eigene frische
 # Nachricht und reagiert darauf — Bloat bleibt isoliert und stört nichts.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=react -t name=Reaktionen -t about=C1-Reaktionstests "$R" >/dev/null 2>&1 || true
+# Dedizierter Schreib-Raum für die C2-Moderationstests (Löschen/Melden): schreiben
+# eigene Nachrichten + Reports und dürfen daher „welcome" nicht aufblähen.
+nak event --auth --sec "$ADMIN" -k 9007 -t h=mod -t name=Moderation -t about=C2-Moderationstests "$R" >/dev/null 2>&1 || true
 
 # NIP-86-Management (HTTP + NIP-98, als ADMIN). MUSS vor allen USER-Events laufen:
 # Der Relay ist member-only (public_write=false, wie Prod), also darf der Test-User
@@ -92,6 +95,7 @@ nak event --auth --sec "$USER" -k 9021 -t h=welcome "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=general "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=scroll "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=react "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$USER" -k 9021 -t h=mod "$R" >/dev/null 2>&1 || true
 
 # Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
 # (nak-Events sind nicht replaceable → Duplikate vermeiden).
