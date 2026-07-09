@@ -39,10 +39,10 @@ test('Raum: Inline-Fehler-Callout mit Retry + aria-busy am Verlauf', function ()
     $res->assertSee('Verlauf wird geladen…');
 });
 
-test('Raum-Menü (C2): Löschen nur bei eigener, Melden nur bei fremder Nachricht — Web + native', function () {
+test('Raum-Menü (C2): Löschen nur bei eigener, Fork off! nur bei fremder Nachricht — Web + native', function () {
     $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.room', ['h' => 'welcome']))->assertOk();
 
-    // Web-Popover (flux:dropdown): Löschen hinter m.mine, Melden hinter !m.mine.
+    // Web-Popover (flux:dropdown): Löschen hinter m.mine, Fork off! hinter !m.mine.
     $res->assertSee('x-if="m.mine"', false);
     $res->assertSee('askDelete(m)', false);
     $res->assertSee('x-if="!m.mine"', false);
@@ -52,7 +52,7 @@ test('Raum-Menü (C2): Löschen nur bei eigener, Melden nur bei fremder Nachrich
     $res->assertSee('x-show="menuFor?.mine"', false);
     $res->assertSee('x-show="!menuFor?.mine"', false);
 
-    // Melde-Modal: Grund-Auswahl (NIP-56) + Bestätigen (Flux rendert das Modal als
+    // Fork-off!-Modal: Grund-Auswahl (NIP-56) + Bestätigen (Flux rendert das Modal als
     // data-modal="report-message", vgl. E2E-Selektor).
     $res->assertSee('data-modal="report-message"', false);
     $res->assertSee('x-model="reportReason"', false);

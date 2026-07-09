@@ -496,15 +496,15 @@ test('C2: Löschen über das „…"-Menü entfernt die Nachricht (kind-5)', asy
 })
 
 /**
- * C2 (Melden) — eine fremde Nachricht (ADMIN) melden: „…"-Menü → Melden → der
+ * C2 (Fork off!) — eine fremde Nachricht (ADMIN) anprangern: „…"-Menü → Fork off! → der
  * Default-Grund („spam") wird als kind-1984 (NIP-56) publiziert, mit `["p", autor]`
  * und `["e", id, reason]`, OHNE `h`/PROTECTED (keine Group-Message).
  */
-test('C2: Melden erzeugt kind-1984 (p + e,reason)', async ({ page }) => {
+test('C2: Fork off! erzeugt kind-1984 (p + e,reason)', async ({ page }) => {
     await openRoom(page, 'mod')
     await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
 
-    // Fremde Nachricht (ADMIN) als Meldeziel — der Melden-Eintrag zeigt sich nur bei !m.mine.
+    // Fremde Nachricht (ADMIN) als Fork-off!-Ziel — der Eintrag zeigt sich nur bei !m.mine.
     const marker = `RP-${Math.floor(Math.random() * 1e9)}`
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=mod', '-c', marker, 'ws://localhost:3334'])
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -515,9 +515,9 @@ test('C2: Melden erzeugt kind-1984 (p + e,reason)', async ({ page }) => {
     const row = page.locator('div.group', { hasText: marker })
     await row.hover()
     await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await page.getByRole('menuitem', { name: 'Melden' }).click()
-    // Modal offen (Default-Grund „spam") → Melden.
-    await page.getByRole('button', { name: 'Melden', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Fork off!' }).click()
+    // Modal offen (Default-Grund „spam") → Fork off!.
+    await page.getByRole('button', { name: 'Fork off!', exact: true }).click()
 
     // Am Relay: kind-1984 auf die Zielnachricht, p = Autor, e trägt den reason.
     let report: RelayEvent | undefined
@@ -534,9 +534,9 @@ test('C2: Melden erzeugt kind-1984 (p + e,reason)', async ({ page }) => {
 
 /**
  * C2 (native App) — dieselbe View, Seam auf `isMobile`: im „…"-Vollbild-Modal zeigt
- * sich „Löschen" bei eigener, „Melden" bei fremder Nachricht.
+ * sich „Löschen" bei eigener, „Fork off!" bei fremder Nachricht.
  */
-test('C2: native Modal zeigt Löschen (eigen) und Melden (fremd)', async ({ page }) => {
+test('C2: native Modal zeigt Löschen (eigen) und Fork off! (fremd)', async ({ page }) => {
     await openRoom(page, 'mod')
     await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
     await page.addInitScript(() => {
@@ -544,7 +544,7 @@ test('C2: native Modal zeigt Löschen (eigen) und Melden (fremd)', async ({ page
     })
     await page.goto('/rooms/mod')
 
-    // Eigene frische Nachricht → Modal zeigt „Löschen", nicht „Melden".
+    // Eigene frische Nachricht → Modal zeigt „Löschen", nicht „Fork off!".
     const own = `NM-${Math.floor(Math.random() * 1e9)}`
     const composer = page.getByPlaceholder('Nachricht schreiben…')
     await expect(composer).toBeVisible({ timeout: 15_000 })
@@ -557,17 +557,17 @@ test('C2: native Modal zeigt Löschen (eigen) und Melden (fremd)', async ({ page
     await ownRow.getByRole('button', { name: 'Weitere Aktionen' }).click()
     const modal = page.locator('dialog[data-modal="message-menu"]')
     await expect(modal.getByRole('button', { name: 'Löschen' })).toBeVisible()
-    await expect(modal.getByRole('button', { name: 'Melden' })).toBeHidden()
+    await expect(modal.getByRole('button', { name: 'Fork off!' })).toBeHidden()
     await modal.getByRole('button', { name: 'Antworten' }).click() // Modal schließen
 
-    // Fremde (ADMIN) Nachricht → Modal zeigt „Melden", nicht „Löschen".
+    // Fremde (ADMIN) Nachricht → Modal zeigt „Fork off!", nicht „Löschen".
     const foreign = `NF-${Math.floor(Math.random() * 1e9)}`
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=mod', '-c', foreign, 'ws://localhost:3334'])
     await expect(page.getByText(foreign, { exact: true })).toBeVisible({ timeout: 15_000 })
     const foreignRow = page.locator('div.group', { hasText: foreign })
     await foreignRow.click()
     await foreignRow.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await expect(modal.getByRole('button', { name: 'Melden' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'Fork off!' })).toBeVisible()
     await expect(modal.getByRole('button', { name: 'Löschen' })).toBeHidden()
 })
 
