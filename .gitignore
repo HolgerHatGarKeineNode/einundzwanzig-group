@@ -38,6 +38,13 @@ yarn-error.log
 /tests/Browser/browsers
 /tests/Browser/Screenshots
 
+# Alby-Payments-Skill: lokal installiert (echtes NWC-Wallet), nicht ins Repo
+/.agents/skills/alby-bitcoin-payments
+/.claude/skills/alby-bitcoin-payments
+
+# Skill-Lockfile: lokaler Skill-Zustand, nicht ins Repo
+/skills-lock.json
+
 # Editor-/Backup-Cruft — Git ist das Backup
 *.bak
 
