@@ -15,6 +15,9 @@ export default defineConfig({
     // Seriell: alle Tests teilen sich denselben serve-Prozess + Session-DB.
     workers: 1,
     reporter: [['list']],
+    // Test-zooid (:3335) SYNCHRON seeden, BEVOR Tests laufen — nicht im webServer, dessen
+    // Port-Probe schon vor Seed-Ende „bereit" meldet (Bind-vor-Seed-Race). Siehe Skript.
+    globalSetup: './tests/e2e/support/global-setup.ts',
     use: {
         baseURL: `http://127.0.0.1:${PORT}`,
         trace: 'on-first-retry',
@@ -33,14 +36,7 @@ export default defineConfig({
     ],
     webServer: [
         {
-            // Isolierter Test-zooid auf :3335 (nicht :3334 — dort darf ein Mitschau-
-            // zooid ungestört laufen). Läuft schon? Wird wiederverwendet.
-            command: 'bash tests/e2e/support/zooid-testserver.sh',
-            url: 'http://localhost:3335',
-            reuseExistingServer: true,
-            timeout: 60_000,
-        },
-        {
+            // Der Test-zooid (:3335) wird in globalSetup geseedet (Race-frei), nicht hier.
             command: `npm run build && php artisan serve --port=${PORT}`,
             url: `http://127.0.0.1:${PORT}`,
             reuseExistingServer: !process.env.CI,

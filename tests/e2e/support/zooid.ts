@@ -7,11 +7,34 @@ import { type Page } from '@playwright/test'
 export const ZOOID_WS = 'ws://localhost:3335'
 export const ZOOID_URL = `${ZOOID_WS}/`
 
+// Winziges 1×1-PNG (deterministische Bild-Antwort für alle proxifizierten/externen
+// Bilder). So trifft KEIN Test je eine echte Remote-URL → keine Rate-Limits, kein
+// Flake durch langsame Fremd-Hosts (robohash & Co.), kein Server-seitiger Proxy-Fetch.
+const PNG_1X1 = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+)
+
+/**
+ * Fängt alle Bildanfragen im Browser ab und beantwortet sie mit einem lokalen 1×1-PNG:
+ * den Bild-Proxy (`/img/{preset}?src=…`) UND direkte externe Bildhosts. Damit lädt der
+ * Emoji-Picker (zeigt Custom-Emoji erst nach dem `load`-Event) deterministisch, und
+ * keine echte Remote-URL wird je getroffen (nie wieder Rate-Limits). Der Marken-SVG
+ * (`/img/…​.svg`, ohne `?src=`) bleibt unangetastet.
+ */
+async function stubImages(page: Page): Promise<void> {
+    await page.route(/(\/img\/[a-z]+\?src=)|robohash\.org|gravatar\.com|imgproxy/i, (route) =>
+        route.fulfill({ status: 200, contentType: 'image/png', body: PNG_1X1 }),
+    )
+}
+
 /**
  * Zeigt welshman im Test auf den lokalen zooid statt auf öffentliche Relays —
- * via `window.__nostrRelays`, das core.ts VOR dem Init liest. Hermetisch.
+ * via `window.__nostrRelays`, das core.ts VOR dem Init liest. Hermetisch. Stubbt
+ * zugleich alle Bilder lokal (keine echten Remote-Fetches).
  */
 export async function useZooid(page: Page): Promise<void> {
+    await stubImages(page)
     await page.addInitScript((url) => {
         ;(window as unknown as { __nostrRelays: unknown }).__nostrRelays = {
             indexer: [url],

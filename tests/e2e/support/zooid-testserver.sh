@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
-# Startet den lokalen zooid-Relay für die E2E-Tests und seedet ihn idempotent:
-# 4 Räume (kind 9007 → 39000), Profile, Directory-Rollen (NIP-86) und Chat.
-# Der Relay ist member-only konfiguriert (config/test.toml, wie der Prod-Relay
-# group.einundzwanzig.space): nichts öffentlich, kein Self-Join. Der Test-User
-# bekommt Zugang NUR, weil der Admin ihn unten per `allowpubkey` hinzufügt — genau
-# wie in Prod. Ein fremder npub sieht nichts (Vereins-Gate greift korrekt).
-# Hinweis: kind-10009 (persönliche Raum-Folgeliste) lehnt zooid als Gruppenrelay
-# ab — sie gehört auf die eigenen Relays des Users; die App führt sie clientseitig
-# (optimistisch). In dieser hermetischen Umgebung erscheinen daher alle Räume als
-# „Andere Räume". Läuft im Vordergrund (Playwright-webServer); stirbt mit ihm.
+# Bereitet den lokalen zooid-Relay (:3335) für die E2E-Tests vor: seedet ihn mit
+# 8 Räumen (kind 9007 → 39000), Profilen, Directory-Rollen (NIP-86), Mitgliedschaften
+# und Chat. Wird aus Playwrights `globalSetup` (nicht webServer!) aufgerufen und läuft
+# SYNCHRON durch bis zur Verifikation — so starten die Tests garantiert erst, wenn der
+# Seed komplett ist (kein Bind-vor-Seed-Race mehr). Der Relay wird DETACHED gestartet
+# und lebt über den Testlauf hinaus weiter, damit der nächste Lauf ihn wiederverwenden
+# kann (siehe Guard unten). Isoliert auf :3335 (eigenes data-test/config-test) — der
+# Mitschau-zooid auf :3334 bleibt IMMER unberührt.
+#
+# Zwei Dauerprobleme, hier an der Wurzel gelöst:
+#   1) Bind-vor-Seed-Race: früher galt der Relay als „bereit", sobald der Port band —
+#      das Seeding (v.a. die Raum-Mitgliedschaften) lief aber noch. Jetzt verifiziert
+#      das Skript am Ende und kehrt erst zurück, wenn das letzte Seed-Artefakt abrufbar
+#      ist. globalSetup blockiert die Tests bis dahin.
+#   2) DB-Bloat: bei reiner Wiederverwendung wuchs die SQLite über viele Läufe (die
+#      Schreib-Testräume sammelten Events) → Relay wurde lahm/flaky. Jetzt setzt der
+#      Guard den Relay frisch auf, sobald der edit-Raum den CAP überschreitet.
+# Der Member-only-Relay (config/test.toml, wie Prod group.einundzwanzig.space) lässt den
+# Test-User NUR zu, weil der Admin ihn unten per `allowpubkey` hinzufügt.
+# Hinweis: kind-10009 (persönliche Raum-Folgeliste) lehnt zooid als Gruppenrelay ab —
+# sie gehört auf die eigenen Relays des Users; die App führt sie clientseitig.
 set -uo pipefail
 export PATH="$PATH:/home/user/go/bin"
 
@@ -18,28 +29,48 @@ USER=76d709385088b75017085270143c45290c0d54b6204e4f9f08dd65b84a180853   # Wegwer
 SELF=da99fbe39247109327ac8504750d0227d50a8f84049ac8bd2f6c7ad0806ed76d   # Relay-self-Pubkey (Owner)
 VIEWER=2dbaf5f4f86a1eed0948852ad48fa40aae2e48d5e347a77fac2ac936d6c94e7b # Pubkey des Test-Users (pub von USER)
 DEV=0adf67475ccc5ca456fd3022e46f5d526eb0af6284bf85494c0dd7847f3e5033    # Entwickler-npub (npub1pt0kw36…) — zum lokalen Mitschauen; NUR local
-# ISOLIERT auf :3335 mit eigenem data-/config-Verzeichnis (nicht :3334!), damit ein
-# lokal laufender Mitschau-zooid auf :3334 (eigene DB) durch die Tests NIE gekillt,
-# zurückgesetzt oder im Port verdrängt wird. Beide Instanzen leben nebeneinander.
 R=ws://localhost:3335
 HTTP=http://localhost:3335
+PIDFILE=/tmp/e2e-zooid-3335.pid
+# Aufbläh-Schwelle: so viele kind-9 im (sonst leeren) edit-Raum toleriert der Guard,
+# bevor er den Relay frisch aufsetzt. Ein Testlauf schreibt ~10; darüber = Alt-Bloat.
+CAP=40
+
+# Läuft schon ein sauberer, geseedeter, nicht aufgeblähter zooid? → wiederverwenden.
+seeded_and_clean() {
+    timeout 5 curl -sf -H 'Accept: application/nostr+json' "$HTTP" >/dev/null 2>&1 || return 1
+    # edit-Mitgliedschaft ist das LETZTE Seed-Artefakt → ihr Vorhandensein ⇒ Seed fertig.
+    timeout 8 nak req -k 39002 -d edit --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
+    local n
+    n=$(timeout 8 nak req -k 9 -t h=edit --auth --sec "$USER" "$R" 2>/dev/null | grep -c '"kind":9')
+    [ "${n:-999}" -le "$CAP" ]
+}
 
 cd "$ZOOID_DIR" || exit 1
 [ -f bin/zooid ] || CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go
+
+if seeded_and_clean; then
+    echo "zooid:3335 bereits sauber geseedet → Wiederverwendung (kein Reset)"
+    exit 0
+fi
+
+# Aufsetzen: alten/aufgeblähten zooid NUR auf :3335 stoppen (Mitschau :3334 bleibt).
+[ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
+fuser -k 3335/tcp 2>/dev/null
+sleep 0.5
 
 # Test-Config aus der lokalen test.toml ableiten, nur der Host wechselt auf :3335.
 # zooid dispatcht per HTTP-Host (instancesByHost) → der Host MUSS zum Port passen.
 mkdir -p config-test
 sed 's/localhost:3334/localhost:3335/' config/test.toml > config-test/test.toml
 
-# Frische SQLite je Lauf im ISOLIERTEN data-test/ (nie das Mitschau-data/ von :3334).
-# Ohne Reset dupliziert der idempotente Seed in DIESELBE DB (welcome wuchs 3→50+,
-# WAL-Bloat) → Tests wurden zunehmend lahm/flaky. Löschen = pristin.
+# Frische SQLite je Aufsetzen im ISOLIERTEN data-test/ (nie das Mitschau-data/ von :3334).
 rm -f data-test/db data-test/db-shm data-test/db-wal
 
-PORT=3335 DATA=./data-test CONFIG=./config-test ./bin/zooid &
-PID=$!
-trap 'kill $PID 2>/dev/null' EXIT INT TERM
+# DETACHED starten (eigene Session, /dev/null-stdin) → überlebt das Skript-Ende, sodass
+# der nächste Lauf ihn per Guard wiederverwenden kann. Kein `wait`, kein Trap.
+setsid env PORT=3335 DATA=./data-test CONFIG=./config-test ./bin/zooid </dev/null >/tmp/e2e-zooid-3335.log 2>&1 &
+echo "$!" > "$PIDFILE"
 
 # Auf NIP-11 warten (Relay oben)
 for _ in $(seq 1 40); do
@@ -62,6 +93,9 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=react -t name=Reaktionen -t about=C
 # Dedizierter Schreib-Raum für die C2-Moderationstests (Löschen/Melden): schreiben
 # eigene Nachrichten + Reports und dürfen daher „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=mod -t name=Moderation -t about=C2-Moderationstests "$R" >/dev/null 2>&1 || true
+# Dedizierter Schreib-Raum für die C3-Tests (Bearbeiten/Zitieren): schreiben eigene
+# Nachrichten + Delete-Republish + Quote-Only und dürfen „welcome" nicht aufblähen.
+nak event --auth --sec "$ADMIN" -k 9007 -t h=edit -t name=Bearbeiten -t about=C3-Edit-Zitat-Tests "$R" >/dev/null 2>&1 || true
 
 # NIP-86-Management (HTTP + NIP-98, als ADMIN). MUSS vor allen USER-Events laufen:
 # Der Relay ist member-only (public_write=false, wie Prod), also darf der Test-User
@@ -98,12 +132,13 @@ nak event --auth --sec "$USER"  -k 0 -c '{"name":"Alice Test"}'  "$R" >/dev/null
 # (kind 9021). Als zugelassenes Relay-Mitglied wird sein JoinRequest akzeptiert —
 # ein Fremder ohne `allowpubkey` käme hier NICHT durch (public_join=false). „dev"
 # bleibt für den Join/Leave-E2E-Test ausgespart. Idempotent: schon Mitglied →
-# „duplicate" (ignoriert).
+# „duplicate" (ignoriert). Der edit-Join steht ZULETZT — er ist das Verifikations-Artefakt.
 nak event --auth --sec "$USER" -k 9021 -t h=welcome "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=general "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=scroll "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=react "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=mod "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$USER" -k 9021 -t h=edit "$R" >/dev/null 2>&1 || true
 
 # Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
 # (nak-Events sind nicht replaceable → Duplikate vermeiden).
@@ -123,4 +158,11 @@ if [ "$(nak req -k 9 -t h=scroll --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -
     done
 fi
 
-wait $PID
+# Verifikation: erst zurückkehren, wenn das letzte Seed-Artefakt (edit-Mitgliedschaft)
+# wirklich abrufbar ist — DAS beseitigt den Bind-vor-Seed-Race. globalSetup blockiert
+# die Tests, bis dieses Skript hier durch ist.
+for _ in $(seq 1 40); do
+    timeout 5 nak req -k 39002 -d edit --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' && break
+    sleep 0.25
+done
+echo "zooid:3335 frisch aufgesetzt + geseedet + verifiziert"

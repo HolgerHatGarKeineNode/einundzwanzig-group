@@ -60,6 +60,27 @@ test('Raum-Menü (C2): Löschen nur bei eigener, Fork off! nur bei fremder Nachr
     $res->assertSee('confirmReport()', false);
 });
 
+test('Raum-Menü (C3): Bearbeiten hinter canEdit, Zitieren immer, Compose-Kontext editing/sharing — Web + native', function () {
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.room', ['h' => 'welcome']))->assertOk();
+
+    // Web-Popover: Zitieren immer, Bearbeiten nur bei canEdit(m) (eigen & ≤5 min).
+    $res->assertSee('share(m)', false);
+    $res->assertSee('x-if="canEdit(m)"', false);
+    $res->assertSee('startEdit(m)', false);
+
+    // Native Modal (Seam auf isMobile): dieselben Aktionen über menuFor.
+    $res->assertSee('share(menuFor)', false);
+    $res->assertSee('menuFor && canEdit(menuFor)', false);
+    $res->assertSee('startEdit(menuFor)', false);
+
+    // Compose-Kontext trägt Bearbeiten (editingId) und Zitieren (sharing) und cancelEdit.
+    $res->assertSee("editingId ? 'Nachricht bearbeiten'", false);
+    $res->assertSee("sharing ? 'Zitieren'", false);
+    $res->assertSee('cancelEdit()', false);
+    // Senden bleibt bei leerem Composer aktiv, solange sharing (Quote-Only).
+    $res->assertSee('draft.trim().length === 0 && !sharing', false);
+});
+
 test('Space-Einstellungen: ready-Guard verhindert Empty-Flash', function () {
     $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
 

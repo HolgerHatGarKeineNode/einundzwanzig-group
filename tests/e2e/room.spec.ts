@@ -6,7 +6,7 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
-type RelayEvent = { id: string; pubkey: string; kind: number; content: string; tags: string[][] }
+type RelayEvent = { id: string; pubkey: string; kind: number; content: string; tags: string[][]; created_at: number }
 
 /**
  * Fragt das Test-zooid (member-only → mit AUTH) nach dem ersten passenden Event des
@@ -504,7 +504,7 @@ test('C1: Custom-Emoji aus dem Profil-Tab reagiert (:shortcode: + emoji-Tag)', a
     const tab = page.getByRole('tab', { name: 'Deine Emojis' })
     await expect(tab).toBeVisible({ timeout: 15_000 })
     await tab.click()
-    // Custom-Emojis erscheinen progressiv, sobald ihr Bild geladen ist.
+    // Custom-Emojis erscheinen progressiv, sobald ihr Bild geladen ist (Stub → 1×1-PNG).
     const customBtn = page.getByRole('button', { name: `Mit :${code}: reagieren` })
     await expect(customBtn).toBeVisible({ timeout: 15_000 })
     await customBtn.click()
@@ -730,6 +730,201 @@ test('C2: native Modal zeigt Löschen (eigen) und Fork off! (fremd)', async ({ p
     await foreignRow.getByRole('button', { name: 'Weitere Aktionen' }).click()
     await expect(modal.getByRole('button', { name: 'Fork off!' })).toBeVisible()
     await expect(modal.getByRole('button', { name: 'Löschen' })).toBeHidden()
+})
+
+/**
+ * C3 (Bearbeiten) — eine frische eigene Nachricht bearbeiten: „…"-Menü → Bearbeiten
+ * füllt den Composer mit dem alten Text; nach dem Speichern liegt am Relay ein kind-5
+ * (Delete des Alten) UND eine neue kind-9 mit demselben `created_at` (Position bleibt).
+ */
+test('C3: Bearbeiten republisht mit gleicher created_at (Delete + kind-9)', async ({ page }) => {
+    await openRoom(page, 'edit')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const a = `EDIT-a-${Math.floor(Math.random() * 1e9)}`
+    const b = `EDIT-b-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(a)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(a, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Original am Relay festhalten (id + created_at) — der Republish erbt created_at.
+    let orig: RelayEvent | undefined
+    await expect.poll(() => (orig = queryRelayEvent((e) => e.content === a, 'edit')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const original = orig as RelayEvent
+
+    // „…"-Menü → Bearbeiten → Composer trägt den alten Text, Kontext „Nachricht bearbeiten".
+    const row = page.locator('div.group', { hasText: a })
+    await row.hover()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await page.getByRole('menuitem', { name: 'Bearbeiten' }).click()
+    await expect(page.getByText('Nachricht bearbeiten')).toBeVisible()
+    await expect(composer).toHaveValue(a)
+
+    await composer.fill(b)
+    await page.getByRole('button', { name: 'Senden' }).click()
+
+    // UI: neue Fassung da, alte weg.
+    await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(a, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+
+    // Relay: kind-5 auf das Original UND neue kind-9 (Text b) mit demselben created_at.
+    await expect
+        .poll(() => queryRelayEvent((e) => e.tags.some((t) => t[0] === 'e' && t[1] === original.id), 'edit', 5) !== undefined, {
+            timeout: 15_000,
+        })
+        .toBe(true)
+    let edited: RelayEvent | undefined
+    await expect.poll(() => (edited = queryRelayEvent((e) => e.content === b, 'edit')) !== undefined, { timeout: 15_000 }).toBe(true)
+    expect((edited as RelayEvent).created_at).toBe(original.created_at)
+    expect((edited as RelayEvent).id).not.toBe(original.id)
+})
+
+/**
+ * C3 (Bearbeiten-Grenze) — eine über 5 Minuten alte eigene Nachricht bietet kein
+ * „Bearbeiten" mehr (canEdit-Zeitfenster), wohl aber „Zitieren" und „Löschen".
+ */
+test('C3: >5 min alte Nachricht bietet kein Bearbeiten', async ({ page }) => {
+    await openRoom(page, 'edit')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+
+    // Eigene, 10 min alte Nachricht seeden (als Test-User → m.mine, aber außerhalb des Fensters).
+    const marker = `OLD-${Math.floor(Math.random() * 1e9)}`
+    const oldTs = Math.floor(Date.now() / 1000) - 600
+    execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '9', '-t', 'h=edit', '--ts', String(oldTs), '-c', marker, ZOOID_WS])
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await expect(page.getByRole('menuitem', { name: 'Bearbeiten' })).toHaveCount(0)
+    await expect(page.getByRole('menuitem', { name: 'Zitieren' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Löschen' })).toBeVisible()
+})
+
+/**
+ * C3 (Zitieren) — eine Nachricht ohne Kommentar teilen (Quote-Only): „…"-Menü →
+ * Zitieren → leer senden → am Relay eine kind-9 mit `q`+`p`+`h` und einem Body, der
+ * nur aus dem `nostr:nevent…`-Präfix besteht. Im Verlauf rendert die bestehende
+ * Zitat-Vorschau (Original + Vorschau = 2× Markertext).
+ */
+test('C3: Zitieren erzeugt Quote-Only (q/p, leerer Body)', async ({ page }) => {
+    await openRoom(page, 'edit')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `QUOTE-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    let target: RelayEvent | undefined
+    await expect.poll(() => (target = queryRelayEvent((e) => e.content === marker, 'edit')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const t = target as RelayEvent
+
+    // „…"-Menü → Zitieren → Kontext „Zitieren", Composer leer, Senden trotzdem aktiv.
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await page.getByRole('menuitem', { name: 'Zitieren' }).click()
+    // Share-Modus aktiv: Composer bleibt leer, Senden ist trotzdem freigeschaltet.
+    await expect(composer).toHaveValue('')
+    const send = page.getByRole('button', { name: 'Senden' })
+    await expect(send).toBeEnabled()
+    await send.click()
+
+    // Relay: Quote-Only kind-9 auf die Zielnachricht — q + p + h, Body nur nevent-Präfix.
+    let quote: RelayEvent | undefined
+    await expect
+        .poll(() => (quote = queryRelayEvent((e) => e.tags.some((tg) => tg[0] === 'q' && tg[1] === t.id), 'edit')) !== undefined, {
+            timeout: 15_000,
+        })
+        .toBe(true)
+    const q = quote as RelayEvent
+    expect(q.content).toMatch(/^nostr:nevent1[0-9a-z]+\s*$/)
+    expect(q.tags.find((tg) => tg[0] === 'p')?.[1]).toBe(t.pubkey)
+    expect(q.tags.find((tg) => tg[0] === 'h')?.[1]).toBe('edit')
+
+    // UI: die Zitat-Vorschau rendert das Original → Markertext erscheint zweimal.
+    await expect(page.getByText(marker, { exact: true })).toHaveCount(2, { timeout: 15_000 })
+})
+
+/**
+ * C3 (native App) — dieselbe View, Seam auf `isMobile`: das „…"-Vollbild-Modal zeigt
+ * bei eigener frischer Nachricht „Bearbeiten" und „Zitieren".
+ */
+test('C3: native Modal zeigt Bearbeiten + Zitieren', async ({ page }) => {
+    await openRoom(page, 'edit')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+    await page.addInitScript(() => {
+        ;(window as unknown as { __nostrMobile: boolean }).__nostrMobile = true
+    })
+    await page.goto('/rooms/edit')
+
+    const own = `NEDIT-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(own)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(own, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const ownRow = page.locator('div.group', { hasText: own })
+    await ownRow.click()
+    await ownRow.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    const modal = page.locator('dialog[data-modal="message-menu"]')
+    await expect(modal.getByRole('button', { name: 'Bearbeiten' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'Zitieren' })).toBeVisible()
+})
+
+/**
+ * C3 (Bearbeiten eines Zitats) — wird eine ANTWORT bearbeitet, bleiben `q`/`p`-Tag
+ * und der `nostr:nevent…`-Präfix erhalten (der Erhaltungszweig von editRoomMessage).
+ * Sonst verlöre ein bearbeiteter Reply still seinen Thread-Bezug.
+ */
+test('C3: Bearbeiten einer Antwort erhält q/p + nevent-Präfix', async ({ page }) => {
+    await openRoom(page, 'edit')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const a = `RE-a-${Math.floor(Math.random() * 1e9)}`
+    const b = `RE-b-${Math.floor(Math.random() * 1e9)}`
+    const b2 = `RE-b2-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(a)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(a, { exact: true })).toBeVisible({ timeout: 15_000 })
+    let aEv: RelayEvent | undefined
+    await expect.poll(() => (aEv = queryRelayEvent((e) => e.content === a, 'edit')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const aRelay = aEv as RelayEvent
+
+    // Auf A antworten → B trägt q/p + Präfix.
+    const rowA = page.locator('div.group', { hasText: a })
+    await rowA.click()
+    await rowA.getByRole('button', { name: 'Antworten' }).click()
+    await composer.fill(b)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
+    let bEv: RelayEvent | undefined
+    await expect.poll(() => (bEv = queryRelayEvent((e) => e.content.endsWith(b), 'edit')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const bOrig = bEv as RelayEvent
+
+    // B bearbeiten: Composer zeigt nur B's Klartext (ohne Präfix) → auf B2 ändern.
+    const rowB = page.locator('div.group', { hasText: b })
+    await rowB.hover()
+    await rowB.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await page.getByRole('menuitem', { name: 'Bearbeiten' }).click()
+    await expect(composer).toHaveValue(b)
+    await composer.fill(b2)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(b2, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Relay: neue kind-9 (Text b2) behält q=A.id + p=A.pubkey + nevent-Präfix, created_at = B.
+    let edited: RelayEvent | undefined
+    await expect.poll(() => (edited = queryRelayEvent((e) => e.content.endsWith(b2), 'edit')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const ed = edited as RelayEvent
+    expect(ed.content).toMatch(/^nostr:nevent1[0-9a-z]+\n\n/)
+    expect(ed.tags.find((t) => t[0] === 'q')?.[1]).toBe(aRelay.id)
+    expect(ed.tags.find((t) => t[0] === 'p')?.[1]).toBe(aRelay.pubkey)
+    expect(ed.created_at).toBe(bOrig.created_at)
+    expect(ed.id).not.toBe(bOrig.id)
 })
 
 /**
