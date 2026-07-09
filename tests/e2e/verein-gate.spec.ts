@@ -52,7 +52,7 @@ test('Vereins-Relay in den Einstellungen zeigt einen Toast', async ({ page }) =>
     await loginAndOpen(page, strangerNsec(), '/settings/space')
 
     // Der fixierte Default-Space (lokaler zooid) ist der einzige Eintrag.
-    await page.getByText('localhost:3334').click()
+    await page.getByText('localhost:3335').click()
 
     await page.waitForURL('**/spaces')
     await expect(page.getByText(/Vereins-Relay/)).toBeVisible({ timeout: 10_000 })

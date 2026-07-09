@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { useZooid } from './support/zooid'
+import { useZooid, ZOOID_WS } from './support/zooid'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
@@ -13,7 +13,7 @@ type RelayEvent = { id: string; pubkey: string; kind: number; content: string; t
  * Kinds. `h=null` lässt den `#h`-Filter weg (für Events ohne Group-Tag, z.B. kind-1984 Report).
  */
 function queryRelayEvent(pred: (e: RelayEvent) => boolean, h: string | null = 'welcome', kind = 9): RelayEvent | undefined {
-    const args = ['req', '-k', String(kind), ...(h ? ['-t', `h=${h}`] : []), '--auth', '--sec', NSEC, 'ws://localhost:3334']
+    const args = ['req', '-k', String(kind), ...(h ? ['-t', `h=${h}`] : []), '--auth', '--sec', NSEC, ZOOID_WS]
     return execFileSync(NAK, args)
         .toString()
         .trim()
@@ -65,7 +65,7 @@ test('M4: neue Nachricht erscheint live', async ({ page }) => {
     const marker = `Live-${Math.floor(Math.random() * 1e9)}`
     execFileSync(NAK, [
         'event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome',
-        '-c', `E2E ${marker}`, 'ws://localhost:3334',
+        '-c', `E2E ${marker}`, ZOOID_WS,
     ])
 
     await expect(page.getByText(`E2E ${marker}`)).toBeVisible({ timeout: 15_000 })
@@ -82,7 +82,7 @@ test('IMG: Inline-Bild im Chat + Lightbox', async ({ page }) => {
     const url = `https://robohash.org/e2e-${Math.floor(Math.random() * 1e9)}.png`
     execFileSync(NAK, [
         'event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome',
-        '-c', `Bild: ${url}`, 'ws://localhost:3334',
+        '-c', `Bild: ${url}`, ZOOID_WS,
     ])
 
     // Inline-Bild läuft über den Proxy (msg-Preset), nicht als Text-Link.
@@ -110,7 +110,7 @@ test('B6: Custom-Emoji (NIP-30) rendert als Inline-Bild', async ({ page }) => {
     const url = `https://robohash.org/${code}.png`
     execFileSync(NAK, [
         'event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome',
-        '-t', `emoji=${code};${url}`, '-c', `Gruß :${code}:`, 'ws://localhost:3334',
+        '-t', `emoji=${code};${url}`, '-c', `Gruß :${code}:`, ZOOID_WS,
     ])
 
     const emoji = page.locator('img.chat-emoji').last()
@@ -424,7 +424,7 @@ test('C1: Custom-Emoji-Reaction rendert als Chip-Inline-Bild', async ({ page }) 
     execFileSync(NAK, [
         'event', '--auth', '--sec', ADMIN, '-k', '7', '-t', 'h=react',
         '-t', `e=${(parent as RelayEvent).id}`, '-t', 'k=9', '-t', `emoji=${code};${url}`,
-        '-c', `:${code}:`, 'ws://localhost:3334',
+        '-c', `:${code}:`, ZOOID_WS,
     ])
 
     const chip = page.locator(`img.chat-emoji[alt=":${code}:"]`)
@@ -485,7 +485,7 @@ test('C1: Custom-Emoji aus dem Profil-Tab reagiert (:shortcode: + emoji-Tag)', a
     const url = `https://robohash.org/${code}.png`
     execFileSync(NAK, [
         'event', '--auth', '--sec', NSEC, '-k', '10030',
-        '-t', `emoji=${code};${url}`, '-c', '', 'ws://localhost:3334',
+        '-t', `emoji=${code};${url}`, '-c', '', ZOOID_WS,
     ])
 
     await openRoom(page, 'react')
@@ -667,7 +667,7 @@ test('C2: Fork off! erzeugt kind-1984 (p + e,reason)', async ({ page }) => {
 
     // Fremde Nachricht (ADMIN) als Fork-off!-Ziel — der Eintrag zeigt sich nur bei !m.mine.
     const marker = `RP-${Math.floor(Math.random() * 1e9)}`
-    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=mod', '-c', marker, 'ws://localhost:3334'])
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=mod', '-c', marker, ZOOID_WS])
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
     let target: RelayEvent | undefined
     await expect.poll(() => (target = queryRelayEvent((e) => e.content === marker, 'mod')) !== undefined, { timeout: 15_000 }).toBe(true)
@@ -723,7 +723,7 @@ test('C2: native Modal zeigt Löschen (eigen) und Fork off! (fremd)', async ({ p
 
     // Fremde (ADMIN) Nachricht → Modal zeigt „Fork off!", nicht „Löschen".
     const foreign = `NF-${Math.floor(Math.random() * 1e9)}`
-    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=mod', '-c', foreign, 'ws://localhost:3334'])
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=mod', '-c', foreign, ZOOID_WS])
     await expect(page.getByText(foreign, { exact: true })).toBeVisible({ timeout: 15_000 })
     const foreignRow = page.locator('div.group', { hasText: foreign })
     await foreignRow.click()
@@ -743,7 +743,7 @@ test('B3: Autor-Profil-Karte zeigt about/website/lud16', async ({ page }) => {
     execFileSync(NAK, [
         'event', '--auth', '--sec', ADMIN, '-k', '0',
         '-c', JSON.stringify({ name: 'Relay Admin', about: bio, website: 'https://profil-test.example', lud16: 'admin@ln.test' }),
-        'ws://localhost:3334',
+        ZOOID_WS,
     ])
 
     await openRoom(page)
@@ -761,7 +761,7 @@ test('B3: Autor-Profil-Karte zeigt about/website/lud16', async ({ page }) => {
 function publishToScroll(content: string): void {
     execFileSync(NAK, [
         'event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=scroll',
-        '-c', content, 'ws://localhost:3334',
+        '-c', content, ZOOID_WS,
     ])
 }
 
@@ -887,7 +887,7 @@ test('D2: Publish-Fehler zeigt Retry-Zeile, erneutes Senden räumt sie', async (
     await useZooid(page)
 
     let blockKind9 = true
-    await page.routeWebSocket(/localhost:3334/, (ws) => {
+    await page.routeWebSocket(/localhost:3335/, (ws) => {
         const server = ws.connectToServer()
         ws.onMessage((raw) => {
             const s = typeof raw === 'string' ? raw : raw.toString()
@@ -944,7 +944,7 @@ test('B4: verifizierter NIP-05-Handle zeigt Häkchen in der Profil-Karte', async
     execFileSync(NAK, [
         'event', '--auth', '--sec', ADMIN, '-k', '0',
         '-c', JSON.stringify({ name: 'Relay Admin', nip05: handle }),
-        'ws://localhost:3334',
+        ZOOID_WS,
     ])
     // welshman löst NIP-05 privacy-schonend über dufflepud auf (kein direkter
     // .well-known-Abruf) — Stub liefert den Handle mit GENAU der Autor-pubkey (Match).

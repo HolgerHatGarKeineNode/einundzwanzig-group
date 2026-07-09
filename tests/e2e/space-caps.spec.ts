@@ -32,7 +32,7 @@ test.describe('spaceSupportsRooms', () => {
  */
 test.describe('spaceBranding', () => {
     test('nimmt NIP-11 name/icon/description/banner, wenn vorhanden', () => {
-        expect(spaceBranding('localhost:3334', { name: 'Zooid Test Space', icon: 'https://x/i.png', description: 'hi', banner: 'https://x/b.png' })).toEqual({
+        expect(spaceBranding('localhost:3335', { name: 'Zooid Test Space', icon: 'https://x/i.png', description: 'hi', banner: 'https://x/b.png' })).toEqual({
             label: 'Zooid Test Space',
             icon: 'https://x/i.png',
             description: 'hi',
@@ -41,8 +41,8 @@ test.describe('spaceBranding', () => {
     })
 
     test('fällt auf die gekürzte URL zurück, wenn kein Name da ist', () => {
-        expect(spaceBranding('localhost:3334', undefined)).toEqual({ label: 'localhost:3334', icon: '', description: '', banner: '' })
-        expect(spaceBranding('localhost:3334', { name: '   ' })).toEqual({ label: 'localhost:3334', icon: '', description: '', banner: '' })
+        expect(spaceBranding('localhost:3335', undefined)).toEqual({ label: 'localhost:3335', icon: '', description: '', banner: '' })
+        expect(spaceBranding('localhost:3335', { name: '   ' })).toEqual({ label: 'localhost:3335', icon: '', description: '', banner: '' })
     })
 })
 

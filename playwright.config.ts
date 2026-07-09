@@ -33,9 +33,10 @@ export default defineConfig({
     ],
     webServer: [
         {
-            // Lokaler zooid-Relay + Testdaten (M2). Läuft schon? Wird wiederverwendet.
+            // Isolierter Test-zooid auf :3335 (nicht :3334 — dort darf ein Mitschau-
+            // zooid ungestört laufen). Läuft schon? Wird wiederverwendet.
             command: 'bash tests/e2e/support/zooid-testserver.sh',
-            url: 'http://localhost:3334',
+            url: 'http://localhost:3335',
             reuseExistingServer: true,
             timeout: 60_000,
         },
