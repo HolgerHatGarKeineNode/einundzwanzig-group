@@ -81,6 +81,31 @@ test('Raum-Menü (C3): Bearbeiten hinter canEdit, Zitieren immer, Compose-Kontex
     $res->assertSee('draft.trim().length === 0 && !sharing', false);
 });
 
+test('Raum-Menü (C4): Mention-Popover + Kopier-/Info-Einträge + Info-Modal — Web + native', function () {
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.room', ['h' => 'welcome']))->assertOk();
+
+    // @-Mention-Autocomplete: Popover hinter mentionOpen, Auswahl ruft pickMention.
+    $res->assertSee('x-if="mentionOpen"', false);
+    $res->assertSee('pickMention(item)', false);
+    $res->assertSee('onComposerInput($event.target)', false);
+
+    // Web-Popover: Kopier-/Info-Einträge (nur lesen).
+    $res->assertSee('copyNevent(m)', false);
+    $res->assertSee('copyNpub(m)', false);
+    $res->assertSee('copyJson(m)', false);
+    $res->assertSee('openInfo(m)', false);
+
+    // Native Modal (Seam auf isMobile): dieselben Aktionen über menuFor.
+    $res->assertSee('copyNevent(menuFor)', false);
+    $res->assertSee('openInfo(menuFor)', false);
+
+    // Info-Modal (Flux rendert data-modal="message-info") mit Roh-Event + Relays.
+    $res->assertSee('data-modal="message-info"', false);
+    $res->assertSee('x-text="infoFor.nevent"', false);
+    $res->assertSee('x-text="infoFor.json"', false);
+    $res->assertSee('infoFor.seenOn.length', false);
+});
+
 test('Space-Einstellungen: ready-Guard verhindert Empty-Flash', function () {
     $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
 

@@ -5,6 +5,8 @@ import { useZooid, ZOOID_WS } from './support/zooid'
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
+// Pubkey des „Relay Admin" (ADMIN ist dessen Secret) — Ziel-Pubkey der @-Mention (C4).
+const SELF = 'da99fbe39247109327ac8504750d0227d50a8f84049ac8bd2f6c7ad0806ed76d'
 
 type RelayEvent = { id: string; pubkey: string; kind: number; content: string; tags: string[][]; created_at: number }
 
@@ -1158,4 +1160,159 @@ test('B4: verifizierter NIP-05-Handle zeigt Häkchen in der Profil-Karte', async
     // Häkchen (Titel „NIP-05 verifiziert: …") + Handle-Text erscheinen nur bei Match.
     await expect(card.getByText(handle)).toBeVisible({ timeout: 15_000 })
     await expect(card.getByTitle(`NIP-05 verifiziert: ${handle}`)).toBeVisible()
+})
+
+/**
+ * C4 (Mention) — `@`-Autocomplete im Composer: nach `@Relay` erscheint der
+ * Mitglieder-Vorschlag „Relay Admin"; die Auswahl fügt `nostr:npub… ` ein. Die
+ * gesendete kind-9 trägt ein `["p", SELF]`-Tag (NIP-08/27) und rendert als @Name.
+ */
+test('C4: @-Mention fügt nostr:npub ein, trägt p-Tag, rendert @Name', async ({ page }) => {
+    await openRoom(page, 'mention')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    // Text zuerst, dann `@Relay` → der Vorschlag ersetzt das @-Token an Ort und
+    // Stelle (Directory lädt async → tippen wiederholen, bis der Vorschlag steht).
+    const marker = `MENTION-${Math.floor(Math.random() * 1e9)}`
+    const suggestion = page.getByRole('button', { name: /Relay Admin/ })
+    await expect(async () => {
+        await composer.fill('')
+        await composer.pressSequentially(`${marker} @Relay`)
+        await expect(suggestion).toBeVisible({ timeout: 1500 })
+    }).toPass({ timeout: 20_000 })
+
+    await suggestion.click()
+    // Draft: „<marker> nostr:npub… " — das npub steht an einer Wortgrenze (rendert als Mention).
+    await expect(composer).toHaveValue(new RegExp(`^${marker} nostr:npub1[0-9a-z]+ $`))
+    await page.getByRole('button', { name: 'Senden' }).click()
+
+    // Gerendert: der Profil-Node löst in DIESER Nachricht zu „@Relay Admin" auf
+    // (nicht rohes nprofile). Auf die Marker-Zeile scopen — der mention-Raum wird
+    // über Läufe wiederverwendet, es gibt also mehrere @Relay-Admin-Spans.
+    const rendered = page.locator('div.group', { hasText: marker })
+    await expect(rendered.locator('.mention', { hasText: '@Relay Admin' })).toBeVisible({ timeout: 15_000 })
+
+    // Relay: kind-9 mit nostr:npub… im Content UND p-Tag = SELF (Mention-Ziel).
+    let msg: RelayEvent | undefined
+    await expect.poll(() => (msg = queryRelayEvent((e) => e.content.includes(marker), 'mention')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const m = msg as RelayEvent
+    expect(m.content).toMatch(/nostr:npub1[0-9a-z]+/)
+    expect(m.tags.find((t) => t[0] === 'p')?.[1]).toBe(SELF)
+})
+
+/**
+ * C4 (Mention-Popover) — wird die Nachricht per Senden-Button bei offenem
+ * Autocomplete abgeschickt, schließt das Popover (kein veralteter Splice-Zustand
+ * über dem geleerten Composer). Review-Fix (closeMentions in send()).
+ */
+test('C4: Senden bei offenem @-Popover schließt das Popover', async ({ page }) => {
+    await openRoom(page, 'mention')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const suggestion = page.getByRole('button', { name: /Relay Admin/ })
+    await expect(async () => {
+        await composer.fill('')
+        await composer.pressSequentially('@Relay')
+        await expect(suggestion).toBeVisible({ timeout: 1500 })
+    }).toPass({ timeout: 20_000 })
+
+    // Statt Enter (das würde auswählen) den Senden-Button klicken → Popover weg.
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(suggestion).toBeHidden()
+    await expect(composer).toHaveValue('')
+})
+
+/**
+ * C4 (Kopieren) — das „…"-Menü kopiert nevent/npub/JSON in die Zwischenablage
+ * (nur lesen, kein Publish). Prüft die drei Formate über die Clipboard-API.
+ */
+test('C4: Kopieren liefert nevent/npub/JSON in die Zwischenablage', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await openRoom(page, 'mention')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `COPY-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    const openMenu = async () => {
+        await row.hover()
+        await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    }
+    const readClip = () => page.evaluate(() => navigator.clipboard.readText())
+
+    await openMenu()
+    await page.getByRole('menuitem', { name: 'npub kopieren' }).click()
+    expect(await readClip()).toMatch(/^npub1[0-9a-z]+$/)
+
+    await openMenu()
+    await page.getByRole('menuitem', { name: 'Event-Link kopieren' }).click()
+    expect(await readClip()).toMatch(/^nostr:nevent1[0-9a-z]+$/)
+
+    await openMenu()
+    await page.getByRole('menuitem', { name: 'JSON kopieren' }).click()
+    const json = JSON.parse(await readClip()) as RelayEvent
+    expect(json.kind).toBe(9)
+    expect(json.content).toBe(marker)
+})
+
+/**
+ * C4 (Info) — das „…"-Menü öffnet ein Nachricht-Info-Modal mit nevent, npub und
+ * dem rohen signierten Event (kind 9 + Inhalt). Nur lesen.
+ */
+test('C4: Info-Modal zeigt nevent/npub/Roh-Event', async ({ page }) => {
+    await openRoom(page, 'mention')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `INFO-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await page.getByRole('menuitem', { name: 'Info' }).click()
+
+    const modal = page.locator('dialog[data-modal="message-info"]')
+    await expect(modal.getByText('Nachricht-Details')).toBeVisible()
+    await expect(modal.getByText(/^nostr:nevent1[0-9a-z]+$/)).toBeVisible()
+    await expect(modal.getByText(/^npub1[0-9a-z]+$/)).toBeVisible()
+    await expect(modal.locator('pre')).toContainText('"kind": 9')
+    await expect(modal.locator('pre')).toContainText(marker)
+})
+
+/**
+ * C4 (native App) — dieselbe View, Seam auf `isMobile`: das „…"-Vollbild-Modal
+ * bietet die Kopier-/Info-Einträge (kein Web-Popover).
+ */
+test('C4: natives Modal zeigt Kopieren + Info', async ({ page }) => {
+    await openRoom(page, 'mention')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+    await page.addInitScript(() => {
+        ;(window as unknown as { __nostrMobile: boolean }).__nostrMobile = true
+    })
+    await page.goto('/rooms/mention')
+
+    const marker = `NCOPY-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.click()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    const modal = page.locator('dialog[data-modal="message-menu"]')
+    await expect(modal.getByRole('button', { name: 'Event-Link kopieren' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'npub kopieren' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'JSON kopieren' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'Info' })).toBeVisible()
 })

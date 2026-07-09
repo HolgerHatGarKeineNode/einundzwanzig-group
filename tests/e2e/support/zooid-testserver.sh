@@ -96,6 +96,9 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=mod -t name=Moderation -t about=C2-
 # Dedizierter Schreib-Raum für die C3-Tests (Bearbeiten/Zitieren): schreiben eigene
 # Nachrichten + Delete-Republish + Quote-Only und dürfen „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=edit -t name=Bearbeiten -t about=C3-Edit-Zitat-Tests "$R" >/dev/null 2>&1 || true
+# Dedizierter Schreib-Raum für die C4-Tests (Mentions/Copy/Info): schreiben eigene
+# Nachrichten mit @-Mentions und dürfen „welcome" nicht aufblähen.
+nak event --auth --sec "$ADMIN" -k 9007 -t h=mention -t name=Mentions -t about=C4-Mention-Tests "$R" >/dev/null 2>&1 || true
 
 # NIP-86-Management (HTTP + NIP-98, als ADMIN). MUSS vor allen USER-Events laufen:
 # Der Relay ist member-only (public_write=false, wie Prod), also darf der Test-User
@@ -138,6 +141,7 @@ nak event --auth --sec "$USER" -k 9021 -t h=general "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=scroll "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=react "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=mod "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$USER" -k 9021 -t h=mention "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=edit "$R" >/dev/null 2>&1 || true
 
 # Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
