@@ -7,6 +7,7 @@ import {
     getPollResults,
     getPollType,
     isPollClosed,
+    isPollShareQuote,
     ownPollSelection,
 } from '../../packages/einundzwanzig-group/js/polls'
 
@@ -118,5 +119,28 @@ test.describe('ownPollSelection', () => {
         expect(ownPollSelection(singlePoll, responses, 'me')).toEqual(['b'])
         expect(ownPollSelection(singlePoll, responses, null)).toEqual([])
         expect(ownPollSelection(singlePoll, responses, 'nobody')).toEqual([])
+    })
+})
+
+test.describe('isPollShareQuote (Flotilla-Kompat, verhindert Doppelanzeige)', () => {
+    // kind-9-Nachricht mit optionalem q-Tag + freiem Content bauen.
+    const msg = (content: string, q?: string): TrustedEvent =>
+        ({ id: 'm', pubkey: 'author', kind: 9, created_at: 0, tags: q ? [['q', q]] : [], content, sig: '' }) as TrustedEvent
+    const pollIds = new Set(['poll1'])
+
+    test('reine Share-Quote einer bekannten Poll wird ausgeblendet', () => {
+        expect(isPollShareQuote(msg('nostr:nevent1abc\n\n', 'poll1'), pollIds)).toBe(true)
+    })
+
+    test('normale Nachricht ohne q-Tag bleibt sichtbar', () => {
+        expect(isPollShareQuote(msg('Hallo Welt'), pollIds)).toBe(false)
+    })
+
+    test('Reply-Zitat auf eine NACHRICHT (q ∉ pollIds) bleibt sichtbar', () => {
+        expect(isPollShareQuote(msg('nostr:nevent1abc\n\nAntwort', 'msg42'), pollIds)).toBe(false)
+    })
+
+    test('Textzitat AUF eine Poll (eigener Kommentar) bleibt sichtbar', () => {
+        expect(isPollShareQuote(msg('nostr:nevent1abc\n\nGuter Punkt!', 'poll1'), pollIds)).toBe(false)
     })
 })
