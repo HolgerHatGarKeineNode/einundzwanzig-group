@@ -46,6 +46,11 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=dev -t name=Dev -t about=Entwicklun
 nak event --auth --sec "$ADMIN" -k 9007 -t h=scroll -t name=Scroll -t about=Langer-Verlauf "$R" >/dev/null 2>&1 || true
 # Raum mit Bild + Zugriffs-Flag (B2): `picture` → Avatar, `private` (Presence-Tag) → Schloss-Badge.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=vip -t name=VIP -t about=Privat -t picture=https://robohash.org/vip.png -t private "$R" >/dev/null 2>&1 || true
+# Dedizierter Schreib-Raum für die C1-Reaktionstests: die schreiben (Nachricht +
+# kind-7-Reactions) und dürfen daher NICHT „welcome" aufblähen (dessen Seed muss im
+# 50er-Fenster bleiben, sonst reißt M4). Jeder C1-Test sendet seine eigene frische
+# Nachricht und reagiert darauf — Bloat bleibt isoliert und stört nichts.
+nak event --auth --sec "$ADMIN" -k 9007 -t h=react -t name=Reaktionen -t about=C1-Reaktionstests "$R" >/dev/null 2>&1 || true
 
 # NIP-86-Management (HTTP + NIP-98, als ADMIN). MUSS vor allen USER-Events laufen:
 # Der Relay ist member-only (public_write=false, wie Prod), also darf der Test-User
@@ -86,6 +91,7 @@ nak event --auth --sec "$USER"  -k 0 -c '{"name":"Alice Test"}'  "$R" >/dev/null
 nak event --auth --sec "$USER" -k 9021 -t h=welcome "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=general "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=scroll "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$USER" -k 9021 -t h=react "$R" >/dev/null 2>&1 || true
 
 # Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
 # (nak-Events sind nicht replaceable → Duplikate vermeiden).

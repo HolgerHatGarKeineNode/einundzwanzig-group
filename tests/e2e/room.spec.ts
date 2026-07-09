@@ -6,11 +6,11 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
-type RelayEvent = { kind: number; content: string; tags: string[][] }
+type RelayEvent = { id: string; pubkey: string; kind: number; content: string; tags: string[][] }
 
-/** Fragt das Test-zooid (member-only → mit AUTH) nach dem ersten passenden Event. */
-function queryRelayEvent(pred: (e: RelayEvent) => boolean, h = 'welcome'): RelayEvent | undefined {
-    const out = execFileSync(NAK, ['req', '-k', '9', '-t', `h=${h}`, '--auth', '--sec', NSEC, 'ws://localhost:3334']).toString()
+/** Fragt das Test-zooid (member-only → mit AUTH) nach dem ersten passenden Event des Kinds. */
+function queryRelayEvent(pred: (e: RelayEvent) => boolean, h = 'welcome', kind = 9): RelayEvent | undefined {
+    const out = execFileSync(NAK, ['req', '-k', String(kind), '-t', `h=${h}`, '--auth', '--sec', NSEC, 'ws://localhost:3334']).toString()
     return out
         .trim()
         .split('\n')
@@ -327,6 +327,133 @@ test('C0: Interaktions-Menü öffnet als Modal (native App)', async ({ page }) =
     await expect(modal.getByText('Nachricht')).toBeVisible()
     await modal.getByRole('button', { name: 'Antworten' }).click()
     await expect(page.getByText('Antwort an')).toBeVisible()
+})
+
+/**
+ * C1 (Reaction + Toggle) — auf eine Nachricht reagieren (kind 7, NIP-25): der Chip
+ * erscheint mit eigenem Zustand; am Relay trägt die kind-7 exakt `e`/`k`/`h` plus
+ * `["-"]` (PROTECTED). Erneuter Chip-Klick nimmt zurück (kind-5-Delete am Relay),
+ * der Chip verschwindet wieder.
+ */
+test('C1: Reaktion erzeugt kind-7 (e/k/h/PROTECTED), Toggle löscht via kind-5', async ({ page }) => {
+    // Dedizierter „react"-Raum: schreibende C1-Tests bloaten NICHT „welcome" (dessen
+    // Seed muss im 50er-Fenster bleiben). Self-contained: eigene frische Nachricht.
+    await openRoom(page, 'react')
+
+    const marker = `RX-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Zeile → Reaktions-Picker (Web-Popover) → 👍
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
+    await page.getByRole('button', { name: 'Mit 👍 reagieren' }).click()
+
+    // Chip erscheint mit eigenem Zustand (aria-pressed).
+    const chip = row.locator('button[aria-pressed="true"]')
+    await expect(chip).toBeVisible({ timeout: 15_000 })
+    await expect(chip).toContainText('👍')
+
+    // Am Relay: kind-7 auf die Marker-Nachricht mit e/k/h/PROTECTED.
+    let msg: RelayEvent | undefined
+    await expect.poll(() => (msg = queryRelayEvent((e) => e.content === marker, 'react')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const parentId = (msg as RelayEvent).id
+    let reaction: RelayEvent | undefined
+    await expect
+        .poll(
+            () =>
+                (reaction = queryRelayEvent(
+                    (e) => e.content === '👍' && e.tags.some((t) => t[0] === 'e' && t[1] === parentId),
+                    'react',
+                    7,
+                )) !== undefined,
+            { timeout: 15_000 },
+        )
+        .toBe(true)
+    const r = reaction as RelayEvent
+    const rtag = (name: string) => r.tags.find((t) => t[0] === name)
+    expect(rtag('e')?.[1]).toBe(parentId)
+    expect(rtag('k')?.[1]).toBe('9')
+    expect(rtag('h')?.[1]).toBe('react')
+    expect(rtag('-')).toBeTruthy() // PROTECTED (zooid meldet NIP-70)
+
+    // Toggle: Chip klicken → Reaction weg (kind-5-Delete am Relay).
+    await chip.click()
+    await expect(row.locator('button[aria-pressed="true"]')).toHaveCount(0, { timeout: 15_000 })
+    await expect
+        .poll(() => queryRelayEvent((e) => e.tags.some((t) => t[0] === 'e' && t[1] === r.id), 'react', 5) !== undefined, {
+            timeout: 15_000,
+        })
+        .toBe(true)
+})
+
+/**
+ * C1 (Custom-Emoji, NIP-30) — eine kind-7-Reaction mit `:shortcode:` + `emoji`-Tag
+ * rendert als Chip mit Inline-`<img>` über den Bild-Proxy (avatar-Preset), nicht als
+ * Text. Die Reaction wird direkt am Relay erzeugt (der Picker bietet nur das
+ * Standard-Set), aggregiert unter der referenzierten Nachricht.
+ */
+test('C1: Custom-Emoji-Reaction rendert als Chip-Inline-Bild', async ({ page }) => {
+    await openRoom(page, 'react')
+
+    // Self-contained: eigene frische Nachricht senden (immer im Fenster), ihre id holen.
+    const marker = `CE-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    let parent: RelayEvent | undefined
+    await expect.poll(() => (parent = queryRelayEvent((e) => e.content === marker, 'react')) !== undefined, { timeout: 15_000 }).toBe(true)
+
+    const code = `pepe${Math.floor(Math.random() * 1e9)}`
+    const url = `https://robohash.org/${code}.png`
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '7', '-t', 'h=react',
+        '-t', `e=${(parent as RelayEvent).id}`, '-t', 'k=9', '-t', `emoji=${code};${url}`,
+        '-c', `:${code}:`, 'ws://localhost:3334',
+    ])
+
+    const chip = page.locator(`img.chat-emoji[alt=":${code}:"]`)
+    await expect(chip).toBeVisible({ timeout: 15_000 })
+    await expect(chip).toHaveAttribute('src', new RegExp(`/img/avatar\\?src=.*robohash.*${code}`))
+})
+
+/**
+ * C1 (Reaktion, native App) — dieselbe View, Seam auf `isMobile`: auf dem Gerät
+ * reagiert man über die Emoji-Reihe im „…"-Vollbild-Modal (kein Zeilen-Popover).
+ */
+test('C1: Reaktion über das native Modal', async ({ page }) => {
+    // Web einloggen, dann als native App den „react"-Raum laden (Session überlebt).
+    await openRoom(page, 'react')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+    await page.addInitScript(() => {
+        ;(window as unknown as { __nostrMobile: boolean }).__nostrMobile = true
+    })
+    await page.goto('/rooms/react')
+
+    const marker = `RM-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.click() // Touch: Aktionen einblenden
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+
+    const modal = page.locator('dialog[data-modal="message-menu"]')
+    await expect(modal).toBeVisible()
+    await modal.getByRole('button', { name: 'Mit 🎉 reagieren' }).click()
+
+    // Chip erscheint (Modal schließt via react()).
+    await expect(row.locator('button[aria-pressed="true"]')).toContainText('🎉', { timeout: 15_000 })
 })
 
 /**
