@@ -51,14 +51,15 @@ test('bottom-nav iteriert config(group.nav): eine Config-Zeile ergibt vier Tabs'
         ->toContain('Chat')->toContain('Wallet')->toContain('Meetups')->toContain('Mehr');
 });
 
-test('nav-tab gate=nostr fängt Tap ohne Session ab und dispatcht open-login-sheet', function () {
+test('nav-tab gate=nostr fängt Tap ohne Session über den authGate-Store ab', function () {
     $html = Blade::render('<x-group::nav-tab route="group.spaces" icon="chat-bubble-left-right" label="Räume" gate="nostr" />');
 
     expect($html)
-        ->toContain('open-login-sheet')
-        // Session korrekt aus dem JSON-serialisierten welshman-Store lesen (nicht der
-        // Rohwert — "undefined"/"null" wären truthy und der Gate immer offen).
-        ->toContain('JSON.parse')
+        // §4.2: der Tap läuft über den globalen authGate-Store (gateTap); der Store
+        // öffnet das Login-Sheet bzw. springt mit ?return auf den Login-View.
+        ->toContain('$store.authGate.gateTap')
+        // Das Ziel für ?return kommt aus dem Anchor-Pfad (nach Login zurück auf die Tab-Route).
+        ->toContain('$el.pathname')
         // In der Capture-Phase auf mousedown/keydown abfangen — click käme nach dem
         // wire:navigate-Commit zu spät.
         ->toContain('mousedown.capture')
@@ -71,7 +72,7 @@ test('nav-tab gate=guest ist ein reiner wire:navigate-Link ohne Login-Intercept'
 
     expect($html)
         ->toContain('wire:navigate')
-        ->not->toContain('open-login-sheet');
+        ->not->toContain('authGate');
 });
 
 test('status-strip trägt beide Signer-Banner in einem Strip', function () {
