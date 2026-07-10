@@ -23,3 +23,13 @@ test('wallet route is reachable with a nostr session', function () {
         ->get(route('group.wallet'))
         ->assertOk();
 });
+
+test('wallet page renders the Z4 receiving-address card', function () {
+    Livewire::test('group::settings.wallet')
+        ->assertOk()
+        ->assertSee('Empfangsadresse')
+        ->assertSee('Nicht gesetzt')
+        // „übernehmen"-Button + Save hängen an der Insel-Logik (addressMismatch/saveReceivingAddress).
+        ->assertSeeHtml('addressMismatch()')
+        ->assertSeeHtml('saveReceivingAddress()');
+});
