@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { NIP46_PERMS, nip46PermsAreStale } from '../../packages/einundzwanzig-group/js/nip46-perms'
+import { NIP46_PERMS, nip46PermsAreStale, permsToNip55Json } from '../../packages/einundzwanzig-group/js/nip46-perms'
 
 /**
  * Amber-Stabilität: die NIP-46-Perm-Liste MUSS jeden Kind abdecken, den der Client je
@@ -56,5 +56,29 @@ test.describe('nip46PermsAreStale (Reconnect-Nudge-Entscheidung)', () => {
         expect(nip46PermsAreStale('nip01', null)).toBe(false)
         expect(nip46PermsAreStale('nip07', null)).toBe(false)
         expect(nip46PermsAreStale(undefined, null)).toBe(false)
+    })
+})
+
+test.describe('permsToNip55Json (Amber NIP-55 permissions-Array)', () => {
+    test('sign_event:<kind> → {type,kind}; Methoden ohne kind → nur {type}', () => {
+        const json = JSON.parse(permsToNip55Json('sign_event:9,nip44_encrypt,sign_event:27235'))
+        expect(json).toContainEqual({ type: 'sign_event', kind: 9 })
+        expect(json).toContainEqual({ type: 'sign_event', kind: 27235 })
+        expect(json).toContainEqual({ type: 'nip44_encrypt' })
+    })
+
+    test('deckt die volle NIP46_PERMS-Liste ab (jeder sign_event mit numerischem kind)', () => {
+        const json = JSON.parse(permsToNip55Json(NIP46_PERMS)) as Array<{ type: string; kind?: number }>
+        expect(json.length).toBe(NIP46_PERMS.split(',').length)
+        for (const p of json) {
+            if (p.type === 'sign_event') {
+                expect(typeof p.kind).toBe('number')
+                expect(Number.isNaN(p.kind)).toBe(false)
+            } else {
+                expect(p.kind).toBeUndefined()
+            }
+        }
+        // Die kritische 27235 muss als sign_event-Eintrag vorhanden sein.
+        expect(json).toContainEqual({ type: 'sign_event', kind: 27235 })
     })
 })

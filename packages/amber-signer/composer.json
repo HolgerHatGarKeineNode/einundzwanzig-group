@@ -1,0 +1,25 @@
+{
+    "name": "einundzwanzig/amber-signer",
+    "description": "Amber NIP-55 same-device signer (offline, ContentResolver) for the EINUNDZWANZIG chat — welshman signer bridge",
+    "type": "nativephp-plugin",
+    "license": "MIT",
+    "require": {
+        "php": "^8.2",
+        "nativephp/mobile": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Einundzwanzig\\AmberSigner\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Einundzwanzig\\AmberSigner\\AmberSignerServiceProvider"
+            ]
+        },
+        "nativephp": {
+            "manifest": "nativephp.json"
+        }
+    }
+}

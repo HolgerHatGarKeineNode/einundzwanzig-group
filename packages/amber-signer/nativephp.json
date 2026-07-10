@@ -1,0 +1,51 @@
+{
+    "namespace": "AmberSigner",
+    "bridge_functions": [
+        {
+            "name": "AmberSigner.IsInstalled",
+            "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.IsInstalled",
+            "description": "True, wenn ein NIP-55-Signer (Amber) auf dem Gerät installiert ist"
+        },
+        {
+            "name": "AmberSigner.GetPublicKey",
+            "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.GetPublicKey",
+            "description": "get_public_key via ContentResolver (nur wenn App bereits autorisiert) — sonst authorized:false"
+        },
+        {
+            "name": "AmberSigner.RequestPublicKey",
+            "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.RequestPublicKey",
+            "description": "Einmaliger sichtbarer get_public_key-Intent (Login + Perms gewähren); Ergebnis via callbackUrl"
+        },
+        {
+            "name": "AmberSigner.SignEvent",
+            "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.SignEvent",
+            "description": "sign_event via ContentResolver (synchron, offline) — liefert signiertes Event oder authorized:false"
+        },
+        {
+            "name": "AmberSigner.Nip44Encrypt",
+            "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.Nip44Encrypt",
+            "description": "nip44_encrypt via ContentResolver (synchron, offline)"
+        },
+        {
+            "name": "AmberSigner.Nip44Decrypt",
+            "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.Nip44Decrypt",
+            "description": "nip44_decrypt via ContentResolver (synchron, offline)"
+        }
+    ],
+    "android": {
+        "min_version": 26,
+        "permissions": [],
+        "dependencies": {
+            "implementation": []
+        }
+    },
+    "ios": {
+        "min_version": "18.2",
+        "info_plist": {},
+        "dependencies": {
+            "swift_packages": [],
+            "pods": []
+        }
+    },
+    "events": []
+}
