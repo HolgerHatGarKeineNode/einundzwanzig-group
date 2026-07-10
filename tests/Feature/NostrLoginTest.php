@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 use swentel\nostr\Event\Event;
 use swentel\nostr\Key\Key;
@@ -7,17 +8,19 @@ use swentel\nostr\Sign\Sign;
 
 /**
  * Signiert ein NIP-98-Auth-Event (kind 27235) wie der Client — nur zum
- * Testen der server-seitigen Verifikation.
+ * Testen der server-seitigen Verifikation. `$createdAtOffset` datiert das Event
+ * zurück (Sekunden), um das EVENT_MAX_AGE-Fenster zu prüfen (langsames Amber).
  *
  * @return array{id: string, pubkey: string, created_at: int, kind: int, tags: array<int, array<int, string>>, content: string, sig: string}
  */
-function signHttpAuth(string $url, string $method, string $challenge): array
+function signHttpAuth(string $url, string $method, string $challenge, int $createdAtOffset = 0): array
 {
     $key = (new Key)->generatePrivateKey();
 
     $event = new Event;
     $event->setKind(27235);
     $event->setContent('');
+    $event->setCreatedAt(now()->timestamp - $createdAtOffset);
     $event->setTags([
         ['u', $url],
         ['method', $method],
@@ -27,6 +30,12 @@ function signHttpAuth(string $url, string $method, string $challenge): array
     (new Sign)->signEvent($event, $key);
 
     return $event->toArray();
+}
+
+/** Nonce so ablegen, wie es der challenge-Endpoint tut (Cache, gekeyt auf den Wert). */
+function seedChallenge(string $challenge): void
+{
+    Cache::put('nostr:challenge:'.$challenge, true, 300);
 }
 
 test('login page renders the nostr auth island', function () {
@@ -44,14 +53,13 @@ test('challenge returns a nonce and the login url', function () {
         ->assertJson(['url' => route('group.nostr.login')]);
 });
 
-test('valid nip98 event authenticates the pubkey', function () {
-    $challenge = 'challenge-'.str_repeat('a', 54);
+test('challenge issues a nonce that authenticates end-to-end', function () {
+    // Realer Flow: GET /nostr/challenge → signieren → POST /nostr/login. Die Nonce
+    // lebt im (geteilten) Cache, nicht in einem Session-Slot.
+    $challenge = $this->getJson('/nostr/challenge')->json('challenge');
     $event = signHttpAuth(route('group.nostr.login'), 'POST', $challenge);
 
-    $this->withSession([
-        'nostr_challenge' => $challenge,
-        'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('group.nostr.login'), ['event' => $event])
+    $this->postJson(route('group.nostr.login'), ['event' => $event])
         ->assertOk()
         ->assertJson(['ok' => true, 'pubkey' => $event['pubkey']]);
 
@@ -60,28 +68,77 @@ test('valid nip98 event authenticates the pubkey', function () {
 
 test('tampered signature is rejected', function () {
     $challenge = 'challenge-'.str_repeat('b', 54);
+    seedChallenge($challenge);
     $event = signHttpAuth(route('group.nostr.login'), 'POST', $challenge);
     $event['sig'] = str_repeat('0', 128);
 
-    $this->withSession([
-        'nostr_challenge' => $challenge,
-        'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('group.nostr.login'), ['event' => $event])
+    $this->postJson(route('group.nostr.login'), ['event' => $event])
         ->assertStatus(422);
 
     expect(session('nostr_pubkey'))->toBeNull();
 });
 
 test('wrong challenge is rejected', function () {
+    // Server gab eine Challenge aus; der Client signiert eine andere → kein Cache-Treffer.
+    seedChallenge('server-expects-this');
     $event = signHttpAuth(route('group.nostr.login'), 'POST', 'signed-with-other');
 
-    $this->withSession([
-        'nostr_challenge' => 'server-expects-this',
-        'nostr_challenge_at' => now()->timestamp,
-    ])->postJson(route('group.nostr.login'), ['event' => $event])
+    $this->postJson(route('group.nostr.login'), ['event' => $event])
         ->assertStatus(422);
 
     expect(session('nostr_pubkey'))->toBeNull();
+});
+
+test('nonce is single-use — replay is rejected', function () {
+    $challenge = $this->getJson('/nostr/challenge')->json('challenge');
+    $event = signHttpAuth(route('group.nostr.login'), 'POST', $challenge);
+
+    $this->postJson(route('group.nostr.login'), ['event' => $event])->assertOk();
+    // Zweiter POST mit derselben (bereits verbrauchten) Challenge → abgelehnt.
+    $this->postJson(route('group.nostr.login'), ['event' => $event])
+        ->assertStatus(422);
+});
+
+test('overlapping challenges stay independently valid', function () {
+    // Regression „Challenge ungültig": zwei überlappende Handoffs holen je eine Nonce
+    // auf DERSELBEN Session. Früher überschrieb die zweite die erste (ein Session-Slot)
+    // → der langsame erste POST fiel durch. Mit Cache-Nonce pro Challenge-Wert bleiben
+    // beide gültig; der erste POST authentifiziert trotz zweiter, neuerer Challenge.
+    $first = $this->getJson('/nostr/challenge')->json('challenge');
+    $second = $this->getJson('/nostr/challenge')->json('challenge');
+    expect($first)->not->toBe($second);
+
+    $event = signHttpAuth(route('group.nostr.login'), 'POST', $first);
+    $this->postJson(route('group.nostr.login'), ['event' => $event])
+        ->assertOk()
+        ->assertJson(['ok' => true]);
+});
+
+test('unknown or expired challenge is rejected', function () {
+    $event = signHttpAuth(route('group.nostr.login'), 'POST', 'never-issued-'.str_repeat('c', 40));
+
+    $this->postJson(route('group.nostr.login'), ['event' => $event])
+        ->assertStatus(422);
+});
+
+test('event within the widened age window is accepted (langsames Amber)', function () {
+    // EVENT_MAX_AGE=300: created_at wird beim Template-Bau gestempelt, VOR dem u.U.
+    // langsamen Amber-Roundtrip. Ein 200s altes Event darf nicht als „abgelaufen"
+    // durchfallen, solange die Challenge (TTL 300) noch gültig ist.
+    $challenge = $this->getJson('/nostr/challenge')->json('challenge');
+    $event = signHttpAuth(route('group.nostr.login'), 'POST', $challenge, createdAtOffset: 200);
+
+    $this->postJson(route('group.nostr.login'), ['event' => $event])
+        ->assertOk()
+        ->assertJson(['ok' => true]);
+});
+
+test('event older than the age window is rejected', function () {
+    $challenge = $this->getJson('/nostr/challenge')->json('challenge');
+    $event = signHttpAuth(route('group.nostr.login'), 'POST', $challenge, createdAtOffset: 400);
+
+    $this->postJson(route('group.nostr.login'), ['event' => $event])
+        ->assertStatus(422);
 });
 
 test('gate redirects guests to login', function () {
