@@ -1329,7 +1329,8 @@ test('C5: Poll erstellen erzeugt kind-1068 (option/polltype/h/PROTECTED) + Karte
     await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
 
     const q = `PQ-${Math.floor(Math.random() * 1e9)}`
-    await page.getByRole('button', { name: 'Umfrage erstellen' }).click()
+    await page.getByRole('button', { name: 'Anhängen' }).click()
+    await page.getByRole('menuitem', { name: 'Umfrage' }).click()
     const modal = page.locator('dialog[data-modal="create-poll"]')
     await expect(modal).toBeVisible()
     await modal.getByPlaceholder('Was möchtest du fragen?').fill(q)
@@ -1420,7 +1421,8 @@ test('C5: Mehrfachwahl toggelt Optionen (Add/Remove) + kein Empty-Vote', async (
 
     // Eigene Mehrfachwahl-Poll mit zwei Optionen anlegen (frisch → nichts vorgewählt).
     const q = `PM-${Math.floor(Math.random() * 1e9)}`
-    await page.getByRole('button', { name: 'Umfrage erstellen' }).click()
+    await page.getByRole('button', { name: 'Anhängen' }).click()
+    await page.getByRole('menuitem', { name: 'Umfrage' }).click()
     const modal = page.locator('dialog[data-modal="create-poll"]')
     await expect(modal).toBeVisible()
     await modal.getByPlaceholder('Was möchtest du fragen?').fill(q)
@@ -1483,7 +1485,8 @@ test('C5: Optionen im Formular per Drag umsortieren, Reihenfolge landet in kind-
     await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
 
     const q = `PO-${Math.floor(Math.random() * 1e9)}`
-    await page.getByRole('button', { name: 'Umfrage erstellen' }).click()
+    await page.getByRole('button', { name: 'Anhängen' }).click()
+    await page.getByRole('menuitem', { name: 'Umfrage' }).click()
     const modal = page.locator('dialog[data-modal="create-poll"]')
     await expect(modal).toBeVisible()
     await modal.getByPlaceholder('Was möchtest du fragen?').fill(q)

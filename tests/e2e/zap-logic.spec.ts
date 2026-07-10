@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { requestZap, type SignedEvent, type Zapper } from '@welshman/util'
-import { canZap, zapRequestTemplate } from '../../packages/einundzwanzig-group/js/zaps'
+import { canZap, mapZapError, zapRequestTemplate } from '../../packages/einundzwanzig-group/js/zaps'
 
 /**
  * ZAPS.md Z1 JS-Unit (welshman-app-frei): das Vorabgate + die kind-9734-Tag-Form +
@@ -81,5 +81,32 @@ test.describe('requestZap (LNURL-Callback-Vertrag → bolt11)', () => {
         } finally {
             globalThis.fetch = orig
         }
+    })
+})
+
+test.describe('mapZapError (deutsche Fehler-Übersetzung, ZAPS.md Z6)', () => {
+    test('Netzwerkfehler → Zapper nicht erreichbar', () => {
+        expect(mapZapError(new TypeError('Failed to fetch'))).toBe('Zapper nicht erreichbar — bitte später erneut versuchen.')
+    })
+
+    test('Wallet-Ablehnung → abgelehnt', () => {
+        expect(mapZapError(new Error('payment rejected'))).toBe('Wallet hat die Zahlung abgelehnt.')
+    })
+
+    test('zu wenig Guthaben → Zahlung fehlgeschlagen', () => {
+        expect(mapZapError(new Error('insufficient balance'))).toBe('Zahlung fehlgeschlagen — Wallet-Guthaben reicht nicht.')
+    })
+
+    test('kein Signer → anmelden', () => {
+        expect(mapZapError(new Error('Kein aktiver Signer.'))).toBe('Bitte zuerst anmelden, um zu zappen.')
+    })
+
+    test('bereits deutsche Fehler bleiben unverändert (durchgereicht)', () => {
+        expect(mapZapError(new Error('Dieser Empfänger kann keine Zaps annehmen.'))).toBe('Dieser Empfänger kann keine Zaps annehmen.')
+        expect(mapZapError(new Error('Rechnung konnte nicht abgerufen werden.'))).toBe('Rechnung konnte nicht abgerufen werden.')
+    })
+
+    test('leerer/unbekannter Fehler → generischer Fallback', () => {
+        expect(mapZapError(undefined)).toBe('Zap fehlgeschlagen.')
     })
 })

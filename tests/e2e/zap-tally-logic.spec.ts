@@ -96,6 +96,7 @@ test.describe('aggregateZaps (validierter 9735-Tally)', () => {
             nameOf,
         )
         expect(zaps.count).toBe(2)
+        expect(zaps.contributors).toBe(1) // Doppel-Zap desselben Pubkeys = 1 Beitragende:r (Flotilla-Parität)
         expect(zaps.names).toBe('Alice')
     })
 
@@ -122,6 +123,6 @@ test.describe('aggregateZaps (validierter 9735-Tally)', () => {
 
     test('keine Receipts: leere, aber wohldefinierte Summary', () => {
         const zaps = aggregateZaps([], zapper, null, nameOf)
-        expect(zaps).toEqual({ count: 0, sats: 0, mine: false, names: '' })
+        expect(zaps).toEqual({ count: 0, contributors: 0, sats: 0, mine: false, names: '' })
     })
 })
