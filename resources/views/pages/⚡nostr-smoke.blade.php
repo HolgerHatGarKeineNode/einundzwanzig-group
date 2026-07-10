@@ -47,7 +47,7 @@ new #[Layout('group::einundzwanzig')] #[Title('welshman Smoke-Test')] class exte
             </template>
         </ul>
 
-        <flux:text x-show="!loading" class="mt-4 text-xs text-zinc-500">
+        <flux:text x-show="!loading" class="mt-4 text-xs text-muted">
             <span x-text="events.length"></span> Events im repository
         </flux:text>
     </div>
