@@ -10,14 +10,26 @@ use Illuminate\Support\Facades\Blade;
  * nav-tab-Gate, status-strip, app-shell-Chrome — und dass das ALTE Vollbild-
  * Layout (Default-Config) unverändert weiterläuft. Motion/Interaktion → E2E.
  */
-test('altes Layout bleibt gültig: Default-Config rendert die drei package-nativen Tabs', function () {
+test('P2 Web-Host-Config: group.spaces rendert die 3 Web-Tabs (Chat · Wallet · Einstellungen) via app-shell', function () {
     $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
 
+    // Seite liegt in der app-shell (main-Outlet + config-getriebene Nav), nicht mehr
+    // im rohen <main> mit hardcoded bottom-nav.
+    $res->assertSee('data-tab-outlet', false);
     $res->assertSee('aria-label="Hauptnavigation"', false);
     $res->assertSee('grid-cols-3', false);
-    foreach (['Räume', 'Mitglieder', 'Einstellungen'] as $label) {
+    // Web = self-host Chat+Wallet-Client: Chat · Wallet · Einstellungen — KEIN
+    // Meetups/Mehr/Portal, keine „Mitglieder" als Bottom-Tab mehr (→ §3.3).
+    foreach (['Chat', 'Wallet', 'Einstellungen'] as $label) {
         $res->assertSee($label);
     }
+    $res->assertDontSee('>Mitglieder<', false);
+    // Wallet-Tab ist per Nav erreichbar (verlinkt die Wallet-Route).
+    $res->assertSee('href="'.route('group.wallet').'"', false);
+    // Kein Takeover: exit=null (eigenständiger Web-Client) → Brand-Mark, kein
+    // Host-Rücksprung.
+    $res->assertSee('aria-label="Startseite"', false);
+    $res->assertDontSee('aria-label="Zurück zu', false);
     // Aktiver Tab trägt den kontrastsicheren brand-700 (≥4.5:1 auf hellem Nav-Grund),
     // nicht das AA-verletzende brand-500/text-accent (§7.6).
     $res->assertSee('text-brand-700 dark:text-brand-400', false);
