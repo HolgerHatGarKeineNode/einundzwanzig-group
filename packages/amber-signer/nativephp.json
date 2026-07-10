@@ -7,19 +7,19 @@
             "description": "True, wenn ein NIP-55-Signer (Amber) auf dem Gerät installiert ist"
         },
         {
-            "name": "AmberSigner.GetPublicKey",
-            "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.GetPublicKey",
-            "description": "get_public_key via ContentResolver (nur wenn App bereits autorisiert) — sonst authorized:false"
-        },
-        {
             "name": "AmberSigner.RequestPublicKey",
             "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.RequestPublicKey",
-            "description": "Einmaliger sichtbarer get_public_key-Intent (Login + Perms gewähren); Ergebnis via callbackUrl"
+            "description": "Sichtbarer get_public_key-Login via startActivityForResult (registriert die App in Amber → ContentResolver-Signieren); Ergebnis async via native-event AmberSigner.PublicKeyReceived"
         },
         {
             "name": "AmberSigner.SignEvent",
             "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.SignEvent",
             "description": "sign_event via ContentResolver (synchron, offline) — liefert signiertes Event oder authorized:false"
+        },
+        {
+            "name": "AmberSigner.RequestSignerOp",
+            "android": "com.einundzwanzig.ambersigner.AmberSignerFunctions.RequestSignerOp",
+            "description": "Sichtbare Signer-Op via startActivityForResult (interaktiver Prompt, Fallback bei nicht vorab gewährter Aktion: sign_event/nip44_encrypt/nip44_decrypt); Ergebnis async via native-event AmberSigner.SignerResult"
         },
         {
             "name": "AmberSigner.Nip44Encrypt",

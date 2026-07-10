@@ -1,10 +1,14 @@
 package com.einundzwanzig.ambersigner
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import androidx.fragment.app.FragmentActivity
 import com.nativephp.mobile.bridge.BridgeFunction
+import com.nativephp.mobile.utils.NativeActionCoordinator
+import org.json.JSONObject
 
 /**
  * Amber NIP-55 Same-Device-Signer über den ContentResolver-Weg.
@@ -85,41 +89,71 @@ object AmberSignerFunctions {
     }
 
     /**
-     * Einmaliger sichtbarer get_public_key-Intent (Login): öffnet Amber, damit der
-     * Nutzer die App autorisiert und die `permissions` (alle unsere Kinds) als
-     * „gemerkt" gewährt — DANACH beantwortet Amber sign/nip44 still per ContentResolver.
+     * Einmaliger sichtbarer get_public_key-Login: öffnet Amber, damit der Nutzer die App
+     * autorisiert und die `permissions` (alle unsere Kinds) als „gemerkt" gewährt — DANACH
+     * beantwortet Amber sign/nip44 still per ContentResolver.
      *
-     * Fire-and-forget via `startActivity` (FLAG_ACTIVITY_NEW_TASK) → callingPackage ist
-     * null → Amber liefert das Ergebnis an `callbackUrl` (unser Custom-Scheme
-     * einundzwanziggroup://…), das die WebView zurück in die App navigiert. Das ist der
-     * EINZIGE navigations-basierte Schritt; alles Weitere läuft synchron über ContentResolver.
+     * Läuft über den `AmberSignerCoordinator` (startActivityForResult), damit Amber
+     * `callingPackage` sieht und die App REGISTRIERT — nur dann funktioniert das
+     * ContentResolver-Signieren. Das Ergebnis kommt async als `native-event`
+     * `AmberSigner.PublicKeyReceived` zurück (in-page, keine Navigation).
      *
-     * Params: permissions (JSON-Array-String), callbackUrl (roh, NICHT url-kodiert),
-     * appName (optional), amberPackage (optional).
+     * Params: permissions (JSON-Array-String), appName (optional), amberPackage (optional).
      */
-    class RequestPublicKey(private val context: Context) : BridgeFunction {
+    class RequestPublicKey(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             val permissions = parameters["permissions"] as? String ?: "[]"
-            val callbackUrl = parameters["callbackUrl"] as? String ?: ""
             val appName = parameters["appName"] as? String ?: "EINUNDZWANZIG"
             val pkg = amberPackage(parameters)
-            return try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:")).apply {
-                    setPackage(pkg)
-                    putExtra("type", "get_public_key")
-                    putExtra("permissions", permissions)
-                    putExtra("appName", appName)
-                    if (callbackUrl.isNotEmpty()) {
-                        putExtra("callbackUrl", callbackUrl)
-                    }
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Launch muss auf dem UI-Thread laufen (Fragment-Install + ActivityResultLauncher).
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    AmberSignerCoordinator.install(activity).requestPublicKey(permissions, appName, pkg)
+                } catch (e: Exception) {
+                    // Fehler ans JS melden — sonst hängt der Login-Promise ewig (dieser Pfad
+                    // gibt synchron zurück, ein Fehler VOR launcher.launch() liefert sonst NIE
+                    // ein native-event). Kann z. B. commitNow() werfen, wenn die App im Hintergrund ist.
+                    Log.e(TAG, "get_public_key-Launch fehlgeschlagen: ${e.message}", e)
+                    NativeActionCoordinator.dispatchEvent(
+                        activity,
+                        AmberSignerCoordinator.EVENT_PUBLIC_KEY,
+                        JSONObject().put("rejected", true).put("error", e.message ?: "unknown").toString(),
+                    )
                 }
-                context.startActivity(intent)
-                mapOf("launched" to true)
-            } catch (e: Exception) {
-                Log.e(TAG, "get_public_key-Intent fehlgeschlagen: ${e.message}", e)
-                mapOf("launched" to false, "error" to (e.message ?: "unknown"))
             }
+            return emptyMap()
+        }
+    }
+
+    /**
+     * Sichtbare Signer-Op via startActivityForResult (interaktiver Amber-Prompt) — der
+     * Fallback, wenn ContentResolver `authorized:false` liefert (Aktion nicht vorab gewährt,
+     * z. B. Amber-Policy „manually approve"). `type` = sign_event | nip44_encrypt |
+     * nip44_decrypt. Ergebnis async via native-event `AmberSigner.SignerResult` (mit `id`).
+     * Params: type, payload, currentUser, pubkey (nur nip44), id, amberPackage.
+     */
+    class RequestSignerOp(private val activity: FragmentActivity) : BridgeFunction {
+        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
+            val type = parameters["type"] as? String ?: return emptyMap()
+            val payload = parameters["payload"] as? String ?: ""
+            val currentUser = parameters["currentUser"] as? String ?: ""
+            val counterparty = parameters["pubkey"] as? String
+            val id = parameters["id"] as? String ?: ""
+            val pkg = amberPackage(parameters)
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    AmberSignerCoordinator.install(activity).signerRequest(type, payload, currentUser, counterparty, id, pkg)
+                } catch (e: Exception) {
+                    // Fehler ans JS melden (mit id) — sonst wartet der Op-Promise ins Leere.
+                    Log.e(TAG, "$type-Launch fehlgeschlagen: ${e.message}", e)
+                    NativeActionCoordinator.dispatchEvent(
+                        activity,
+                        AmberSignerCoordinator.EVENT_SIGNER_RESULT,
+                        JSONObject().put("id", id).put("rejected", true).put("error", e.message ?: "unknown").toString(),
+                    )
+                }
+            }
+            return emptyMap()
         }
     }
 
@@ -134,14 +168,6 @@ object AmberSignerFunctions {
                 false
             }
             return mapOf("installed" to installed)
-        }
-    }
-
-    /** get_public_key via ContentResolver — nur wenn die App bereits autorisiert ist. */
-    class GetPublicKey(private val context: Context) : BridgeFunction {
-        override fun execute(parameters: Map<String, Any>): Map<String, Any> {
-            val currentUser = parameters["currentUser"] as? String ?: ""
-            return query(context, amberPackage(parameters), "GET_PUBLIC_KEY", "", "", currentUser)
         }
     }
 
