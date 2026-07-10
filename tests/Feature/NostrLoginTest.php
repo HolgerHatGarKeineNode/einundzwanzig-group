@@ -46,6 +46,45 @@ test('login page renders the nostr auth island', function () {
     $response->assertSee('x-data="nostrAuth"', false);
 });
 
+test('P6: login-form zeigt genau einen Primär-CTA + Andere Optionen (Methoden-Prio §5.1)', function () {
+    $html = $this->get('/nostr-login')->assertOk()->getContent();
+
+    // Ein primärer Web-CTA (NIP-07) + die aufklappbare Sekundär-Sektion.
+    expect($html)->toContain('Mit Browser-Erweiterung anmelden');
+    expect($html)->toContain('Andere Optionen');
+    // Der Signer-per-QR-Pfad (nostrconnect) ersetzt im Web die Amber-Marke.
+    expect($html)->toContain('Signer per QR verbinden');
+    // „Neu bei Nostr?"-Erklär-Panel (§5.1), kein Registrieren-Wizard.
+    expect($html)->toContain('Neu bei Nostr?');
+});
+
+test('P6: nsec liegt hinter dem Checkbox-Gate (Härtung §5.1)', function () {
+    $html = $this->get('/nostr-login')->assertOk()->getContent();
+
+    // Consent-Checkbox schaltet den Button frei; ohne Zustimmung bleibt er disabled.
+    expect($html)->toContain('Ich verstehe das Risiko');
+    expect($html)->toContain('x-model="nsecOk"');
+    expect($html)->toContain('!nsecOk || busy');
+});
+
+test('P6: kein Lightning-Login im Web-Client (§8.5)', function () {
+    // Web = eigenständiger Chat+Wallet-Client ohne Portal → im Login kein
+    // Lightning/LNURL-Zweig (Wallet-Lightning bleibt im Wallet-Tab unberührt).
+    $this->get('/nostr-login')
+        ->assertOk()
+        ->assertDontSee('LNURL')
+        ->assertDontSee('Lightning');
+});
+
+test('P6: das globale Login-Sheet ist gemountet und fängt open-login-sheet ab (§4.2)', function () {
+    // Layout mountet <x-group::login-sheet> außerhalb des $slot → jede Seite kann
+    // das authGate-Event abfangen (in-place statt Redirect). Insel deferred (x-if).
+    $this->get('/nostr-login')
+        ->assertOk()
+        ->assertSee('open-login-sheet.window', false)
+        ->assertSee('role="dialog"', false);
+});
+
 test('challenge returns a nonce and the login url', function () {
     $this->getJson('/nostr/challenge')
         ->assertOk()
