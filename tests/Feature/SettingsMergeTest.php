@@ -43,6 +43,17 @@ test('Wallet: Einstieg verlinkt die Wallet-Route (Betrieb bleibt eigener Tab)', 
     settings()->assertSee('href="'.route('group.wallet').'"', false);
 });
 
+test('Netzwerk & Relays: read-only, nur wenn der Host es einblendet (config-Gate)', function () {
+    // Web-Default: kein show_relays → Sektion aus (Web-Umfang ohne Relays).
+    settings()->assertDontSee('Netzwerk &amp; Relays', false);
+
+    // Host schaltet ein (Mobile) → read-only Relay-Insel erscheint.
+    config(['group.show_relays' => true]);
+    $res = settings();
+    $res->assertSee('Netzwerk &amp; Relays', false);
+    $res->assertSee('x-data="nostrRelays"', false);
+});
+
 test('Darstellung: EIN Theme-Regler über $flux.appearance, kein hartes class="dark"', function () {
     $res = settings();
 
