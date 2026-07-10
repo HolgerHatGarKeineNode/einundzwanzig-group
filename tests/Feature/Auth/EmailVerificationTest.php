@@ -37,7 +37,7 @@ test('email can be verified', function () {
     Event::assertDispatched(Verified::class);
 
     $this->assertTrue($user->fresh()->hasVerifiedEmail());
-    $response->assertRedirect(route('dashboard', absolute: false).'?verified=1');
+    $response->assertRedirect('/?verified=1');
 });
 
 test('email is not verified with invalid hash', function () {
@@ -68,7 +68,7 @@ test('already verified user visiting verification link is redirected without fir
     );
 
     $this->actingAs($user)->get($verificationUrl)
-        ->assertRedirect(route('dashboard', absolute: false).'?verified=1');
+        ->assertRedirect('/?verified=1');
 
     $this->assertTrue($user->fresh()->hasVerifiedEmail());
     Event::assertNotDispatched(Verified::class);
