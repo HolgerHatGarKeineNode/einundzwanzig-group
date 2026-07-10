@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { requestZap, type SignedEvent, type Zapper } from '@welshman/util'
-import { canZap, mapZapError, zapRequestTemplate } from '../../packages/einundzwanzig-group/js/zaps'
+import { canZap, invoiceRequestError, mapZapError, zapRequestTemplate } from '../../packages/einundzwanzig-group/js/zaps'
 
 /**
  * ZAPS.md Z1 JS-Unit (welshman-app-frei): das Vorabgate + die kind-9734-Tag-Form +
@@ -81,6 +81,24 @@ test.describe('requestZap (LNURL-Callback-Vertrag → bolt11)', () => {
         } finally {
             globalThis.fetch = orig
         }
+    })
+})
+
+test.describe('invoiceRequestError (Empfänger-LNURL liefert keine bolt11, ZAPS.md Z6)', () => {
+    test('generischer welshman-Fallback → entlastende deutsche Meldung (kein englisches Roh-Wort)', () => {
+        const msg = invoiceRequestError('Failed to request invoice')
+        expect(msg).toContain('Empfänger-Wallet')
+        expect(msg).not.toContain('Failed to request invoice')
+        // mapZapError reicht die (deutsche) Meldung unverändert bis zum Nutzer durch.
+        expect(mapZapError(new Error(msg))).toBe(msg)
+    })
+
+    test('ohne error (undefined) → dieselbe generische Meldung', () => {
+        expect(invoiceRequestError()).toContain('Empfänger-Wallet')
+    })
+
+    test('echter LNURL-reason des Servers bleibt für den Nutzer sichtbar', () => {
+        expect(invoiceRequestError('Amount too low')).toContain('Amount too low')
     })
 })
 
