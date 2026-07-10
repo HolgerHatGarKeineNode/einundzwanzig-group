@@ -10,16 +10,16 @@ return [
      * gewinnen (keine Listen-Konkatenation), die 3 Web-Tabs ersetzen die 3
      * package-nativen Default-Tabs sauber.
      *
-     * Einstellungen bleibt in P2 die bestehende Space-Seite (group.space.settings);
-     * der verschmolzene Settings-Screen kommt erst in P5. gate=nostr: der Tab liegt
-     * server-seitig hinter `nostr.auth`, der Tap-Intercept öffnet später (P6) das
-     * Login-Sheet statt zu navigieren.
+     * Einstellungen zeigt seit P5 den verschmolzenen Settings-Screen
+     * (group.settings, §6): Konto/Identität · Space & Räume · Wallet · Darstellung ·
+     * Abmelden. gate=nostr: der Tab liegt server-seitig hinter `nostr.auth`, der
+     * Tap-Intercept öffnet später (P6) das Login-Sheet statt zu navigieren.
      */
     'nav' => [
         // `match` weggelassen: nav-tab fällt via `$match ?? $route` auf die Route
         // zurück, und alle drei Web-Tabs sind Ein-Routen-Tabs (Aktiv = exakte Route).
         ['key' => 'chat', 'route' => 'group.spaces', 'icon' => 'chat-bubble-left-right', 'label' => 'Chat', 'gate' => 'nostr'],
         ['key' => 'wallet', 'route' => 'group.wallet', 'icon' => 'bolt', 'label' => 'Wallet', 'gate' => 'nostr'],
-        ['key' => 'settings', 'route' => 'group.space.settings', 'icon' => 'cog-6-tooth', 'label' => 'Einstellungen', 'gate' => 'nostr'],
+        ['key' => 'settings', 'route' => 'group.settings', 'icon' => 'cog-6-tooth', 'label' => 'Einstellungen', 'gate' => 'nostr'],
     ],
 ];

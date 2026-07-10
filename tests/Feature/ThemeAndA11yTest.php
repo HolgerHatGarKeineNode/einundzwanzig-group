@@ -16,7 +16,7 @@ test('Layout ist enthärtet: kein hartes class="dark" mehr → @fluxAppearance s
 });
 
 test('Einstellungen-Tab: Theme-Switch bindet an den geteilten $flux.appearance-Store', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
 
     $res->assertSee('Darstellung');
     $res->assertSee('x-model="$flux.appearance"', false);

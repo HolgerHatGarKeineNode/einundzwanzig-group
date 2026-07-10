@@ -8,7 +8,7 @@ declare(strict_types=1);
  * der Marken-Fehlerseiten und des OG-Share-Bilds. Verhalten deckt Playwright ab.
  */
 test('Einstellungen-Tab: Abmelden ist erreichbar (Flow Settings→Logout bricht nicht)', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
 
     $res->assertSee('x-data="nostrAuth"', false);
     $res->assertSee('doLogout()', false);
@@ -16,7 +16,7 @@ test('Einstellungen-Tab: Abmelden ist erreichbar (Flow Settings→Logout bricht 
 });
 
 test('Bottom-Nav-Tabs tragen den Brand-Mark-Header, keinen Zurück-Pfeil', function () {
-    foreach (['group.directory', 'group.space.settings'] as $name) {
+    foreach (['group.directory', 'group.settings'] as $name) {
         $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route($name))->assertOk();
 
         // Brand-Mark verlinkt zur Startseite …
@@ -43,7 +43,7 @@ test('Native-Host (config group.exit): Vollbild-Chat zeigt sichtbaren Rücksprun
 });
 
 test('Empty-Space-Liste ist keine Sackgasse: CTA zur Startseite', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
 
     $res->assertSee('x-if="ready && spaces.length === 0"', false);
     $res->assertSee('Zur Startseite');

@@ -25,7 +25,7 @@ new #[Layout('group::einundzwanzig')] #[Title('EINUNDZWANZIG')] class extends Co
                 <div class="truncate rounded-tile bg-zinc-100 p-2 font-mono text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400" x-text="npub"></div>
                 <flux:button variant="primary" class="w-full" icon="arrow-right" :href="route('group.spaces')" wire:navigate>Zu deinem Space</flux:button>
                 <div class="flex gap-2">
-                    <flux:button variant="ghost" size="sm" class="flex-1" :href="route('group.space.settings')" wire:navigate>Space wechseln</flux:button>
+                    <flux:button variant="ghost" size="sm" class="flex-1" :href="route('group.settings')" wire:navigate>Einstellungen</flux:button>
                     <flux:button variant="ghost" size="sm" class="flex-1" x-on:click="doLogout()">Abmelden</flux:button>
                 </div>
             </div>
