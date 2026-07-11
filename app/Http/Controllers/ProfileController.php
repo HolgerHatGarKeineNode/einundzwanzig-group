@@ -22,8 +22,14 @@ class ProfileController extends Controller
             100,
         );
 
+        // CORS: die Native-WebView-Insel ruft diesen Endpunkt cross-origin von
+        // `http://127.0.0.1` (bzw. capacitor/ionic) aus. kind-0 ist öffentlich und
+        // ohne Credentials → Wildcard genügt; ein simpler GET (nur Accept-Header)
+        // löst keinen Preflight aus, der Response-Header reicht. Ohne ihn fielen
+        // Namen/Avatare in der App auf npub zurück.
         return response()
             ->json(['events' => $cache->get($pubkeys)])
-            ->header('Cache-Control', 'public, max-age=300');
+            ->header('Cache-Control', 'public, max-age=300')
+            ->header('Access-Control-Allow-Origin', '*');
     }
 }
