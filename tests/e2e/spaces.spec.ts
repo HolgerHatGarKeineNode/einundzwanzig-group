@@ -1,15 +1,13 @@
 import { test, expect } from '@playwright/test'
 import { useZooid } from './support/zooid'
+import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 
 /** Loggt via nsec ein und landet im Gate (`/spaces`). */
 async function login(page: import('@playwright/test').Page): Promise<void> {
     await useZooid(page)
-    await page.goto('/nostr-login')
-    await page.getByPlaceholder(/nsec1/).fill(NSEC)
-    await page.getByRole('button', { name: 'Anmelden' }).click()
-    await page.waitForURL('**/spaces')
+    await loginNsec(page, NSEC)
 }
 
 /**

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { useZooid } from './support/zooid'
+import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 // Relay-Owner-Secret (Pubkey = relay.self) — der einzige NIP-86-Admin des zooid.
@@ -8,10 +9,7 @@ const ADMIN_HEX = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439
 /** Loggt mit einem Secret ein und öffnet das Directory des fixierten Space. */
 async function openDirectoryAs(page: Page, secret: string): Promise<void> {
     await useZooid(page)
-    await page.goto('/nostr-login')
-    await page.getByPlaceholder(/nsec1/).fill(secret)
-    await page.getByRole('button', { name: 'Anmelden' }).click()
-    await page.waitForURL('**/spaces')
+    await loginNsec(page, secret)
     await page.goto('/directory')
 }
 

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { useZooid, ZOOID_WS } from './support/zooid'
+import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
@@ -30,10 +31,7 @@ function queryRelayEvent(pred: (e: RelayEvent) => boolean, h: string | null = 'w
 /** Loggt via nsec ein und öffnet den Chat eines Raums (default „welcome"). */
 async function openRoom(page: Page, h = 'welcome'): Promise<void> {
     await useZooid(page)
-    await page.goto('/nostr-login')
-    await page.getByPlaceholder(/nsec1/).fill(NSEC)
-    await page.getByRole('button', { name: 'Anmelden' }).click()
-    await page.waitForURL('**/spaces')
+    await loginNsec(page, NSEC)
     await page.goto(`/rooms/${h}`)
 }
 
@@ -1106,10 +1104,7 @@ test('D2: Publish-Fehler zeigt Retry-Zeile, erneutes Senden räumt sie', async (
         server.onMessage((raw) => ws.send(raw))
     })
 
-    await page.goto('/nostr-login')
-    await page.getByPlaceholder(/nsec1/).fill(NSEC)
-    await page.getByRole('button', { name: 'Anmelden' }).click()
-    await page.waitForURL('**/spaces')
+    await loginNsec(page, NSEC)
     await page.goto('/rooms/welcome')
     await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
 

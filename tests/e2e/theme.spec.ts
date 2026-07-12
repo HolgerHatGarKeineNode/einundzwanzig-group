@@ -1,15 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
 import { useZooid } from './support/zooid'
+import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 
 /** Loggt via nsec ein und öffnet den Einstellungen-Tab (dort liegt der Theme-Switch). */
 async function openSettings(page: Page): Promise<void> {
     await useZooid(page)
-    await page.goto('/nostr-login')
-    await page.getByPlaceholder(/nsec1/).fill(NSEC)
-    await page.getByRole('button', { name: 'Anmelden' }).click()
-    await page.waitForURL('**/spaces')
+    await loginNsec(page, NSEC)
     await page.goto('/settings/space')
     await expect(page.getByText('Darstellung')).toBeVisible()
 }

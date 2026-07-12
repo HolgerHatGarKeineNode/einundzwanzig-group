@@ -4,6 +4,7 @@ import { installNip07 } from './support/nip07'
 import { startRelay } from './support/relay'
 import { startBunker } from './support/bunker'
 import { useZooid } from './support/zooid'
+import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 
@@ -31,11 +32,7 @@ test.describe('Nostr-Login (E2E)', () => {
     test('nsec-Login meldet über den Handoff im Gate an', async ({ page }) => {
         const { npub } = testKeys()
 
-        await page.goto('/nostr-login')
-        await page.getByPlaceholder(/nsec1/).fill(NSEC)
-        await page.getByRole('button', { name: /Trotzdem anmelden/ }).click()
-
-        await page.waitForURL('**/spaces')
+        await loginNsec(page, NSEC)
         await expect(page.locator('body')).toContainText(npub)
     })
 
@@ -43,10 +40,7 @@ test.describe('Nostr-Login (E2E)', () => {
         const { npub } = testKeys()
 
         // Regulär anmelden → Client-Session (localStorage) + Laravel-Session.
-        await page.goto('/nostr-login')
-        await page.getByPlaceholder(/nsec1/).fill(NSEC)
-        await page.getByRole('button', { name: /Trotzdem anmelden/ }).click()
-        await page.waitForURL('**/spaces')
+        await loginNsec(page, NSEC)
 
         // Reboot/Ablauf simulieren: Server-Session (Cookies) weg, Client-Session bleibt.
         await context.clearCookies()
@@ -104,10 +98,7 @@ test.describe('Nostr-Login (E2E)', () => {
     })
 
     test('Logout leert beide Sessions und das Gate sperrt wieder', async ({ page }) => {
-        await page.goto('/nostr-login')
-        await page.getByPlaceholder(/nsec1/).fill(NSEC)
-        await page.getByRole('button', { name: /Trotzdem anmelden/ }).click()
-        await page.waitForURL('**/spaces')
+        await loginNsec(page, NSEC)
 
         await page.getByRole('button', { name: 'Abmelden' }).click()
         await page.waitForURL('**/nostr-login')

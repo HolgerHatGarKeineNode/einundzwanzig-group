@@ -3,6 +3,7 @@ import { useZooid } from './support/zooid'
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure'
 import { nsecEncode } from 'nostr-tools/nip19'
 import { testKeys } from './support/keys'
+import { loginNsec } from './support/login'
 
 // Der geseedete Test-User (VIEWER) trägt die Rolle „member" → steht in der
 // relay-signierten 13534-Liste, ist also Vereinsmitglied des lokalen zooid.
@@ -14,10 +15,7 @@ const strangerNsec = (): string => nsecEncode(generateSecretKey())
 /** Loggt per nsec ein und öffnet die Zielseite des fixierten Space. */
 async function loginAndOpen(page: Page, nsec: string, path = '/spaces'): Promise<void> {
     await useZooid(page)
-    await page.goto('/nostr-login')
-    await page.getByPlaceholder(/nsec1/).fill(nsec)
-    await page.getByRole('button', { name: 'Anmelden' }).click()
-    await page.waitForURL('**/spaces')
+    await loginNsec(page, nsec)
     if (path !== '/spaces') {
         await page.goto(path)
     }
