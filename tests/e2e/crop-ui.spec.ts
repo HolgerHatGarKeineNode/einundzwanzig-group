@@ -1,16 +1,36 @@
 import { test, expect, type Page } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { useZooid } from './support/zooid'
+import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
+const NAK = '/home/user/go/bin/nak'
 // Echtes, ausreichend großes PNG aus dem Repo (OG-Bild) als Crop-Vorlage.
 const IMAGE = readFileSync('public/og.png')
 
-async function openComposerRoom(page: Page): Promise<void> {
+type RelayEvent = { id: string; kind: number; content: string; tags: string[][] }
+
+/** Fragt das Test-zooid (member-only → AUTH) nach dem ersten passenden kind-9. */
+function queryKind9(pred: (e: RelayEvent) => boolean, h = 'welcome'): RelayEvent | undefined {
+    return execFileSync(NAK, ['req', '-k', '9', '-t', `h=${h}`, '--auth', '--sec', NSEC, ZOOID_WS])
+        .toString()
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as RelayEvent)
+        .find(pred)
+}
+
+async function openComposerRoom(page: Page, h = 'welcome'): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
-    await page.goto('/rooms/welcome')
+    await page.goto(`/rooms/${h}`)
+    // Schreibende Tests nutzen dedizierte Räume (nie „welcome" bloaten) → dort ggf. beitreten.
+    const join = page.getByRole('button', { name: /Beitreten|Trete bei/ })
+    if (await join.isVisible().catch(() => false)) {
+        await join.click()
+    }
     await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
 }
 
@@ -94,4 +114,45 @@ test('C6a: Paste mit Text UND Bild öffnet den Cropper NICHT (Text hat Vorrang)'
     // Kein Cropper — der Browser fügt den Text via Default-Paste ein.
     await expect(page.getByRole('dialog', { name: 'Bild zuschneiden' })).toBeHidden()
     await expect(page.locator('.cropper-container')).toHaveCount(0)
+})
+
+/**
+ * C6a Senden mit Anhang: das `imetaTag` liegt im reaktiven Alpine-State (Proxy) —
+ * gelangte es roh in die Event-Tags, scheiterte welshmans Event-Klon an
+ * „DataCloneError: Proxy object could not be cloned". send() muss den Anhang zu
+ * reinen Werten entwickeln. Hier direkt in den State gesetzt (kein echter Blossom-
+ * Upload nötig — geprüft wird der SENDE-Pfad), dann gegen das echte zooid gesendet.
+ */
+test('C6a: Nachricht mit Anhang senden — kein DataCloneError, imeta am kind-9', async ({ page }) => {
+    const errors: string[] = []
+    page.on('pageerror', (e) => errors.push(String(e)))
+    await openComposerRoom(page, 'edit') // dedizierter Schreib-Raum
+    const marker = `img${Date.now()}`
+    const imgUrl = `https://blossom.band/${marker}.webp`
+
+    await page.locator('[x-data^="nostrRoomChat"]').first().evaluate((el, ctx) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = (window as any).Alpine.$data(el)
+        data.attachment = { url: ctx.url, imetaTag: ['imeta', `url ${ctx.url}`, 'm image/webp', `x ${ctx.marker}`] }
+    }, { url: imgUrl, marker })
+
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await composer.fill(`Bild Test ${marker}`)
+    await page.getByRole('button', { name: 'Senden' }).click()
+
+    // Erfolg (mit dem Bug: Composer bliebe gefüllt + „DataCloneError"-Fehlerzeile):
+    // Composer leert, keine Fehlerzeile, Nachricht + Bild-Element erscheinen im Verlauf.
+    await expect(composer).toHaveValue('', { timeout: 10_000 })
+    await expect(page.locator('text=DataCloneError')).toHaveCount(0)
+    await expect(page.getByText(`Bild Test ${marker}`)).toBeVisible()
+    await expect(page.locator('img.chat-image').last()).toBeVisible()
+    expect(errors.join('\n')).not.toContain('DataCloneError')
+
+    // Relay-Beleg (gepollt — Propagation ist nicht sofort): kind-9 trägt imeta + URL im Content.
+    let ev: RelayEvent | undefined
+    await expect
+        .poll(() => (ev = queryKind9((e) => e.content.includes(marker), 'edit')) !== undefined, { timeout: 15_000 })
+        .toBe(true)
+    expect(ev!.tags.some((t) => t[0] === 'imeta' && t.includes(`url ${imgUrl}`))).toBe(true)
+    expect(ev!.content).toContain(imgUrl)
 })
