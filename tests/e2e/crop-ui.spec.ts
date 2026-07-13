@@ -54,3 +54,44 @@ test('C6a: Bild anhängen öffnet genau EINEN funktionierenden Cropper', async (
     await expect(overlay).toBeHidden()
     await expect(page.locator('.cropper-container')).toHaveCount(0)
 })
+
+/**
+ * C6a Copy&Paste: ein Bild aus der Zwischenablage ins Eingabefeld einfügen öffnet
+ * denselben Cropper (kein roher Datei-/Text-Paste). Simuliert per ClipboardEvent
+ * mit einem File in `clipboardData`.
+ */
+test('C6a: Bild in den Composer einfügen (Paste) öffnet den Cropper', async ({ page }) => {
+    await openComposerRoom(page)
+
+    await page.getByPlaceholder('Nachricht schreiben…').evaluate((ta, bytes) => {
+        const dt = new DataTransfer()
+        dt.items.add(new File([new Uint8Array(bytes as number[])], 'paste.png', { type: 'image/png' }))
+        ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    }, Array.from(IMAGE))
+
+    const overlay = page.getByRole('dialog', { name: 'Bild zuschneiden' })
+    await expect(overlay).toBeVisible()
+    await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.locator('.cropper-crop-box')).toBeVisible()
+})
+
+/**
+ * C6a Paste-Vorrang: gemischte Zwischenablage (Text + gerendertes Bild, wie beim
+ * Kopieren von Tabellenzellen) darf den Text-Paste NICHT kapern — der Cropper
+ * bleibt zu, der Text landet normal im Composer.
+ */
+test('C6a: Paste mit Text UND Bild öffnet den Cropper NICHT (Text hat Vorrang)', async ({ page }) => {
+    await openComposerRoom(page)
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+
+    await composer.evaluate((ta, bytes) => {
+        const dt = new DataTransfer()
+        dt.items.add('Zelleninhalt', 'text/plain')
+        dt.items.add(new File([new Uint8Array(bytes as number[])], 'cells.png', { type: 'image/png' }))
+        ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    }, Array.from(IMAGE))
+
+    // Kein Cropper — der Browser fügt den Text via Default-Paste ein.
+    await expect(page.getByRole('dialog', { name: 'Bild zuschneiden' })).toBeHidden()
+    await expect(page.locator('.cropper-container')).toHaveCount(0)
+})
