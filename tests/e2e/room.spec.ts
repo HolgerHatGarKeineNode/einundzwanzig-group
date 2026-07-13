@@ -1506,3 +1506,73 @@ test('C5: Optionen im Formular per Drag umsortieren, Reihenfolge landet in kind-
     await expect.poll(() => (poll = queryRelayEvent((e) => e.content === q, 'poll', 1068)) !== undefined, { timeout: 15_000 }).toBe(true)
     expect((poll as RelayEvent).tags.filter((t) => t[0] === 'option').map((t) => t[2])).toEqual(['Zwei', 'Drei', 'Eins'])
 })
+
+/**
+ * C6b (Thread-Ansicht, NIP-22 kind 1111) — an einer Quote-Only-Nachricht öffnet der
+ * „Kommentieren"-Chip das In-Room-Overlay; ein Kommentar landet als kind-1111 am Relay
+ * mit `E`(Root)/`e`(Parent)/`k`/`h`/PROTECTED, erscheint im Thread und hebt den Zähler.
+ * Eine Antwort auf den Kommentar ist verschachtelt (`e` = Kommentar-id, `E` = Root).
+ */
+test('C6b: Kommentar erzeugt kind-1111 (E/e/k/h/PROTECTED) + Thread + verschachtelte Antwort', async ({ page }) => {
+    // Dedizierter „thread"-Raum (bläht „welcome" nicht auf). Self-contained.
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    // 1) Wurzelnachricht senden und ihre Relay-id holen (= Thread-Root).
+    const marker = `THREAD-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    let root: RelayEvent | undefined
+    await expect.poll(() => (root = queryRelayEvent((e) => e.content === marker, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const rootId = (root as RelayEvent).id
+
+    // 2) Als Quote-Only teilen (Thread-Wurzel wird kommentierbar): „…" → Zitieren → leer senden.
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    await page.getByRole('menuitem', { name: 'Zitieren' }).click()
+    await page.getByRole('button', { name: 'Senden' }).click()
+    // Quote-Only im Feed → Markertext erscheint zweimal (Original + Zitat-Vorschau).
+    await expect(page.getByText(marker, { exact: true })).toHaveCount(2, { timeout: 15_000 })
+
+    // 3) „Kommentieren"-Chip öffnet das Thread-Overlay. `.last()` = mein frisch erzeugtes
+    //    Quote-Only (der thread-Raum kann aus früheren Läufen weitere Quote-Onlys tragen).
+    await page.getByRole('button', { name: /Thread öffnen/ }).last().click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText(marker).first()).toBeVisible() // Root gerendert
+
+    // 4) Kommentar schreiben → kind-1111 am Relay.
+    const c1 = `COMMENT-${Math.floor(Math.random() * 1e9)}`
+    await dialog.getByPlaceholder('Kommentieren…').fill(c1)
+    await dialog.getByRole('button', { name: 'Kommentar senden' }).click()
+    await expect(dialog.getByText(c1, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText('1 Kommentar', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    let comment: RelayEvent | undefined
+    await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, 'thread', 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    const cm = comment as RelayEvent
+    const tag = (name: string) => cm.tags.find((t) => t[0] === name)
+    expect(tag('E')?.[1]).toBe(rootId) // Thread-Root (Großbuchstabe)
+    expect(tag('e')?.[1]).toBe(rootId) // direktes Parent = Root (Top-Level-Kommentar)
+    expect(tag('k')?.[1]).toBe('9') // Parent-Kind der Wurzel
+    expect(tag('h')?.[1]).toBe('thread') // NIP-29-Group-Tag (member-only Speicherung)
+    expect(tag('-')).toBeTruthy() // PROTECTED (zooid meldet NIP-70)
+
+    // 5) Auf den Kommentar antworten (verschachtelt): e = Kommentar-id, E = Root.
+    await dialog.getByRole('button', { name: 'Antworten' }).first().click()
+    const c2 = `REPLY-${Math.floor(Math.random() * 1e9)}`
+    await dialog.getByPlaceholder('Kommentieren…').fill(c2)
+    await dialog.getByRole('button', { name: 'Kommentar senden' }).click()
+    await expect(dialog.getByText(c2, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    let nested: RelayEvent | undefined
+    await expect.poll(() => (nested = queryRelayEvent((e) => e.content === c2, 'thread', 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    const nt = nested as RelayEvent
+    expect(nt.tags.find((t) => t[0] === 'e')?.[1]).toBe(cm.id) // Parent = der erste Kommentar
+    expect(nt.tags.find((t) => t[0] === 'E')?.[1]).toBe(rootId) // Root bleibt die Wurzel
+    // Zähler steigt auf 2 (verschachtelte Antwort zählt zum Thread) — echte Sichtbarkeits-Assertion.
+    await expect(dialog.getByText('2 Kommentare', { exact: true })).toBeVisible({ timeout: 15_000 })
+})

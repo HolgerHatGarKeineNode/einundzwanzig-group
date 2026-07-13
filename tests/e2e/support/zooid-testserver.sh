@@ -43,6 +43,8 @@ seeded_and_clean() {
     timeout 8 nak req -k 39002 -d edit --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
     # C5-Seed-Poll: fehlt sie (Relay von einem älteren Seed-Skript ohne poll-Raum), frisch aufsetzen.
     timeout 8 nak req -k 1068 -t h=poll --auth --sec "$USER" "$R" 2>/dev/null | grep -q 'Lieblingsfarbe' || return 1
+    # C6b-thread-Raum: fehlt seine Mitgliedschaft (Relay von einem Seed-Skript ohne thread-Raum), frisch aufsetzen.
+    timeout 8 nak req -k 39002 -d thread --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
     local n
     n=$(timeout 8 nak req -k 9 -t h=edit --auth --sec "$USER" "$R" 2>/dev/null | grep -c '"kind":9')
     [ "${n:-999}" -le "$CAP" ]
@@ -104,6 +106,9 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=mention -t name=Mentions -t about=C
 # Dedizierter Schreib-Raum für die C5-Tests (Poll-Erstellen/Abstimmen): schreiben
 # eigene Polls (kind 1068) + Responses (kind 1018) und dürfen „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=poll -t name=Umfragen -t about=C5-Poll-Tests "$R" >/dev/null 2>&1 || true
+# Dedizierter Schreib-Raum für die C6b-Tests (Thread-Ansicht/NIP-22-Kommentare):
+# schreiben Quote-Only-Nachrichten + kind-1111-Kommentare und dürfen „welcome" nicht aufblähen.
+nak event --auth --sec "$ADMIN" -k 9007 -t h=thread -t name=Threads -t about=C6b-Thread-Tests "$R" >/dev/null 2>&1 || true
 
 # NIP-86-Management (HTTP + NIP-98, als ADMIN). MUSS vor allen USER-Events laufen:
 # Der Relay ist member-only (public_write=false, wie Prod), also darf der Test-User
@@ -148,6 +153,7 @@ nak event --auth --sec "$USER" -k 9021 -t h=react "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=mod "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=mention "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=poll "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$USER" -k 9021 -t h=thread "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=edit "$R" >/dev/null 2>&1 || true
 
 # Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
