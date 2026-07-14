@@ -32,9 +32,14 @@ DEV=0adf67475ccc5ca456fd3022e46f5d526eb0af6284bf85494c0dd7847f3e5033    # Entwic
 R=ws://localhost:3335
 HTTP=http://localhost:3335
 PIDFILE=/tmp/e2e-zooid-3335.pid
-# Aufbläh-Schwelle: so viele kind-9 im (sonst leeren) edit-Raum toleriert der Guard,
-# bevor er den Relay frisch aufsetzt. Ein Testlauf schreibt ~10; darüber = Alt-Bloat.
-CAP=40
+# welcome-Seed-Baseline: der Guard setzt frisch auf, sobald der Default-Raum „welcome"
+# über seine 3 Seed-Nachrichten hinaus wächst. Grund: die welcome-Tests (M4/M5) prüfen
+# die ÄLTESTE Seed-Nachricht („Willkommen…") — im virtualisierten Chat (chatVirtualizer)
+# rutscht sie bei Bloat aus dem gemounteten Fenster → Test findet sie nicht. Dedizierte
+# Schreib-Räume (react/edit/…) sind hier egal: ihre Tests senden eine frische Nachricht
+# und prüfen DIESE (immer im Fenster). Ein Voll-Lauf schreibt in welcome → nächster Lauf
+# reseeded frisch; die Lese-Iteration eines einzelnen welcome-freien Tests bleibt schnell.
+WELCOME_SEED=3
 
 # Läuft schon ein sauberer, geseedeter, nicht aufgeblähter zooid? → wiederverwenden.
 seeded_and_clean() {
@@ -46,8 +51,8 @@ seeded_and_clean() {
     # C6b-thread-Raum: fehlt seine Mitgliedschaft (Relay von einem Seed-Skript ohne thread-Raum), frisch aufsetzen.
     timeout 8 nak req -k 39002 -d thread --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
     local n
-    n=$(timeout 8 nak req -k 9 -t h=edit --auth --sec "$USER" "$R" 2>/dev/null | grep -c '"kind":9')
-    [ "${n:-999}" -le "$CAP" ]
+    n=$(timeout 8 nak req -k 9 -t h=welcome --auth --sec "$USER" "$R" 2>/dev/null | grep -c '"kind":9')
+    [ "${n:-999}" -le "$WELCOME_SEED" ]
 }
 
 cd "$ZOOID_DIR" || exit 1

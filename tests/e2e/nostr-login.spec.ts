@@ -58,9 +58,10 @@ test.describe('Nostr-Login (E2E)', () => {
 
         try {
             await page.goto('/nostr-login')
-            await page.getByRole('tab', { name: 'Bunker' }).click()
+            // nsec/Bunker liegen seit dem gehärteten Formular hinter „Andere Optionen".
+            await page.getByRole('button', { name: 'Andere Optionen' }).click()
             await page.getByPlaceholder('bunker://…').fill(bunker.uri)
-            await page.getByRole('button', { name: 'Verbinden' }).click()
+            await page.getByRole('button', { name: 'Mit Bunker verbinden' }).click()
 
             await page.waitForURL('**/spaces', { timeout: 20_000 })
             await expect(page.locator('body')).toContainText(npub)
@@ -86,8 +87,9 @@ test.describe('Nostr-Login (E2E)', () => {
 
     test('Amber-QR (nostrconnect) wird erzeugt und angezeigt', async ({ page }) => {
         await page.goto('/nostr-login')
-        await page.getByRole('tab', { name: 'Amber' }).click()
-        await page.getByRole('button', { name: 'Mit Amber verbinden' }).click()
+        // Web ohne Erweiterung: der Primär-CTA „Signer per QR verbinden" ist der
+        // nostrconnect-Pfad (Amber ist im Web keine eigene Marke mehr, §5.1).
+        await page.getByRole('button', { name: 'Signer per QR verbinden' }).click()
 
         // Desktop-Web: kein nativer Intent → QR zum Scannen mit Amber.
         // Deckt die ganze Kette ab: startConnect → makeNostrconnectUrl → QR-Render.

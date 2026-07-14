@@ -45,11 +45,12 @@ test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async 
 test('M2: Space-Wechsel liegt in den Einstellungen', async ({ page }) => {
     await login(page)
 
-    // Über die Bottom-Nav in die Einstellungen (Space-Wechsel liegt dort, §12)
+    // Über die Bottom-Nav in die Einstellungen — der Space-Wechsel liegt seit der
+    // vereinheitlichten Settings-Seite als „Space & Räume"-Section unter /settings (§6.5).
     await page.getByRole('link', { name: 'Einstellungen' }).click()
-    await page.waitForURL('**/settings/space')
+    await page.waitForURL('**/settings')
 
-    await expect(page.getByText('Space wählen')).toBeVisible()
+    await expect(page.getByText('Space & Räume')).toBeVisible()
     // Space-Auswahl zeigt den NIP-11-Namen (B1), nicht die nackte URL.
     await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
 })

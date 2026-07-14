@@ -359,7 +359,7 @@ test('C1: Reaktion erzeugt kind-7 (e/k/h/PROTECTED), Toggle löscht via kind-5',
     await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
     // MRU-Reihe ist beim ersten Gebrauch leer → 👍 über die Suche wählen.
     await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('daumen')
-    await page.getByRole('button', { name: 'Mit Daumen hoch reagieren' }).click({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Reagieren mit Daumen hoch' }).click({ timeout: 15_000 })
 
     // Chip erscheint mit eigenem Zustand (aria-pressed).
     const chip = row.locator('button[aria-pressed="true"]')
@@ -454,7 +454,7 @@ test('C1: Suche im Emoji-Panel wählt aus dem vollen Set (kind-7)', async ({ pag
     await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
     // 🦄 ist NICHT in der Schnell-Reihe → nur über Suche + Grid erreichbar.
     await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('einhorn')
-    await page.getByRole('button', { name: 'Mit Einhorn reagieren' }).click({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Reagieren mit Einhorn' }).click({ timeout: 15_000 })
 
     const chip = row.locator('button[aria-pressed="true"]')
     await expect(chip).toContainText('🦄', { timeout: 15_000 })
@@ -507,7 +507,7 @@ test('C1: Custom-Emoji aus dem Profil-Tab reagiert (:shortcode: + emoji-Tag)', a
     await expect(tab).toBeVisible({ timeout: 15_000 })
     await tab.click()
     // Custom-Emojis erscheinen progressiv, sobald ihr Bild geladen ist (Stub → 1×1-PNG).
-    const customBtn = page.getByRole('button', { name: `Mit :${code}: reagieren` })
+    const customBtn = page.getByRole('button', { name: `Reagieren mit :${code}:` })
     await expect(customBtn).toBeVisible({ timeout: 15_000 })
     await customBtn.click()
 
@@ -560,7 +560,7 @@ test('C1: Reaktion über das native Modal', async ({ page }) => {
     await expect(modal).toBeVisible()
     // MRU-Reihe ist beim ersten Gebrauch leer → 🎉 über die Suche im Modal-Panel.
     await modal.getByRole('searchbox', { name: 'Emoji suchen' }).fill('konfetti')
-    await modal.getByRole('button', { name: 'Mit Konfettibombe reagieren' }).click({ timeout: 15_000 })
+    await modal.getByRole('button', { name: 'Reagieren mit Konfettibombe' }).click({ timeout: 15_000 })
 
     // Chip erscheint (Modal schließt via react()).
     await expect(row.locator('button[aria-pressed="true"]')).toContainText('🎉', { timeout: 15_000 })
@@ -587,13 +587,13 @@ test('C1: benutztes Emoji erscheint in „Zuletzt benutzt" (MRU)', async ({ page
     await expect(page.getByRole('group', { name: 'Zuletzt benutzt' })).toHaveCount(0)
     // Über die Suche reagieren → Picker schließt.
     await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('rakete')
-    await page.getByRole('button', { name: 'Mit Rakete reagieren' }).click({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Reagieren mit Rakete' }).click({ timeout: 15_000 })
 
     // Erneut öffnen → 🚀 steht jetzt in der „Zuletzt benutzt"-Reihe.
     await row.hover()
     await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
     await expect(
-        page.getByRole('group', { name: 'Zuletzt benutzt' }).getByRole('button', { name: 'Mit Rakete reagieren' }),
+        page.getByRole('group', { name: 'Zuletzt benutzt' }).getByRole('button', { name: 'Reagieren mit Rakete' }),
     ).toBeVisible({ timeout: 15_000 })
 })
 
@@ -615,7 +615,7 @@ test('C1: Reaction-Chip-Tooltip zeigt den Reagierenden-Namen', async ({ page }) 
     await row.hover()
     await row.getByRole('button', { name: 'Reagieren', exact: true }).click()
     await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('rakete')
-    await page.getByRole('button', { name: 'Mit Rakete reagieren' }).click({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Reagieren mit Rakete' }).click({ timeout: 15_000 })
 
     // Tooltip = Name des eingeloggten Reagierenden („Alice Test"), kein Datum.
     const chip = row.locator('button[aria-pressed="true"]')
@@ -1140,12 +1140,15 @@ test('B4: verifizierter NIP-05-Handle zeigt Häkchen in der Profil-Karte', async
         '-c', JSON.stringify({ name: 'Relay Admin', nip05: handle }),
         ZOOID_WS,
     ])
-    // welshman löst NIP-05 privacy-schonend über dufflepud auf (kein direkter
-    // .well-known-Abruf) — Stub liefert den Handle mit GENAU der Autor-pubkey (Match).
-    await page.route('**/handle/info', (route) =>
+    // Seit dufflepudUrl='' (Auftraggeber-Entscheidung 2026-07-10) verifiziert welshman
+    // NIP-05 DIREKT über .well-known/nostr.json (queryProfile), nicht über dufflepud.
+    // Stub liefert `names.admin` = GENAU die Autor-pubkey (Match) + CORS für den Cross-
+    // Origin-Fetch nach nip05-test.example.
+    await page.route('**/.well-known/nostr.json*', (route) =>
         route.fulfill({
             contentType: 'application/json',
-            body: JSON.stringify({ data: [{ handle, info: { pubkey: SELF, nip05: handle } }] }),
+            headers: { 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ names: { admin: SELF } }),
         }),
     )
 
@@ -1237,9 +1240,15 @@ test('C4: Kopieren liefert nevent/npub/JSON in die Zwischenablage', async ({ pag
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
 
     const row = page.locator('div.group', { hasText: marker })
+    // flux:dropdown-Reopen ist rennanfällig: ein Klick während der Schließ-Animation
+    // toggelt das Menü wieder zu. Bis das Menü wirklich offen ist (ein Eintrag sichtbar)
+    // retrien — dasselbe toPass-Muster wie beim @-Popover oben.
     const openMenu = async () => {
-        await row.hover()
-        await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+        await expect(async () => {
+            await row.hover()
+            await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+            await expect(page.getByRole('menuitem', { name: 'npub kopieren' })).toBeVisible({ timeout: 1500 })
+        }).toPass({ timeout: 15_000 })
     }
     const readClip = () => page.evaluate(() => navigator.clipboard.readText())
 
