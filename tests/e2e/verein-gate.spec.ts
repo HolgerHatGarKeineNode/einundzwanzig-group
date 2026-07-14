@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
-import { useZooid } from './support/zooid'
+import { test, expect, type Page } from './support/fixtures'
+import { useZooid, ZOOID_PORT } from './support/zooid'
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure'
 import { nsecEncode } from 'nostr-tools/nip19'
 import { testKeys } from './support/keys'
@@ -50,7 +50,7 @@ test('Vereins-Relay in den Einstellungen zeigt einen Toast', async ({ page }) =>
     await loginAndOpen(page, strangerNsec(), '/settings/space')
 
     // Der fixierte Default-Space (lokaler zooid) ist der einzige Eintrag.
-    await page.getByText('localhost:3335').click()
+    await page.getByText(`localhost:${ZOOID_PORT}`).click()
 
     await page.waitForURL('**/spaces')
     await expect(page.getByText(/Vereins-Relay/)).toBeVisible({ timeout: 10_000 })

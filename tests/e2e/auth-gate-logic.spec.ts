@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { sanitizeReturnUrl, isAuthed } from '../../packages/einundzwanzig-group/js/auth-gate'
 
 /**

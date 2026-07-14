@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { ZAP_GOAL, type TrustedEvent } from '@welshman/util'
 import { getGoalSummary, getGoalTargetSats, getGoalTitle, goalProgress } from '../../packages/einundzwanzig-group/js/goals'
 

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { spaceSupportsRooms, spaceBranding, hasNip70 } from '../../packages/einundzwanzig-group/js/relayCaps'
 
 /**

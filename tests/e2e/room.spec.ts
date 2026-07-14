@@ -1,6 +1,6 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
-import { useZooid, ZOOID_WS } from './support/zooid'
+import { useZooid, ZOOID_WS, ZOOID_PORT } from './support/zooid'
 import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
@@ -1084,7 +1084,7 @@ test('D2: Publish-Fehler zeigt Retry-Zeile, erneutes Senden räumt sie', async (
     await useZooid(page)
 
     let blockKind9 = true
-    await page.routeWebSocket(/localhost:3335/, (ws) => {
+    await page.routeWebSocket(new RegExp(`localhost:${ZOOID_PORT}`), (ws) => {
         const server = ws.connectToServer()
         ws.onMessage((raw) => {
             const s = typeof raw === 'string' ? raw : raw.toString()
@@ -1240,31 +1240,29 @@ test('C4: Kopieren liefert nevent/npub/JSON in die Zwischenablage', async ({ pag
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
 
     const row = page.locator('div.group', { hasText: marker })
-    // flux:dropdown-Reopen ist rennanfällig: ein Klick während der Schließ-Animation
-    // toggelt das Menü wieder zu. Bis das Menü wirklich offen ist (ein Eintrag sichtbar)
-    // retrien — dasselbe toPass-Muster wie beim @-Popover oben.
-    const openMenu = async () => {
+    const readClip = () => page.evaluate(() => navigator.clipboard.readText())
+
+    // Das „…"-Menü ist ein flux:dropdown, das floating-ui ans schwebende Panel positioniert.
+    // Solange der Chat-Virtualizer noch Zeilen/Profile nachlädt, wandert der Anker → das
+    // Panel repositioniert → der Eintrag wird nie „stable" (unter Parallel-Last verschärft).
+    // Deshalb die GANZE Einheit (öffnen → Eintrag klicken → Clipboard prüfen) als toPass:
+    // ein transienter Jank verwirft den Versuch und öffnet frisch, bis es sitzt.
+    const copyVia = async (item: string, check: (clip: string) => void) => {
         await expect(async () => {
             await row.hover()
             await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-            await expect(page.getByRole('menuitem', { name: 'npub kopieren' })).toBeVisible({ timeout: 1500 })
-        }).toPass({ timeout: 15_000 })
+            await page.getByRole('menuitem', { name: item }).click({ timeout: 2000 })
+            check(await readClip())
+        }).toPass({ timeout: 20_000 })
     }
-    const readClip = () => page.evaluate(() => navigator.clipboard.readText())
 
-    await openMenu()
-    await page.getByRole('menuitem', { name: 'npub kopieren' }).click()
-    expect(await readClip()).toMatch(/^npub1[0-9a-z]+$/)
-
-    await openMenu()
-    await page.getByRole('menuitem', { name: 'Event-Link kopieren' }).click()
-    expect(await readClip()).toMatch(/^nostr:nevent1[0-9a-z]+$/)
-
-    await openMenu()
-    await page.getByRole('menuitem', { name: 'JSON kopieren' }).click()
-    const json = JSON.parse(await readClip()) as RelayEvent
-    expect(json.kind).toBe(9)
-    expect(json.content).toBe(marker)
+    await copyVia('npub kopieren', (clip) => expect(clip).toMatch(/^npub1[0-9a-z]+$/))
+    await copyVia('Event-Link kopieren', (clip) => expect(clip).toMatch(/^nostr:nevent1[0-9a-z]+$/))
+    await copyVia('JSON kopieren', (clip) => {
+        const json = JSON.parse(clip) as RelayEvent
+        expect(json.kind).toBe(9)
+        expect(json.content).toBe(marker)
+    })
 })
 
 /**

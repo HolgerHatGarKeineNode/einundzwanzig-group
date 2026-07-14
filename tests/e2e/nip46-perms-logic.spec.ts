@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { NIP46_PERMS, nip46PermsAreStale, permsToNip55Json } from '../../packages/einundzwanzig-group/js/nip46-perms'
 
 /**

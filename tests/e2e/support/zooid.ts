@@ -1,10 +1,17 @@
 import { type Page } from '@playwright/test'
 
-// ISOLIERTER Test-Relay auf :3335 (nicht der Standard-:3334). So bleibt ein lokal
-// laufender Mitschau-zooid auf :3334 komplett unberührt — die Tests fassen ihn nie
-// an. Der Testserver startet die :3335-Instanz mit eigenem data-/config-Verzeichnis
-// (siehe zooid-testserver.sh). `ZOOID_WS` (ohne Slash) ist die nak-CLI-Ziel-URL.
-export const ZOOID_WS = 'ws://localhost:3335'
+// ISOLIERTER Test-Relay (nicht der Standard-:3334). So bleibt ein lokal laufender
+// Mitschau-zooid auf :3334 komplett unberührt — die Tests fassen ihn nie an.
+//
+// PRO WORKER isoliert: `TEST_PARALLEL_INDEX` (0-basierter Worker-Slot, von Playwright je
+// Worker-PROZESS gesetzt) verschiebt Relay- UND App-Port. Dieses Modul wird pro Worker-
+// Prozess einmal ausgewertet ⇒ jeder Worker bekommt automatisch seine eigenen Ports und
+// spricht seine eigene zooid-Instanz + seinen eigenen `php artisan serve` an (siehe
+// fixtures.ts + zooid-testserver.sh). `ZOOID_WS` (ohne Slash) ist die nak-CLI-Ziel-URL.
+const SLOT = Number(process.env.TEST_PARALLEL_INDEX ?? '0')
+export const ZOOID_PORT = 3335 + SLOT
+export const SERVE_PORT = 8137 + SLOT
+export const ZOOID_WS = `ws://localhost:${ZOOID_PORT}`
 export const ZOOID_URL = `${ZOOID_WS}/`
 
 // Winziges 1×1-PNG (deterministische Bild-Antwort für alle proxifizierten/externen

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { verifiedNip05 } from '../../packages/einundzwanzig-group/js/handles'
 
 /**

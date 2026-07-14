@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'

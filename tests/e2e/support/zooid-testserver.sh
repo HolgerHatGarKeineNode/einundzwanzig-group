@@ -29,9 +29,16 @@ USER=76d709385088b75017085270143c45290c0d54b6204e4f9f08dd65b84a180853   # Wegwer
 SELF=da99fbe39247109327ac8504750d0227d50a8f84049ac8bd2f6c7ad0806ed76d   # Relay-self-Pubkey (Owner)
 VIEWER=2dbaf5f4f86a1eed0948852ad48fa40aae2e48d5e347a77fac2ac936d6c94e7b # Pubkey des Test-Users (pub von USER)
 DEV=0adf67475ccc5ca456fd3022e46f5d526eb0af6284bf85494c0dd7847f3e5033    # Entwickler-npub (npub1pt0kw36…) — zum lokalen Mitschauen; NUR local
-R=ws://localhost:3335
-HTTP=http://localhost:3335
-PIDFILE=/tmp/e2e-zooid-3335.pid
+# Port pro Playwright-Worker isoliert: jeder Worker seedet SEINE eigene zooid-Instanz
+# (eigenes data-/config-Verzeichnis, eigener Port) → echte Parallelität ohne Kollision.
+# Default 3335 für Einzel-Nutzung/Dev. Der Mitschau-zooid auf :3334 bleibt IMMER unberührt.
+ZOOID_PORT="${ZOOID_PORT:-3335}"
+R=ws://localhost:$ZOOID_PORT
+HTTP=http://localhost:$ZOOID_PORT
+PIDFILE=/tmp/e2e-zooid-$ZOOID_PORT.pid
+DATA=./data-test-$ZOOID_PORT
+CONFIG=./config-test-$ZOOID_PORT
+LOG=/tmp/e2e-zooid-$ZOOID_PORT.log
 # welcome-Seed-Baseline: der Guard setzt frisch auf, sobald der Default-Raum „welcome"
 # über seine 3 Seed-Nachrichten hinaus wächst. Grund: die welcome-Tests (M4/M5) prüfen
 # die ÄLTESTE Seed-Nachricht („Willkommen…") — im virtualisierten Chat (chatVirtualizer)
@@ -59,26 +66,26 @@ cd "$ZOOID_DIR" || exit 1
 [ -f bin/zooid ] || CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go
 
 if seeded_and_clean; then
-    echo "zooid:3335 bereits sauber geseedet → Wiederverwendung (kein Reset)"
+    echo "zooid:$ZOOID_PORT bereits sauber geseedet → Wiederverwendung (kein Reset)"
     exit 0
 fi
 
-# Aufsetzen: alten/aufgeblähten zooid NUR auf :3335 stoppen (Mitschau :3334 bleibt).
+# Aufsetzen: alten/aufgeblähten zooid NUR auf diesem Port stoppen (Mitschau :3334 bleibt).
 [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
-fuser -k 3335/tcp 2>/dev/null
+fuser -k "$ZOOID_PORT/tcp" 2>/dev/null
 sleep 0.5
 
-# Test-Config aus der lokalen test.toml ableiten, nur der Host wechselt auf :3335.
+# Test-Config aus der lokalen test.toml ableiten, nur der Host wechselt auf diesen Port.
 # zooid dispatcht per HTTP-Host (instancesByHost) → der Host MUSS zum Port passen.
-mkdir -p config-test
-sed 's/localhost:3334/localhost:3335/' config/test.toml > config-test/test.toml
+mkdir -p "$CONFIG"
+sed "s/localhost:3334/localhost:$ZOOID_PORT/" config/test.toml > "$CONFIG/test.toml"
 
-# Frische SQLite je Aufsetzen im ISOLIERTEN data-test/ (nie das Mitschau-data/ von :3334).
-rm -f data-test/db data-test/db-shm data-test/db-wal
+# Frische SQLite je Aufsetzen im ISOLIERTEN, worker-eigenen data-Verzeichnis.
+rm -f "$DATA/db" "$DATA/db-shm" "$DATA/db-wal"
 
 # DETACHED starten (eigene Session, /dev/null-stdin) → überlebt das Skript-Ende, sodass
 # der nächste Lauf ihn per Guard wiederverwenden kann. Kein `wait`, kein Trap.
-setsid env PORT=3335 DATA=./data-test CONFIG=./config-test ./bin/zooid </dev/null >/tmp/e2e-zooid-3335.log 2>&1 &
+setsid env PORT="$ZOOID_PORT" DATA="$DATA" CONFIG="$CONFIG" ./bin/zooid </dev/null >"$LOG" 2>&1 &
 echo "$!" > "$PIDFILE"
 
 # Auf NIP-11 warten (Relay oben)
@@ -195,4 +202,4 @@ for _ in $(seq 1 40); do
     timeout 5 nak req -k 39002 -d edit --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' && break
     sleep 0.25
 done
-echo "zooid:3335 frisch aufgesetzt + geseedet + verifiziert"
+echo "zooid:$ZOOID_PORT frisch aufgesetzt + geseedet + verifiziert"

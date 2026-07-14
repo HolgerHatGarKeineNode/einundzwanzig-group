@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { fromMsats, type TrustedEvent, type Zapper } from '@welshman/util'
 import { aggregateZaps } from '../../packages/einundzwanzig-group/js/feeds'
 

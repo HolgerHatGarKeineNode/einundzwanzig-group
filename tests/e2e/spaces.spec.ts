@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
 

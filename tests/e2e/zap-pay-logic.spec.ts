@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { ZAP_RESPONSE, type SignedEvent, type Zapper } from '@welshman/util'
 import { request } from '@welshman/net'
 import { chooseZapMethod, payZapAuto, watchZapReceipt } from '../../packages/einundzwanzig-group/js/zaps'

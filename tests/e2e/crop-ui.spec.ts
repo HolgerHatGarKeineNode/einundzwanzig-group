@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { useZooid, ZOOID_WS } from './support/zooid'

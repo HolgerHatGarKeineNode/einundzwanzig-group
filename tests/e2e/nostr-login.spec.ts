@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { testKeys } from './support/keys'
 import { installNip07 } from './support/nip07'
 import { startRelay } from './support/relay'

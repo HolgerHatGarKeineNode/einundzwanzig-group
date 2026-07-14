@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import { fromMsats, getInvoiceAmount, getLnUrl, getWalletAddress, toMsats, WalletType } from '@welshman/util'
 import { nwc } from '@getalby/sdk'
 import { Invoice } from '@getalby/lightning-tools/bolt11'

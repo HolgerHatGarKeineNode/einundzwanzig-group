@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/fixtures'
 import type { TrustedEvent } from '@welshman/util'
 import {
     getPollEndsAt,
