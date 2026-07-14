@@ -54,8 +54,8 @@ test('M4: Room-Verlauf lädt, Text + Profile gerendert', async ({ page }) => {
     // Link im Inhalt wird als Anchor gerendert (welshman/content)
     await expect(page.getByRole('link', { name: /einundzwanzig\.space/ })).toBeVisible()
 
-    // Pagination-Affordanz
-    await expect(page.getByRole('button', { name: /Ältere laden/ })).toBeVisible()
+    // Ältere Nachrichten laden jetzt automatisch beim Hochscrollen (createScroller, column-reverse)
+    // — kein „Ältere laden"-Button mehr. Das Nachladen selbst deckt der D1-Scroll-Test ab.
 })
 
 test('M4: neue Nachricht erscheint live', async ({ page }) => {
