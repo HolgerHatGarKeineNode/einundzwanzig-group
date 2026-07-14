@@ -62,3 +62,47 @@ test('P1: Chat persistiert in IndexedDB und hydriert nach Reload aus dem Cache',
 
     await expect(page.getByText(WELCOME)).toBeVisible({ timeout: 15_000 })
 })
+
+/** Ist der Cache leer (keine kind-9, kein owner-Meta)? Für den Logout-Beweis. */
+function cacheIsEmpty(page: Page): Promise<boolean> {
+    return page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const req = indexedDB.open('einundzwanzig-cache')
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+        })
+        try {
+            const count = (store: string) =>
+                new Promise<number>((resolve, reject) => {
+                    const req = db.transaction(store, 'readonly').objectStore(store).count()
+                    req.onsuccess = () => resolve(req.result)
+                    req.onerror = () => reject(req.error)
+                })
+            return (await count('events')) === 0 && (await count('tracker')) === 0 && (await count('meta')) === 0
+        } finally {
+            db.close()
+        }
+    })
+}
+
+/**
+ * M3 P3 — Logout leert den Cache (Multi-Account-Isolation). Nach dem Abmelden dürfen
+ * KEINE gecachten Räume + kein owner-Meta zurückbleiben → der nächste Boot (Gast oder
+ * fremder Account) re-hydratisiert nichts Fremdes. (Der owner-Gate in initStorage ist
+ * der Backstop; hier wird der aktive Clear-Pfad bewiesen.)
+ */
+test('P3: Logout leert den Event-Cache vollständig', async ({ page }) => {
+    await useZooid(page)
+    await loginNsec(page, NSEC)
+    await page.goto('/rooms/welcome')
+
+    await expect(page.getByText(WELCOME)).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => cacheReadiness(page), { timeout: 15_000 }).toBeGreaterThan(0)
+
+    // Abmelden über die Startseite (nostrAuth.doLogout → logout() → clearCache()).
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Abmelden' }).click()
+    await page.waitForURL('**/nostr-login')
+
+    await expect.poll(() => cacheIsEmpty(page), { timeout: 15_000 }).toBe(true)
+})
