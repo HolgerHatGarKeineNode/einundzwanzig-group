@@ -239,7 +239,7 @@ test('M6: auf eine Nachricht antworten (Zitat)', async ({ page }) => {
     // Auf A antworten → Zeile antippen (Aktionen einblenden), dann Antworten.
     const rowA = page.locator('div.group', { hasText: a })
     await rowA.click()
-    await rowA.getByRole('button', { name: 'Antworten' }).click()
+    await rowA.getByRole('button', { name: 'Antworten', exact: true }).click()
     await expect(page.getByText('Antwort an')).toBeVisible()
 
     // Antwort B senden → B ist da UND zitiert A (Original + Zitat = 2× A)
@@ -268,7 +268,7 @@ test('C0: Antwort trägt am Relay q/p/h/PROTECTED + nevent-Präfix', async ({ pa
 
     const rowA = page.locator('div.group', { hasText: a })
     await rowA.click()
-    await rowA.getByRole('button', { name: 'Antworten' }).click()
+    await rowA.getByRole('button', { name: 'Antworten', exact: true }).click()
     await expect(page.getByText('Antwort an')).toBeVisible()
 
     await composer.fill(b)
@@ -301,10 +301,10 @@ test('C0: Interaktions-Menü öffnet als Popover (Web)', async ({ page }) => {
 
     await row.hover()
     await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await expect(page.getByRole('menuitem', { name: 'Antworten' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Antworten', exact: true })).toBeVisible()
 
     // Eintrag setzt den Antwort-Kontext (identisch zur Inline-Aktion).
-    await page.getByRole('menuitem', { name: 'Antworten' }).click()
+    await page.getByRole('menuitem', { name: 'Antworten', exact: true }).click()
     await expect(page.getByText('Antwort an')).toBeVisible()
 })
 
@@ -331,7 +331,7 @@ test('C0: Interaktions-Menü öffnet als Modal (native App)', async ({ page }) =
     const modal = page.locator('dialog[data-modal="message-menu"]')
     await expect(modal).toBeVisible()
     await expect(modal.getByText('Nachricht')).toBeVisible()
-    await modal.getByRole('button', { name: 'Antworten' }).click()
+    await modal.getByRole('button', { name: 'Antworten', exact: true }).click()
     await expect(page.getByText('Antwort an')).toBeVisible()
 })
 
@@ -721,7 +721,7 @@ test('C2: native Modal zeigt Löschen (eigen) und Fork off! (fremd)', async ({ p
     const modal = page.locator('dialog[data-modal="message-menu"]')
     await expect(modal.getByRole('button', { name: 'Löschen' })).toBeVisible()
     await expect(modal.getByRole('button', { name: 'Fork off!' })).toBeHidden()
-    await modal.getByRole('button', { name: 'Antworten' }).click() // Modal schließen
+    await modal.getByRole('button', { name: 'Antworten', exact: true }).click() // Modal schließen
 
     // Fremde (ADMIN) Nachricht → Modal zeigt „Fork off!", nicht „Löschen".
     const foreign = `NF-${Math.floor(Math.random() * 1e9)}`
@@ -900,7 +900,7 @@ test('C3: Bearbeiten einer Antwort erhält q/p + nevent-Präfix', async ({ page 
     // Auf A antworten → B trägt q/p + Präfix.
     const rowA = page.locator('div.group', { hasText: a })
     await rowA.click()
-    await rowA.getByRole('button', { name: 'Antworten' }).click()
+    await rowA.getByRole('button', { name: 'Antworten', exact: true }).click()
     await composer.fill(b)
     await page.getByRole('button', { name: 'Senden' }).click()
     await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -1063,7 +1063,7 @@ test('D2: Klick aufs Zitat hebt die Original-Nachricht hervor', async ({ page })
 
     const rowA = page.locator('div.group', { hasText: a })
     await rowA.click()
-    await rowA.getByRole('button', { name: 'Antworten' }).click()
+    await rowA.getByRole('button', { name: 'Antworten', exact: true }).click()
     await composer.fill(b)
     await page.getByRole('button', { name: 'Senden' }).click()
     await expect(page.getByText(b, { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -1508,18 +1508,19 @@ test('C5: Optionen im Formular per Drag umsortieren, Reihenfolge landet in kind-
 })
 
 /**
- * C6b (Thread-Ansicht, NIP-22 kind 1111) — an einer Quote-Only-Nachricht öffnet der
- * „Kommentieren"-Chip das In-Room-Overlay; ein Kommentar landet als kind-1111 am Relay
- * mit `E`(Root)/`e`(Parent)/`k`/`h`/PROTECTED, erscheint im Thread und hebt den Zähler.
- * Eine Antwort auf den Kommentar ist verschachtelt (`e` = Kommentar-id, `E` = Root).
+ * C6b (Threading, NIP-22 kind 1111, Slack-Modell) — JEDE Nachricht ist thread-fähig
+ * (kein Quote-Only nötig): der Hover-Button „Im Thread antworten" öffnet das Overlay,
+ * eine Antwort landet als kind-1111 mit `E`(Root=Nachricht selbst)/`e`(Parent)/`k`/`h`/
+ * PROTECTED und hebt den Zähler. Eine verschachtelte Antwort trägt `e`=Antwort-id, `E`=Root.
+ * Zurück im Feed erscheint der Antworten-Indikator an der Nachricht.
  */
-test('C6b: Kommentar erzeugt kind-1111 (E/e/k/h/PROTECTED) + Thread + verschachtelte Antwort', async ({ page }) => {
+test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikator + verschachtelt', async ({ page }) => {
     // Dedizierter „thread"-Raum (bläht „welcome" nicht auf). Self-contained.
     await openRoom(page, 'thread')
     const composer = page.getByPlaceholder('Nachricht schreiben…')
     await expect(composer).toBeVisible({ timeout: 15_000 })
 
-    // 1) Wurzelnachricht senden und ihre Relay-id holen (= Thread-Root).
+    // 1) Nachricht senden — sie selbst ist die Thread-Wurzel (jede Nachricht ist thread-fähig).
     const marker = `THREAD-${Math.floor(Math.random() * 1e9)}`
     await composer.fill(marker)
     await page.getByRole('button', { name: 'Senden' }).click()
@@ -1528,51 +1529,95 @@ test('C6b: Kommentar erzeugt kind-1111 (E/e/k/h/PROTECTED) + Thread + verschacht
     await expect.poll(() => (root = queryRelayEvent((e) => e.content === marker, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
     const rootId = (root as RelayEvent).id
 
-    // 2) Als Quote-Only teilen (Thread-Wurzel wird kommentierbar): „…" → Zitieren → leer senden.
+    // 2) Thread direkt öffnen: Hover-Toolbar → „Im Thread antworten" (kein Quote-Only mehr).
     const row = page.locator('div.group', { hasText: marker })
     await row.hover()
-    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await page.getByRole('menuitem', { name: 'Zitieren' }).click()
-    await page.getByRole('button', { name: 'Senden' }).click()
-    // Quote-Only im Feed → Markertext erscheint zweimal (Original + Zitat-Vorschau).
-    await expect(page.getByText(marker, { exact: true })).toHaveCount(2, { timeout: 15_000 })
-
-    // 3) „Kommentieren"-Chip öffnet das Thread-Overlay. `.last()` = mein frisch erzeugtes
-    //    Quote-Only (der thread-Raum kann aus früheren Läufen weitere Quote-Onlys tragen).
-    await page.getByRole('button', { name: /Thread öffnen/ }).last().click()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
     const dialog = page.getByRole('dialog', { name: 'Thread' })
     await expect(dialog).toBeVisible()
-    await expect(dialog.getByText(marker).first()).toBeVisible() // Root gerendert
+    await expect(dialog.getByText(marker).first()).toBeVisible() // Wurzel gerendert
 
-    // 4) Kommentar schreiben → kind-1111 am Relay.
-    const c1 = `COMMENT-${Math.floor(Math.random() * 1e9)}`
-    await dialog.getByPlaceholder('Kommentieren…').fill(c1)
-    await dialog.getByRole('button', { name: 'Kommentar senden' }).click()
+    // 3) Antwort schreiben → kind-1111 am Relay.
+    const sendReply = dialog.getByRole('button', { name: 'Antwort senden' })
+    const c1 = `REPLY-${Math.floor(Math.random() * 1e9)}`
+    await dialog.getByPlaceholder('Im Thread antworten…').fill(c1)
+    await expect(sendReply).toBeEnabled({ timeout: 15_000 })
+    await sendReply.click()
     await expect(dialog.getByText(c1, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(dialog.getByText('1 Kommentar', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText('1 Antwort', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     let comment: RelayEvent | undefined
-    await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, 'thread', 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
     const cm = comment as RelayEvent
     const tag = (name: string) => cm.tags.find((t) => t[0] === name)
-    expect(tag('E')?.[1]).toBe(rootId) // Thread-Root (Großbuchstabe)
-    expect(tag('e')?.[1]).toBe(rootId) // direktes Parent = Root (Top-Level-Kommentar)
+    expect(tag('E')?.[1]).toBe(rootId) // Thread-Root = die Nachricht selbst
+    expect(tag('e')?.[1]).toBe(rootId) // direktes Parent = Root (Top-Level-Antwort)
     expect(tag('k')?.[1]).toBe('9') // Parent-Kind der Wurzel
-    expect(tag('h')?.[1]).toBe('thread') // NIP-29-Group-Tag (member-only Speicherung)
+    expect(tag('h')).toBeUndefined() // KEIN `h` — flotilla-kompatibel (Kommentar ist kein Group-Event)
     expect(tag('-')).toBeTruthy() // PROTECTED (zooid meldet NIP-70)
 
-    // 5) Auf den Kommentar antworten (verschachtelt): e = Kommentar-id, E = Root.
-    await dialog.getByRole('button', { name: 'Antworten' }).first().click()
-    const c2 = `REPLY-${Math.floor(Math.random() * 1e9)}`
-    await dialog.getByPlaceholder('Kommentieren…').fill(c2)
-    await dialog.getByRole('button', { name: 'Kommentar senden' }).click()
+    // 4) Auf die Antwort antworten (verschachtelt): e = Antwort-id, E = Root.
+    await dialog.getByRole('button', { name: 'Antworten', exact: true }).first().click()
+    const c2 = `NESTED-${Math.floor(Math.random() * 1e9)}`
+    await dialog.getByPlaceholder('Im Thread antworten…').fill(c2)
+    await expect(sendReply).toBeEnabled({ timeout: 15_000 })
+    await sendReply.click()
     await expect(dialog.getByText(c2, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     let nested: RelayEvent | undefined
-    await expect.poll(() => (nested = queryRelayEvent((e) => e.content === c2, 'thread', 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => (nested = queryRelayEvent((e) => e.content === c2, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
     const nt = nested as RelayEvent
-    expect(nt.tags.find((t) => t[0] === 'e')?.[1]).toBe(cm.id) // Parent = der erste Kommentar
+    expect(nt.tags.find((t) => t[0] === 'e')?.[1]).toBe(cm.id) // Parent = die erste Antwort
     expect(nt.tags.find((t) => t[0] === 'E')?.[1]).toBe(rootId) // Root bleibt die Wurzel
-    // Zähler steigt auf 2 (verschachtelte Antwort zählt zum Thread) — echte Sichtbarkeits-Assertion.
-    await expect(dialog.getByText('2 Kommentare', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // 5) Zurück im Feed: der Antworten-Indikator erscheint an der Nachricht.
+    await dialog.getByRole('button', { name: 'Zurück' }).click()
+    await expect(row.getByText('2 Antworten')).toBeVisible({ timeout: 15_000 })
+})
+
+/**
+ * C6b (Startseite) — die raumübergreifende Threads-Übersicht auf `/spaces` listet einen
+ * Thread (Root-Snippet + „N Antworten"); Klick öffnet ihn per Deep-Link (`?thread=`)
+ * direkt im Raum-Overlay.
+ */
+test('C6b: Threads-Übersicht auf der Startseite + Deep-Link in den Raum', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    // Nachricht + eine Antwort erzeugen (Thread entsteht).
+    const marker = `SPACETHREAD-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    const reply = `SR-${Math.floor(Math.random() * 1e9)}`
+    await dialog.getByPlaceholder('Im Thread antworten…').fill(reply)
+    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await expect(send).toBeEnabled({ timeout: 15_000 })
+    await send.click()
+    await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+    // Vor dem HARTEN Reload (page.goto) sicherstellen, dass der Kommentar wirklich am Relay
+    // liegt — sonst bricht die Navigation den optimistischen In-Flight-Publish ab (bei echten
+    // Nutzern via wire:navigate bleibt der Socket erhalten; hier ist es ein voller Reload).
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await dialog.getByRole('button', { name: 'Zurück' }).click()
+
+    // Startseite → „Threads"-Tab öffnen → Karte zeigt den Thread (Root-Snippet).
+    await page.goto('/spaces')
+    await page.getByRole('tab', { name: /Threads/ }).click()
+    // Tab-Auswahl wird in ?tab= gespiegelt (verlinkbar).
+    await expect(page).toHaveURL(/[?&]tab=threads/, { timeout: 10_000 })
+    const tile = page.getByRole('button', { name: new RegExp(marker) })
+    await expect(tile).toBeVisible({ timeout: 20_000 })
+
+    // Klick → verlinkbarer Deep-Link-PFAD (/rooms/{h}/thread/{nevent}), Thread-Vollansicht offen.
+    await tile.click()
+    await expect(page).toHaveURL(/\/rooms\/[^/]+\/thread\/nevent1[0-9a-z]+/, { timeout: 15_000 })
+    await expect(page.getByRole('dialog', { name: 'Thread' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('dialog', { name: 'Thread' }).getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
