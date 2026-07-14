@@ -1630,6 +1630,47 @@ test('P3(4.2): Reaktion auf einen Thread-Kommentar erscheint als Chip (geerbte R
 })
 
 /**
+ * P3 (4.2, Review-Fix) — der Reaktions-Picker der geteilten Row wird nach <body> teleportiert.
+ * Ohne `x-on:click.stop` am Panel bubbelt ein Klick darin zum document und triggert den
+ * click.outside-Guard des Thread-Overlays (closeThread) → der Thread verschwände beim Emoji-Wählen.
+ * Test: Picker im Thread öffnen, Emoji wählen → Reaktion landet UND der Thread bleibt offen.
+ */
+test('P3(4.2): Reaction-Picker im Thread schließt den Thread nicht (teleportiertes Panel, .stop)', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `PICKTHREAD-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    const c1 = `PC-${Math.floor(Math.random() * 1e9)}`
+    await dialog.getByPlaceholder('Im Thread antworten…').fill(c1)
+    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await expect(send).toBeEnabled({ timeout: 15_000 })
+    await send.click()
+    await expect(dialog.getByText(c1, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Reaktions-Picker an der Kommentar-Row öffnen und ein Emoji wählen.
+    const c1Row = dialog.locator('div.group', { hasText: c1 })
+    await c1Row.hover()
+    await c1Row.getByRole('button', { name: 'Reagieren', exact: true }).click()
+    // Tippen im teleportierten Suchfeld ist selbst schon ein Klick/Fokus IM Panel → ohne .stop
+    // würde er zum document bubbeln und den Thread schließen.
+    await page.getByRole('searchbox', { name: 'Emoji suchen' }).fill('daumen')
+    await page.getByRole('button', { name: 'Reagieren mit Daumen hoch' }).click({ timeout: 15_000 })
+
+    // KERN: der Thread bleibt offen (vor dem Fix hätte der Klick closeThread ausgelöst) …
+    await expect(dialog).toBeVisible()
+    // … und die Reaktion erscheint als Chip an der Kommentar-Row.
+    await expect(c1Row.getByText('👍')).toBeVisible({ timeout: 15_000 })
+})
+
+/**
  * C6b (Startseite) — die raumübergreifende Threads-Übersicht auf `/spaces` listet einen
  * Thread (Root-Snippet + „N Antworten"); Klick öffnet ihn per Deep-Link (`?thread=`)
  * direkt im Raum-Overlay.
