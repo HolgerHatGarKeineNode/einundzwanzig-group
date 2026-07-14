@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures'
 import type { TrustedEvent } from '@welshman/util'
-import { shouldPersistEvent } from '../../packages/einundzwanzig-group/js/storage'
+import { shouldPersistEvent, messagesToPrune } from '../../packages/einundzwanzig-group/js/storage'
 
 /**
  * M3 P0 — Cache-Whitelist (`shouldPersistEvent`, §4.1/4.2). Reiner welshman-app-
@@ -9,6 +9,13 @@ import { shouldPersistEvent } from '../../packages/einundzwanzig-group/js/storag
  */
 const ev = (kind: number): TrustedEvent =>
     ({ id: `k${kind}`, pubkey: 'a', kind, created_at: 0, tags: [], content: '', sig: '' }) as TrustedEvent
+
+// kind-9-Nachricht in Raum `h` mit created_at `ts`.
+const msg = (id: string, h: string, ts: number): TrustedEvent =>
+    ({ id, pubkey: 'a', kind: 9, created_at: ts, tags: [['h', h]], content: '', sig: '' }) as TrustedEvent
+
+const NOW = 1_700_000_000
+const DAY = 86_400
 
 test.describe('shouldPersistEvent', () => {
     test('cacht Chat + Control-Plane + Deletes', () => {
@@ -24,5 +31,44 @@ test.describe('shouldPersistEvent', () => {
         for (const kind of [7, 9735, 1111, 22242, 20000, 24133]) {
             expect(shouldPersistEvent(ev(kind)), `kind ${kind} sollte NICHT gecacht werden`).toBe(false)
         }
+    })
+})
+
+test.describe('messagesToPrune (§4.3 Per-Raum-Cap + Alters-Backstop)', () => {
+    test('kappt pro Raum auf die neuesten N, verwirft den Überschuss', () => {
+        // Raum A: 5 Nachrichten (a1=neueste NOW-10 … a5=älteste NOW-50), cap 3 → a4+a5 fallen.
+        const events = [1, 2, 3, 4, 5].map((t) => msg(`a${t}`, 'roomA', NOW - t * 10))
+        const drop = messagesToPrune(events, NOW, 3)
+        expect(drop.sort()).toEqual(['a4', 'a5'])
+    })
+
+    test('Cap ist pro Raum unabhängig', () => {
+        const events = [
+            ...[1, 2, 3].map((t) => msg(`a${t}`, 'roomA', NOW - t)),
+            ...[1, 2, 3].map((t) => msg(`b${t}`, 'roomB', NOW - t)),
+        ]
+        // cap 2 → je Raum fällt genau die älteste (a3, b3).
+        expect(messagesToPrune(events, NOW, 2).sort()).toEqual(['a3', 'b3'])
+    })
+
+    test('Alters-Backstop verwirft alles älter als maxAge, unabhängig vom Cap', () => {
+        const events = [
+            msg('fresh', 'roomA', NOW - 10 * DAY),
+            msg('old', 'roomA', NOW - 31 * DAY), // > 30 Tage
+        ]
+        expect(messagesToPrune(events, NOW, 300, 30 * DAY)).toEqual(['old'])
+    })
+
+    test('lässt Control-Plane und kind-9 ohne #h unangetastet', () => {
+        // ZWEI #h-lose kind-9 bei cap=1: fällt die `if (!h) continue`-Guard weg, würden
+        // beide unter demselben (undefined) Key gruppiert → Überschuss → Drop. Also fenced
+        // dieser Fall die Guard wirklich (ein einzelnes Event täte es nicht).
+        const events = [
+            ev(0), // Profile (kein kind 9)
+            ev(10002), // Relays
+            { id: 'noh1', pubkey: 'a', kind: 9, created_at: NOW, tags: [], content: '', sig: '' } as TrustedEvent,
+            { id: 'noh2', pubkey: 'a', kind: 9, created_at: NOW - 1, tags: [], content: '', sig: '' } as TrustedEvent,
+        ]
+        expect(messagesToPrune(events, NOW, 1)).toEqual([])
     })
 })
