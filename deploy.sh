@@ -18,6 +18,20 @@ APP_DIR="webclient"
 echo "▸ 1/3  Production-Build (lokal)"
 npm run build
 
+# Assets vorkomprimieren: die hash-benannten Bundles sind unveränderlich, also
+# einmal maximal komprimieren — nginx serviert die .gz mit `gzip_static on` ohne
+# Request-CPU (statt dynamisch pro Request). Startup-Hebel auf langsamem Netz.
+# .gz ist der AKTIVE Pfad (gzip_static ist im nginx-Core-Build vorhanden). .br
+# wird zusätzlich erzeugt, falls/sobald das ngx_brotli-Modul installiert ist
+# (`brotli_static on` → welshman ~302KB gz → ~230KB br). rsync -az nimmt beide mit.
+GZ_ASSETS=$(find public/build/assets -type f \( -name '*.js' -o -name '*.css' \))
+echo "  · gzip-Precompression der Build-Assets (-9)"
+for f in $GZ_ASSETS; do gzip -9 -k -f "$f"; done
+if command -v brotli >/dev/null 2>&1; then
+    echo "  · Brotli-Precompression der Build-Assets (q11, für brotli_static)"
+    for f in $GZ_ASSETS; do brotli -q 11 -k -f "$f"; done
+fi
+
 echo "▸ 2/3  rsync → ${REMOTE}:~/${APP_DIR}"
 # --delete räumt entfernte Dateien auf; excluded Pfade (.env, DB, Logs) bleiben
 # am Ziel erhalten (kein --delete-excluded). vendor/ baut Composer auf dem Server.

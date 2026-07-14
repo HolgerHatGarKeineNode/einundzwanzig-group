@@ -1628,3 +1628,109 @@ test('C6b: Threads-Übersicht auf der Startseite + Deep-Link in den Raum', async
     await expect(page.getByRole('dialog', { name: 'Thread' })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('dialog', { name: 'Thread' }).getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
+
+/**
+ * Feedback-Fix #4 (Composer-Enter, Web) — auf dem Desktop bleibt die Gewohnheit:
+ * Enter sendet, Shift+Enter erzeugt einen Zeilenumbruch OHNE zu senden. Der
+ * `!isMobile`-Guard darf das Web-Verhalten NICHT verändern (Regression-Schutz).
+ */
+test('Composer: Enter sendet (Web), Shift+Enter macht Umbruch', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `WEBENTER-${Math.floor(Math.random() * 1e9)}`
+    // Shift+Enter → Umbruch mitten im Draft, KEIN Senden.
+    await composer.fill('Zeile1')
+    await composer.press('Shift+Enter')
+    await composer.pressSequentially(marker)
+    await expect(composer).toHaveValue(`Zeile1\n${marker}`)
+
+    // Enter → sendet den mehrzeiligen Draft; der Composer leert optimistisch.
+    await composer.press('Enter')
+    await expect(composer).toHaveValue('')
+    await expect(page.getByText(marker).first()).toBeVisible({ timeout: 15_000 })
+})
+
+/**
+ * Feedback-Fix #4 (Composer-Enter, native App) — auf dem Gerät gibt es keine
+ * Shift-Taste. Enter darf daher NICHT senden, sondern erzeugt einen Umbruch;
+ * gesendet wird nur über den Button. Seam über `__nostrMobile` (wie C0-Modal).
+ */
+test('Composer: Enter macht Umbruch statt zu senden (native App)', async ({ page }) => {
+    await openRoom(page, 'thread')
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+    // Auf „native App" umschalten und den Raum neu laden (Session überlebt, gleiche Origin).
+    await page.addInitScript(() => {
+        ;(window as unknown as { __nostrMobile: boolean }).__nostrMobile = true
+    })
+    await page.goto('/rooms/thread')
+
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill('Zeile1')
+    await composer.press('Enter') // native: Umbruch, KEIN Senden
+    await composer.pressSequentially('Zeile2')
+    // Draft bleibt (inkl. Umbruch) → Enter hat NICHT gesendet.
+    await expect(composer).toHaveValue('Zeile1\nZeile2')
+
+    // Senden nur über den Button → Composer leert.
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(composer).toHaveValue('', { timeout: 15_000 })
+})
+
+/**
+ * Feedback-Fix #5 (Thread-Auto-Scroll) — beim Öffnen landet die Thread-Ansicht
+ * ganz unten bei der letzten Antwort (Nutzer muss nicht selbst runterscrollen).
+ * Kleiner Viewport + mehrere lange Antworten erzwingen Überlauf; nach Schließen +
+ * erneutem Öffnen (frischer openThread-Load) muss der Container am Boden stehen.
+ */
+test('Thread: Ansicht startet beim Laden ganz unten (letzte Antwort)', async ({ page }) => {
+    await page.setViewportSize({ width: 500, height: 420 })
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    // Wurzel-Nachricht.
+    const marker = `TSCROLL-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Thread öffnen und mehrere lange Antworten posten (überläuft den kleinen Viewport).
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    await expect(dialog).toBeVisible()
+    const sendReply = dialog.getByRole('button', { name: 'Antwort senden' })
+    const input = dialog.getByPlaceholder('Im Thread antworten…')
+    for (let i = 0; i < 6; i++) {
+        const reply = `R${i}-${Math.floor(Math.random() * 1e9)} ${'wort '.repeat(14)}`
+        await input.fill(reply)
+        await expect(sendReply).toBeEnabled({ timeout: 15_000 })
+        await sendReply.click()
+        await expect(dialog.getByText(new RegExp(`^R${i}-`)).first()).toBeVisible({ timeout: 15_000 })
+    }
+
+    // Schließen + erneut öffnen → frischer Load-Pfad (openThread lädt warm aus dem Repo).
+    await dialog.getByRole('button', { name: 'Zurück' }).click()
+    await expect(dialog).toBeHidden()
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    await expect(dialog).toBeVisible()
+
+    // Der Kommentar-Container läuft über UND steht ganz unten.
+    const scroller = dialog.locator('.overflow-y-auto').first()
+    await expect
+        .poll(
+            () =>
+                scroller.evaluate((el) => {
+                    const overflow = el.scrollHeight - el.clientHeight
+                    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+                    return overflow > 40 && fromBottom < 80 ? 'ok' : `overflow=${overflow} fromBottom=${fromBottom}`
+                }),
+            { timeout: 15_000 },
+        )
+        .toBe('ok')
+})
