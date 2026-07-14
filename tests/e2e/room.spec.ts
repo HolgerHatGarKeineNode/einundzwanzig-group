@@ -1592,6 +1592,44 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
 })
 
 /**
+ * P3 (4.2 Schritt 5) — Thread-Kommentare rendern durch die GETEILTE Raum-Row und erben deren
+ * Reaktions-Lane. Eine kind-7-Reaktion auf einen Kommentar (trägt `#h` = Root-`h`, via makeReaction)
+ * wird über `roomReactionFilter(h)` mitgeladen und je Kommentar (`#e`) aggregiert → Chip erscheint.
+ */
+test('P3(4.2): Reaktion auf einen Thread-Kommentar erscheint als Chip (geerbte Row)', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `REACTTHREAD-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    const c1 = `TC-${Math.floor(Math.random() * 1e9)}`
+    await dialog.getByPlaceholder('Im Thread antworten…').fill(c1)
+    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await expect(send).toBeEnabled({ timeout: 15_000 })
+    await send.click()
+    await expect(dialog.getByText(c1, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Kommentar-Event (kind 1111) am Relay holen, dann eine kind-7-Reaktion darauf publizieren
+    // (h=thread = Root-h, e=commentId, k=1111) — genau wie makeReaction sie baut.
+    let comment: RelayEvent | undefined
+    await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '7', '-t', 'h=thread',
+        '-t', `e=${(comment as RelayEvent).id}`, '-t', 'k=1111', '-c', '🔥', ZOOID_WS,
+    ])
+
+    // Der Chip erscheint an der Kommentar-Row im Thread (geerbte Reaktions-Lane, Schritt 5).
+    await expect(dialog.getByText('🔥')).toBeVisible({ timeout: 15_000 })
+})
+
+/**
  * C6b (Startseite) — die raumübergreifende Threads-Übersicht auf `/spaces` listet einen
  * Thread (Root-Snippet + „N Antworten"); Klick öffnet ihn per Deep-Link (`?thread=`)
  * direkt im Raum-Overlay.
