@@ -1571,6 +1571,10 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     await sendReply.click()
     await expect(dialog.getByText(c2, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(dialog.getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
+    // Flach/chronologisch (P3 4.2): die verschachtelte Antwort trägt KEINE depth-Einrückung,
+    // der Eltern-Bezug erscheint als „Antwort auf <Autor>"-Zeile (replyToName). Genau eine,
+    // da c1 top-level (leer) und nur c2 ein Parent im Thread hat.
+    await expect(dialog.getByText(/Antwort auf/).first()).toBeVisible({ timeout: 15_000 })
 
     let nested: RelayEvent | undefined
     await expect.poll(() => (nested = queryRelayEvent((e) => e.content === c2, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
