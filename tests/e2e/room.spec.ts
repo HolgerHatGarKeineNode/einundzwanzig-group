@@ -1563,8 +1563,11 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     expect(tag('h')?.[1]).toBe('thread') // `h` des Thread-ROOTS (kind 9) — additiv für NIP-29/Lotus-Interop (P1)
     expect(tag('-')).toBeTruthy() // PROTECTED (zooid meldet NIP-70)
 
-    // 4) Auf die Antwort antworten (verschachtelt): e = Antwort-id, E = Root.
-    await dialog.getByRole('button', { name: 'Antworten', exact: true }).first().click()
+    // 4) Auf die Antwort antworten (verschachtelt): e = Antwort-id, E = Root. Der Reply-Button
+    // liegt jetzt (P3 4.2) in der Hover-Toolbar der geteilten Row → Kommentar hovern, dann klicken.
+    const c1Row = dialog.locator('div.group', { hasText: c1 })
+    await c1Row.hover()
+    await c1Row.getByRole('button', { name: 'Antworten', exact: true }).click()
     const c2 = `NESTED-${Math.floor(Math.random() * 1e9)}`
     await dialog.getByPlaceholder('Im Thread antworten…').fill(c2)
     await expect(sendReply).toBeEnabled({ timeout: 15_000 })
