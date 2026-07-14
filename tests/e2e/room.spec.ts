@@ -1630,6 +1630,91 @@ test('P3(4.2): Reaktion auf einen Thread-Kommentar erscheint als Chip (geerbte R
 })
 
 /**
+ * P4 (Interop, bidirektional lesen) — Lotus' In-Chat-Thread ist ein `kind 10` (NIP-29 Group
+ * Chat Threading): Root via `["e", rootId, relay, "root"]`, Parent via `["e", parentId, …, "reply"]`,
+ * plus `["h", groupId, …]`. Unser Read war doppelt auf NIP-22 (`kind 1111` + `#E`) verriegelt.
+ * Test: wir posten eine kind-9-Wurzel, ein FREMDER Client (ADMIN) seedet eine kind-10-Antwort
+ * exakt nach Lotus-Spec → sie erscheint als Antworten-Indikator UND als Kommentar-Row im Thread
+ * (geteilte Row), eine verschachtelte kind-10 (`reply`-Marker) zeigt den Eltern-Bezug. Kein
+ * Geister-Thread (Zähler = genau die kind-10-Events).
+ */
+test('P4: Lotus kind-10 In-Chat-Thread wird gelesen (Root/Reply-Marker, Indikator, geteilte Row)', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    // 1) Eigene kind-9-Wurzel senden (Autor = VIEWER), Root-ID am Relay holen.
+    const marker = `LOTUSROOT-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    let root: RelayEvent | undefined
+    await expect.poll(() => (root = queryRelayEvent((e) => e.content === marker, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const rootId = (root as RelayEvent).id
+
+    // 2) Lotus-kind-10-Antwort als FREMDER Client seeden — exakt nach Spec: e=root(marker "root"),
+    //    p=Root-Autor, h=Group. (nak: `key=v1;v2;v3` → mehrwertiges Tag mit Marker in Position 3.)
+    const l1 = `LOTUSREPLY-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '10',
+        '-t', `h=thread;${ZOOID_WS}`,
+        '-t', `e=${rootId};${ZOOID_WS};root`,
+        '-t', `p=${VIEWER}`,
+        '-c', l1, ZOOID_WS,
+    ])
+
+    // 3) Der Antworten-Indikator erscheint an der Nachricht (kind-10 in commentsByRoot gebündelt).
+    const row = page.locator('div.group', { hasText: marker })
+    await expect(row.getByText('1 Antwort', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // 4) Thread öffnen → das kind-10 rendert als vollwertige Kommentar-Row (geteilte Raum-Row).
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText(l1, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // 5) Verschachtelte kind-10 (reply-Marker auf die erste Antwort) → Eltern-Bezug als
+    //    „Antwort auf <Autor>"-Zeile (commentParentId liest den `reply`-Marker, nicht den ersten `e`).
+    let l1Event: RelayEvent | undefined
+    await expect.poll(() => (l1Event = queryRelayEvent((e) => e.content === l1, 'thread', 10)) !== undefined, { timeout: 15_000 }).toBe(true)
+    const l2 = `LOTUSNESTED-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', ADMIN, '-k', '10',
+        '-t', `h=thread;${ZOOID_WS}`,
+        '-t', `e=${rootId};${ZOOID_WS};root`,
+        '-t', `p=${VIEWER}`,
+        '-t', `e=${(l1Event as RelayEvent).id};${ZOOID_WS};reply`,
+        '-c', l2, ZOOID_WS,
+    ])
+    await expect(dialog.getByText(l2, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText(/Antwort auf/).first()).toBeVisible({ timeout: 15_000 })
+
+    // 6) Kein Geister-Thread: der Zähler ist GENAU die zwei kind-10 (keine Fremd-Buckets).
+    await expect(dialog.getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // 7) Regression-Guard: Wir antworten auf das FREMDE kind-10. Unser Write bleibt kind-1111,
+    //    MUSS aber an der echten kind-9-Wurzel rooten (E=rootId) — sonst re-rootet welshman den
+    //    Reply aufs kind-10 (E=kind10, nur lowercase-Marker) und er verschwände aus dem Thread.
+    const l1Row = dialog.locator('div.group', { hasText: l1 })
+    await l1Row.hover()
+    await l1Row.getByRole('button', { name: 'Antworten', exact: true }).click()
+    const r1 = `OURREPLY-${Math.floor(Math.random() * 1e9)}`
+    const sendReply = dialog.getByRole('button', { name: 'Antwort senden' })
+    await dialog.getByPlaceholder('Im Thread antworten…').fill(r1)
+    await expect(sendReply).toBeEnabled({ timeout: 15_000 })
+    await sendReply.click()
+    // Unsere Antwort bleibt im Thread sichtbar (nicht spurlos verschwunden).
+    await expect(dialog.getByText(r1, { exact: true })).toBeVisible({ timeout: 15_000 })
+    let ourReply: RelayEvent | undefined
+    await expect.poll(() => (ourReply = queryRelayEvent((e) => e.content === r1, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    const or = ourReply as RelayEvent
+    expect(or.tags.find((t) => t[0] === 'E')?.[1]).toBe(rootId) // an der kind-9-Wurzel gerootet, NICHT am kind-10
+    expect(or.tags.find((t) => t[0] === 'K')?.[1]).toBe('9') // Root-Kind = 9 (nicht 10)
+    await expect(dialog.getByText('3 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
+})
+
+/**
  * P3 (4.2, Review-Fix) — der Reaktions-Picker der geteilten Row wird nach <body> teleportiert.
  * Ohne `x-on:click.stop` am Panel bubbelt ein Klick darin zum document und triggert den
  * click.outside-Guard des Thread-Overlays (closeThread) → der Thread verschwände beim Emoji-Wählen.
