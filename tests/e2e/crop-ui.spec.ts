@@ -22,7 +22,7 @@ function queryKind9(pred: (e: RelayEvent) => boolean, h = 'welcome'): RelayEvent
         .find(pred)
 }
 
-/** Fragt kind-1111 (Kommentar) — OHNE `h`-Filter, weil Kommentare flotilla-kompatibel kein `h` tragen. */
+/** Fragt kind-1111 (Kommentar) — ohne `h`-Filter (Content-Match genügt; Kommentare tragen jetzt additiv das Root-`h`). */
 function queryComment(pred: (e: RelayEvent) => boolean): RelayEvent | undefined {
     return execFileSync(NAK, ['req', '-k', '1111', '--auth', '--sec', NSEC, ZOOID_WS])
         .toString()
@@ -172,10 +172,10 @@ test('C6a: Nachricht mit Anhang senden — kein DataCloneError, imeta am kind-9'
 /**
  * C6b Meme-Thread: der Thread-Composer teilt sich die C6a-Anhang-Maschinerie (Cropper +
  * `attachment`-State) mit dem Haupt-Composer. Eine Antwort MIT Bild landet als kind-1111
- * mit `imeta` (NIP-92) + URL im Content — und weiterhin OHNE `h` (flotilla-kompatibel).
+ * mit `imeta` (NIP-92) + URL im Content — plus dem `h` des Thread-Roots (Interop P1).
  * Anhang wieder direkt in den State gesetzt (Sende-Pfad, kein echter Blossom-Upload).
  */
-test('C6b: Bild im Thread anhängen — kind-1111 trägt imeta + URL, KEIN h (flotilla-kompat)', async ({ page }) => {
+test('C6b: Bild im Thread anhängen — kind-1111 trägt imeta + URL + h (Root, Interop P1)', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', (e) => errors.push(String(e)))
     await openComposerRoom(page, 'thread') // dedizierter Thread-Raum
@@ -210,12 +210,12 @@ test('C6b: Bild im Thread anhängen — kind-1111 trägt imeta + URL, KEIN h (fl
     await dialog.getByPlaceholder('Im Thread antworten…').fill(`Meme ${marker}`)
     await send.click()
 
-    // Am Relay: kind-1111 mit imeta + URL im Content, aber OHNE h (flotilla-kompat).
+    // Am Relay: kind-1111 mit imeta + URL im Content, MIT h des Thread-Roots (Interop P1).
     let ev: RelayEvent | undefined
     await expect.poll(() => (ev = queryComment((e) => e.content.includes(marker))) !== undefined, { timeout: 15_000 }).toBe(true)
     expect(ev!.tags.some((t) => t[0] === 'imeta' && t.includes(`url ${imgUrl}`))).toBe(true)
     expect(ev!.content).toContain(imgUrl)
-    expect(ev!.tags.find((t) => t[0] === 'h')).toBeUndefined() // KEIN h — flotilla-kompatibel
+    expect(ev!.tags.find((t) => t[0] === 'h')?.[1]).toBe('thread') // Root-`h` additiv (P1)
     expect(errors.join('\n')).not.toContain('DataCloneError')
 })
 

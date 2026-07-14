@@ -1560,7 +1560,7 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     expect(tag('E')?.[1]).toBe(rootId) // Thread-Root = die Nachricht selbst
     expect(tag('e')?.[1]).toBe(rootId) // direktes Parent = Root (Top-Level-Antwort)
     expect(tag('k')?.[1]).toBe('9') // Parent-Kind der Wurzel
-    expect(tag('h')).toBeUndefined() // KEIN `h` — flotilla-kompatibel (Kommentar ist kein Group-Event)
+    expect(tag('h')?.[1]).toBe('thread') // `h` des Thread-ROOTS (kind 9) — additiv für NIP-29/Lotus-Interop (P1)
     expect(tag('-')).toBeTruthy() // PROTECTED (zooid meldet NIP-70)
 
     // 4) Auf die Antwort antworten (verschachtelt): e = Antwort-id, E = Root.
@@ -1577,6 +1577,7 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     const nt = nested as RelayEvent
     expect(nt.tags.find((t) => t[0] === 'e')?.[1]).toBe(cm.id) // Parent = die erste Antwort
     expect(nt.tags.find((t) => t[0] === 'E')?.[1]).toBe(rootId) // Root bleibt die Wurzel
+    expect(nt.tags.find((t) => t[0] === 'h')?.[1]).toBe('thread') // auch nested trägt das Root-`h` (P1, aus dem Root, nicht dem Parent)
 
     // 5) Zurück im Feed: der Antworten-Indikator erscheint an der Nachricht.
     await dialog.getByRole('button', { name: 'Zurück' }).click()
