@@ -1631,6 +1631,47 @@ test('C6b: Threads-Übersicht auf der Startseite + Deep-Link in den Raum', async
 })
 
 /**
+ * P2 (Route statt Modal) — die Antworten-Pille an einer Nachricht ist ein echter
+ * `<a wire:navigate>` auf die teilbare Thread-Route (/rooms/{h}/thread/{nevent}),
+ * NICHT mehr das In-Place-Modal. Klick navigiert die URL + öffnet die Vollansicht.
+ */
+test('P2: Antworten-Pille navigiert auf die teilbare Thread-Route (kein Modal)', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    // Nachricht + eine Antwort (via Modal-Button) → an der Nachricht erscheint die Pille.
+    const marker = `PILL-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    const reply = `PR-${Math.floor(Math.random() * 1e9)}`
+    await dialog.getByPlaceholder('Im Thread antworten…').fill(reply)
+    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await expect(send).toBeEnabled({ timeout: 15_000 })
+    await send.click()
+    await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await dialog.getByRole('button', { name: 'Zurück' }).click()
+    await expect(dialog).toBeHidden()
+
+    // Die Pille ist ein echter Link (teilbar/mittelklick) auf die Thread-Route.
+    const pill = row.getByRole('link', { name: /Thread öffnen/ })
+    await expect(pill).toBeVisible({ timeout: 15_000 })
+    expect(await pill.getAttribute('href')).toMatch(/^\/rooms\/[^/]+\/thread\/nevent1[0-9a-z]+$/)
+
+    // Klick → URL wechselt auf die Route (kein Modal am Pillen-Pfad), Vollansicht offen.
+    await pill.click()
+    await expect(page).toHaveURL(/\/rooms\/[^/]+\/thread\/nevent1[0-9a-z]+/, { timeout: 15_000 })
+    await expect(page.getByRole('dialog', { name: 'Thread' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('dialog', { name: 'Thread' }).getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+})
+
+/**
  * Feedback-Fix #4 (Composer-Enter, Web) — auf dem Desktop bleibt die Gewohnheit:
  * Enter sendet, Shift+Enter erzeugt einen Zeilenumbruch OHNE zu senden. Der
  * `!isMobile`-Guard darf das Web-Verhalten NICHT verändern (Regression-Schutz).
