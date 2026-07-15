@@ -5,16 +5,14 @@ import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
-const BLOSSOM = 'https://blossom.einundzwanzig.space'
 
 /**
- * C6a Blossom-Anzeige + Bugfix: der im Profil (kind 10063) konfigurierte Blossom-Server
- * muss geladen und in den Einstellungen angezeigt werden — nicht der Standard-Fallback.
- * Deckt den gemeldeten Bug ab (Liste wurde vor dem Auflösen nie geladen → Fallback).
+ * Blossom ist auf den Vereins-Server fixiert (alle Nutzer sind Mitglieder): die Profil-
+ * Serverliste (kind 10063) wird NICHT mehr aufgelöst. Der Test seedet bewusst einen
+ * abweichenden kind-10063-Server und prüft, dass er die Anzeige nicht kapert.
  */
-test('C6a Settings: konfigurierter Blossom-Server (kind 10063) wird angezeigt', async ({ page }) => {
-    // kind-10063 (Blossom-Server-Liste) für den Test-User seeden.
-    execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '10063', '-t', `server=${BLOSSOM}`, ZOOID_WS])
+test('Settings: Blossom ist auf den Vereins-Server fixiert (kind 10063 wird ignoriert)', async ({ page }) => {
+    execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '10063', '-t', 'server=https://fremder.example', ZOOID_WS])
 
     await useZooid(page)
     await loginNsec(page, NSEC)
@@ -22,10 +20,9 @@ test('C6a Settings: konfigurierter Blossom-Server (kind 10063) wird angezeigt', 
 
     const section = page.locator('section[aria-labelledby="settings-blossom"]')
     await expect(section).toBeVisible()
-    // Der konfigurierte Server erscheint (aus dem Profil geladen), Herkunft „aus Profil".
-    await expect(section.getByText('blossom.einundzwanzig.space')).toBeVisible({ timeout: 15_000 })
-    await expect(section.getByText('aus Profil')).toBeVisible()
-    await expect(section.getByText('Standard')).toHaveCount(0)
+    await expect(section.getByText('blossom.einundzwanzig.space')).toBeVisible()
+    await expect(section.getByText('Vereins-Server')).toBeVisible()
+    await expect(section.getByText('fremder.example')).toHaveCount(0)
 
     await section.scrollIntoViewIfNeeded()
     await section.screenshot({ path: 'plans/screenshots/c6a-blossom-settings.png' })
