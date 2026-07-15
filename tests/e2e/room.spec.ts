@@ -1021,6 +1021,42 @@ test('D1: Unread-Zähler zählt Nachrichten, Jump springt ans Ende', async ({ pa
 })
 
 /**
+ * D1 (Jump-Button, manuelles Zurückscrollen) — der Button muss auch verschwinden, wenn
+ * der User OHNE ihn ans Ende zurückscrollt. Deckt den gemeldeten Bug ab: `x-on:scroll`
+ * war `.throttle.50ms`, und Alpines throttle feuert nur auf der leading edge — das
+ * letzte Event einer Wheel-Serie (genau das, das am Boden ankommt) fiel weg, `atBottom`
+ * blieb auf dem vorletzten Wert stehen → Pfeil klebte fest. Der Jump-Klick-Test oben
+ * fand das nie, weil `scrollToBottom()` `atBottom` selbst setzt.
+ */
+test('D1: manuelles Zurückscrollen ans Ende blendet den Jump-Button aus', async ({ page }) => {
+    await openRoom(page, 'scroll')
+    await expect(page.getByText('Zeile 60', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const jumpBtn = page.getByRole('button', { name: 'Zum Ende springen' })
+    const log = page.locator('[role=log]')
+
+    // Hoch, bis der Button hält.
+    await expect(async () => {
+        await log.hover()
+        await page.mouse.wheel(0, -1200)
+        await expect(jumpBtn).toBeVisible({ timeout: 1500 })
+    }).toPass({ timeout: 15_000 })
+
+    // Manuell zurück ans Ende — schnelle Ticks ohne Pause, wie beim echten Runterscrollen.
+    // column-reverse: positives Delta scrollt Richtung Boden (scrollTop → 0).
+    await log.hover()
+    for (let i = 0; i < 12; i++) {
+        await page.mouse.wheel(0, 400)
+    }
+
+    // Erst belegen, dass wir WIRKLICH am Boden stehen (sonst wäre ein sichtbarer Pfeil korrekt).
+    await expect
+        .poll(() => log.evaluate((el) => Math.abs(el.scrollTop)), { timeout: 5_000 })
+        .toBeLessThan(5)
+    await expect(jumpBtn).toBeHidden()
+})
+
+/**
  * D2 (Shift+Enter) — der alte `.prevent` verschluckte JEDEN Enter, mehrzeilige
  * Nachrichten waren unmöglich. Shift+Enter fügt jetzt einen Umbruch ein (kein
  * Senden), Enter allein sendet.
