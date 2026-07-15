@@ -1,39 +1,47 @@
 # EINUNDZWANZIG — Group
 
-> 🚧 **Work in Progress** — kein stabiler Stand, keine Garantien.
+> 🚧 **Work in progress** — not a stable state, no guarantees.
 
-Nostr-Community-Client für **EINUNDZWANZIG**: Spaces, Räume, Directory und Chat auf
-Nostr (NIP-29), gebaut mit Laravel, Livewire und Flux UI. Das Nostr-SDK (welshman)
-läuft client-seitig im Browser; Signing bleibt immer im Browser — der private Key
-verlässt nie das Gerät.
+Nostr community client for **EINUNDZWANZIG**: spaces, rooms, directory and chat on
+Nostr (NIP-29), built with Laravel, Livewire and Flux UI. The Nostr SDK (welshman) runs
+client-side in the browser; signing always stays in the browser — the private key never
+leaves the device.
 
 ## Stack
 
 - Laravel 13 · Livewire 4 · Flux UI · Tailwind v4
-- Nostr-SDK: welshman (`@welshman/*`), client-seitig
+- Nostr SDK: welshman (`@welshman/*`), client-side
 - Tests: Pest + Playwright
 
 ## Status
 
-Web-Client-Kern funktionsfähig: Nostr-Login (NIP-07/46), Spaces & Räume, Directory
-mit Rollen, Chat lesen/senden, Admin (NIP-86). Der Mobile-Port (Chat als Package in
-die Portal-App) ist in Planung — siehe `PLAN2.md`; der Web-Kern-Verlauf steht in
-`PLAN.md`.
+The web client core works: Nostr login (NIP-07/46), spaces & rooms, directory with roles,
+reading and sending chat, admin (NIP-86). The history of the web core is in `PLAN.md`.
 
-## Chat-Package & Mitentwickeln
+**The mobile port has shipped** (which makes `PLAN2.md` history): the chat runs as the
+`einundzwanzig/group` package inside the
+[TWENTY ONE Companion](https://github.com/HolgerHatGarKeineNode/twenty-one-companion) app
+for Android — with zaps, wallet and an on-device cache. Since app v1.7.0 it also has
+**chat notifications without Goolag**: a native background worker asks the relay itself —
+no Play Services, no second app, no push server in between. Login and room membership are
+known only to the client, so this package supplies the state for it (`pushSyncState`, see
+the package README).
 
-Der Chat-Kern (Spaces/Räume/Directory/Login) ist ein eigenes Composer-Package
-`einundzwanzig/group`, das in einem separaten Repo lebt:
+## Chat package & contributing
+
+The chat core (spaces/rooms/directory/login) is its own Composer package
+`einundzwanzig/group`, living in a separate repo:
 [einundzwanzig-group-package](https://github.com/HolgerHatGarKeineNode/einundzwanzig-group-package)
-(Branch `master`).
+(branch `master`).
 
-Der Ordner `packages/einundzwanzig-group/` ist **gitignored**; Composer wählt die Quelle per Weiche:
+The `packages/einundzwanzig-group/` directory is **gitignored**; Composer picks the source
+automatically:
 
-| Situation | Quelle |
+| Situation | Source |
 |---|---|
-| `packages/einundzwanzig-group/` als Clone vorhanden | **Symlink** auf den lokalen Ordner (Dev) |
-| Ordner fehlt (frischer Clone / CI) | Package als `dev-master` von GitHub |
+| `packages/einundzwanzig-group/` cloned locally | **symlink** to the local directory (dev) |
+| directory missing (fresh clone / CI) | package as `dev-master` from GitHub |
 
-**Nur an der App arbeiten:** `composer install` genügt — das Package kommt von GitHub.
-**Am Package mitentwickeln:** Repo nach `packages/einundzwanzig-group/` klonen, dann greift der
-Symlink. Vollständige Anleitung: **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
+**Working on the app only:** `composer install` is enough — the package comes from GitHub.
+**Contributing to the package:** clone the repo into `packages/einundzwanzig-group/`, then
+the symlink kicks in. Full guide: **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
