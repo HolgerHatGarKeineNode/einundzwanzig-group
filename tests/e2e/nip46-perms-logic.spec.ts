@@ -14,7 +14,7 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
     test('deckt alle signierten Kinds ab — inkl. der kritischen 27235 (Login + Admin)', () => {
         // Jeder Kind, den der Client signiert (Kind-Audit). 27235 ist am kritischsten:
         // ohne ihn kein Server-Login-Handoff und kein NIP-86-Relay-Admin.
-        const required = [0, 5, 7, 9, 1018, 1068, 1984, 9021, 9022, 9041, 9734, 10009, 22242, 27235, 28934, 28936]
+        const required = [0, 5, 7, 9, 1018, 1068, 1984, 9005, 9021, 9022, 9041, 9734, 10009, 22242, 27235, 28934, 28936]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
         }

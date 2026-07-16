@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures'
 import type { TrustedEvent } from '@welshman/util'
-import { shouldPersistEvent, messagesToPrune } from '../../packages/einundzwanzig-group/js/storage'
+import { shouldPersistEvent, messagesToPrune, tombstonedIds } from '../../packages/einundzwanzig-group/js/storage'
 
 /**
  * M3 P0 — Cache-Whitelist (`shouldPersistEvent`, §4.1/4.2). Reiner welshman-app-
@@ -20,8 +20,9 @@ const DAY = 86_400
 test.describe('shouldPersistEvent', () => {
     test('cacht Chat + Control-Plane + Deletes', () => {
         // Chat (der 13-s-Treiber) + kind 5 (sonst reappearen gelöschte Nachrichten).
-        // Vollständige PERSIST_KINDS-Whitelist (13) — dieser Test ist bis P1 der EINZIGE Wächter.
-        for (const kind of [9, 5, 0, 3, 10000, 10002, 30078, 39000, 39001, 39002, 13534, 1068, 9041]) {
+        // Vollständige PERSIST_KINDS-Whitelist (14, inkl. 9005 ROOM_DELETE_EVENT) —
+        // dieser Test ist bis P1 der EINZIGE Wächter.
+        for (const kind of [9, 5, 9005, 0, 3, 10000, 10002, 30078, 39000, 39001, 39002, 13534, 1068, 9041]) {
             expect(shouldPersistEvent(ev(kind)), `kind ${kind} sollte gecacht werden`).toBe(true)
         }
     })
@@ -70,5 +71,30 @@ test.describe('messagesToPrune (§4.3 Per-Raum-Cap + Alters-Backstop)', () => {
             { id: 'noh2', pubkey: 'a', kind: 9, created_at: NOW - 1, tags: [], content: '', sig: '' } as TrustedEvent,
         ]
         expect(messagesToPrune(events, NOW, 1)).toEqual([])
+    })
+})
+
+// kind-9005 (ROOM_DELETE_EVENT) mit `e`-Zielen `ids`.
+const del = (id: string, ...ids: string[]): TrustedEvent =>
+    ({ id, pubkey: 'a', kind: 9005, created_at: NOW, tags: [['h', 'roomA'], ...ids.map((e) => ['e', e])], content: '', sig: '' }) as TrustedEvent
+
+test.describe('tombstonedIds (B2 Selbstreparatur gegen Limbo-Events)', () => {
+    test('sammelt alle e-Ziele aller 9005', () => {
+        const events = [msg('m1', 'roomA', NOW), del('t1', 'm1'), del('t2', 'm2', 'm3'), ev(9)]
+        expect([...tombstonedIds(events)].sort()).toEqual(['m1', 'm2', 'm3'])
+    })
+
+    test('ignoriert Nicht-9005 und leere e-Werte', () => {
+        // Nur 9005 zählt; ein `e`-Tag ohne Wert wird übersprungen (kein leerer Eintrag).
+        const events = [
+            msg('m1', 'roomA', NOW),
+            ev(5), // NIP-09-Delete, NICHT 9005 → hier irrelevant
+            { id: 'd', pubkey: 'a', kind: 9005, created_at: NOW, tags: [['h', 'roomA'], ['e', '']], content: '', sig: '' } as TrustedEvent,
+        ]
+        expect(tombstonedIds(events).size).toBe(0)
+    })
+
+    test('kein 9005 → leeres Set', () => {
+        expect(tombstonedIds([msg('m1', 'roomA', NOW), ev(7)]).size).toBe(0)
     })
 })

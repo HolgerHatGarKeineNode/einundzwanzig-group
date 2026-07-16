@@ -2146,6 +2146,101 @@ test('P1: Admin entfernt fremde Nachricht (banevent)', async ({ page }) => {
     await expect.poll(() => (queryRelayEvent((e) => e.content === marker, 'mod') ? 1 : 0), { timeout: 15_000 }).toBe(0)
 })
 
+// Kernbeweis der Live-Löschsync: ein ZWEITER offener Client (eigener Context/Session)
+// verliert die vom Admin entfernte Nachricht OHNE Reload. Weg: der Admin publiziert ein
+// NIP-29 kind-9005 (delete-event) → zooid akzeptiert es (nur can_manage) + broadcastet es
+// an die `#h`-Live-Subs → `listenRoom`→`honorDeleteEvent` nimmt das Ziel aus dem Repository.
+test('P1: Admin-Löschung propagiert live an offene Zweit-Clients (9005, ohne Reload)', async ({ page, browser, baseURL }) => {
+    seedAuthor(MOD_AUTHOR, 'mod')
+    const marker = `Mod-Live-${Math.floor(Math.random() * 1e9)}`
+    seedMessage(MOD_AUTHOR, 'mod', marker)
+
+    // Zweiter offener Client (VIEWER, getrennte Session) — sieht die Nachricht live.
+    const viewerCtx = await browser.newContext({ baseURL: baseURL ?? undefined })
+    const viewer = await viewerCtx.newPage()
+    try {
+        await useZooid(viewer)
+        await loginNsec(viewer, NSEC)
+        await viewer.goto('/rooms/mod')
+        await expect(viewer.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+        // Admin entfernt die fremde Nachricht in SEINEM Client.
+        await openRoomWith(page, ADMIN, 'mod')
+        await openRowMenu(page, marker)
+        await page.getByRole('menuitem', { name: 'Nachricht entfernen' }).click()
+        await page.getByRole('button', { name: 'Entfernen', exact: true }).click()
+        await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+
+        // Der Zweit-Client verliert sie LIVE — keine Navigation/kein Reload dazwischen.
+        await expect(viewer.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+    } finally {
+        await viewerCtx.close()
+    }
+})
+
+// A1-Negativ-Gate: ein 9005 (delete-event) von einem NICHT-Admin-Mitglied wird vom Relay
+// abgelehnt (CheckWrite: nur can_manage) → die Ziel-Nachricht überlebt. Belegt, dass das
+// Löschrecht nicht an jedem Member hängt. Publish via nak (kein UI — Nicht-Admins sehen
+// den Menüeintrag ohnehin nicht, siehe „P1: Nicht-Admin sieht keine Moderation").
+test('P1: 9005 von Nicht-Admin wird abgelehnt — Ziel-Nachricht überlebt', async () => {
+    const author = seedAuthor(MOD_AUTHOR, 'mod')
+    const marker = `Mod-Gate9005-${Math.floor(Math.random() * 1e9)}`
+    seedMessage(MOD_AUTHOR, 'mod', marker)
+    const target = queryRelayEvent((e) => e.content === marker, 'mod')
+    expect(target, 'Seed-Nachricht muss am Relay liegen').toBeTruthy()
+
+    // MOD_AUTHOR ist Relay-Member (allowpubkey oben), aber KEIN can_manage-Admin.
+    // Sein 9005 muss vom Relay verworfen werden — nak-Fehler ignorieren, entscheidend
+    // ist der Relay-Zustand danach.
+    try {
+        execFileSync(NAK, ['event', '--auth', '--sec', MOD_AUTHOR, '-k', '9005', '-t', 'h=mod', '-t', `e=${target!.id}`, ZOOID_WS], {
+            stdio: 'ignore',
+        })
+    } catch {
+        // erwartet: Relay lehnt ab (restricted) → nak exit ≠ 0
+    }
+    void author
+
+    // Die Ziel-Nachricht ist NICHT gelöscht worden (das 9005 hatte kein Recht).
+    expect(queryRelayEvent((e) => e.content === marker, 'mod'), 'Ziel-Nachricht muss überleben').toBeTruthy()
+})
+
+// B-Selbstreparatur (Kern): ein Client, der die Nachricht im Warm-Cache (IndexedDB) hat und
+// beim Admin-9005 „offline" (Kaltstart-Reset) war, verliert sie beim nächsten Öffnen OHNE
+// manuelles Reload — loadRoomDeletes holt das gespeicherte 9005 nach und honorDeleteEvent
+// nimmt das Ziel aus repository+IDB. Simuliert per vollem page.goto (JS-Reset → Cache-Reload).
+test('P1: Kaltstart holt verpasste Admin-Löschung nach (loadRoomDeletes, ohne Reload-Klick)', async ({ page }) => {
+    seedAuthor(MOD_AUTHOR, 'mod')
+    const marker = `Mod-Repair-${Math.floor(Math.random() * 1e9)}`
+    seedMessage(MOD_AUTHOR, 'mod', marker)
+    const target = queryRelayEvent((e) => e.content === marker, 'mod')
+    expect(target).toBeTruthy()
+
+    // 1) Viewer öffnet den Raum, SIEHT die Nachricht → sie landet im Warm-Cache (IDB).
+    await openRoom(page, 'mod')
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    // syncEvents persistiert gebatcht (batch 3000ms) → auf den IDB-Flush warten.
+    await page.waitForTimeout(3500)
+
+    // 2) Admin entfernt die Nachricht, WÄHREND dieser Client sie nicht live sieht:
+    //    9005 (native, wird gespeichert + löscht das Ziel) + banevent (Bann-Liste).
+    try {
+        execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9005', '-t', 'h=mod', '-t', `e=${target!.id}`, ZOOID_WS], { stdio: 'ignore' })
+    } catch {
+        // publish best-effort
+    }
+    mgmt(`{"method":"banevent","params":["${target!.id}"]}`)
+    // Relay-seitig ist die Nachricht weg, das 9005-Tombstone aber abfragbar.
+    await expect.poll(() => (queryRelayEvent((e) => e.content === marker, 'mod') ? 1 : 0), { timeout: 15_000 }).toBe(0)
+
+    // 3) Kaltstart: voller Seiten-Load (JS-Reset) → loadCachedEvents holt die Nachricht aus
+    //    der IDB in die repository. OHNE loadRoomDeletes bliebe sie stehen (der Relay liefert
+    //    sie nicht mehr, entfernt sie aber auch nicht aus dem Cache). MIT der Reparatur
+    //    verschwindet sie, ohne dass der Nutzer etwas tut.
+    await page.goto('/rooms/mod')
+    await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+})
+
 // „Autor bannen" (banpubkey) ist vorerst NICHT im UI angeboten (bewusst deaktiviert).
 // Der destruktive Ban-Flow bleibt als Test erhalten, aber geskippt — beim Reaktivieren
 // der Menü-Einträge (chat-row/⚡room) wieder einschalten.
