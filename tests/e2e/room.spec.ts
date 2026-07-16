@@ -385,7 +385,7 @@ test('C0: Interaktions-Menü öffnet als Modal (native App)', async ({ page }) =
 
     const modal = page.locator('dialog[data-modal="message-menu"]')
     await expect(modal).toBeVisible()
-    await expect(modal.getByText('Nachricht')).toBeVisible()
+    await expect(modal.getByText('Nachricht', { exact: true })).toBeVisible()
     await modal.getByRole('button', { name: 'Antworten', exact: true }).click()
     await expect(page.getByText('Antwort an')).toBeVisible()
 })

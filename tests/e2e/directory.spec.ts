@@ -45,9 +45,11 @@ const openDirectory = (page: Page): Promise<void> => openDirectoryAs(page, NSEC)
 test('M3: Directory zeigt Members + Rollen, ohne Flackern', async ({ page }) => {
     await openDirectory(page)
 
-    // Beide geseedeten Mitglieder (mit kind-0-Namen)
+    // Beide geseedeten Mitglieder (mit kind-0-Namen) — auf das Member-Grid gescopt:
+    // „Alice Test" kann auch in der Beitritts-Queue (P4b) auftauchen (offene 9021 für
+    // einen closed-Raum), dann wäre ein seitenweites getByText mehrdeutig.
     await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Alice Test')).toBeVisible()
+    await expect(page.locator('.list-stagger').getByText('Alice Test')).toBeVisible()
 
     // Rollen-Badges aus 33534 (exakt — „Mitglied" ≠ Überschrift „Mitglieder").
     // Auf das sichtbare Member-Grid begrenzt: dieselben Labels stehen auch in den
@@ -66,11 +68,12 @@ test('M3: Client-Suche filtert die Mitglieder', async ({ page }) => {
     await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     const search = page.getByPlaceholder('Mitglied suchen…')
+    const grid = page.locator('.list-stagger')
 
-    // Treffer eingrenzen
+    // Treffer eingrenzen (auf das Member-Grid gescopt, s.o.)
     await search.fill('alice')
-    await expect(page.getByText('Alice Test')).toBeVisible()
-    await expect(page.getByText('Relay Admin')).toBeHidden()
+    await expect(grid.getByText('Alice Test')).toBeVisible()
+    await expect(grid.getByText('Relay Admin')).toBeHidden()
 
     // Kein Treffer
     await search.fill('zzzzzz')
@@ -78,8 +81,8 @@ test('M3: Client-Suche filtert die Mitglieder', async ({ page }) => {
 
     // Zurücksetzen zeigt wieder alle
     await search.fill('')
-    await expect(page.getByText('Relay Admin')).toBeVisible()
-    await expect(page.getByText('Alice Test')).toBeVisible()
+    await expect(grid.getByText('Relay Admin')).toBeVisible()
+    await expect(grid.getByText('Alice Test')).toBeVisible()
 })
 
 test('M3: Directory überlebt Reload ohne Flackern', async ({ page }) => {
@@ -288,4 +291,58 @@ test('P3: kaputter Report-Pubkey legt die Queue nicht lahm', async ({ page }) =>
     const modal = page.locator('dialog[data-modal="action-items"]')
     // Trotz der kaputten Meldung rendert die Queue die gültige.
     await expect(modal.getByText(good)).toBeVisible({ timeout: 15_000 })
+})
+
+// ── P4b: Beitritts-Queue (offene 9021 für closed-Räume) ─────────────────────
+const JOIN_APPLICANT = '6666666666666666666666666666666666666666666666666666666666666666'
+const REJECT_APPLICANT = '7777777777777777777777777777777777777777777777777777777777777777'
+
+/** Legt einen closed-Raum via nak an (kind 9007 + 9002 mit closed-Flag). */
+function seedClosedRoom(h: string, name: string): void {
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9007', '-t', `h=${h}`, ZOOID_WS])
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, '-t', 'closed', ZOOID_WS])
+}
+
+/** Ein Wegwerf-Bewerber (erst als Space-Member zugelassen) sendet einen Join (9021). */
+function seedJoinRequest(sec: string, h: string): void {
+    const pub = execFileSync(NAK, ['key', 'public', sec]).toString().trim()
+    mgmt(`{"method":"allowpubkey","params":["${pub}"]}`)
+    execFileSync(NAK, ['event', '--auth', '--sec', sec, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
+}
+
+test('P4b: Admin nimmt eine Beitritts-Anfrage an (closed-Raum)', async ({ page }) => {
+    const h = `join${Math.floor(Math.random() * 1e9)}`
+    const name = `JoinRoom-${Math.floor(Math.random() * 1e9)}`
+    seedClosedRoom(h, name)
+    seedJoinRequest(JOIN_APPLICANT, h)
+
+    await openDirectoryAs(page, ADMIN_HEX)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+
+    await page.getByRole('button', { name: /Meldungen/ }).click()
+    const modal = page.locator('dialog[data-modal="action-items"]')
+    const row = modal.locator('.surface-card', { hasText: name })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.getByRole('button', { name: 'Annehmen' }).click()
+
+    // Nach Annahme (kind 9000 → 39002) fällt die Anfrage aus der Queue.
+    await expect(modal.getByText(name)).toHaveCount(0, { timeout: 15_000 })
+})
+
+test('P4b: Admin lehnt eine Beitritts-Anfrage ab (banevent)', async ({ page }) => {
+    const h = `rej${Math.floor(Math.random() * 1e9)}`
+    const name = `RejRoom-${Math.floor(Math.random() * 1e9)}`
+    seedClosedRoom(h, name)
+    seedJoinRequest(REJECT_APPLICANT, h)
+
+    await openDirectoryAs(page, ADMIN_HEX)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+
+    await page.getByRole('button', { name: /Meldungen/ }).click()
+    const modal = page.locator('dialog[data-modal="action-items"]')
+    const row = modal.locator('.surface-card', { hasText: name })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.getByRole('button', { name: 'Ablehnen' }).click()
+
+    await expect(modal.getByText(name)).toHaveCount(0, { timeout: 15_000 })
 })
