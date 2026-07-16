@@ -257,7 +257,10 @@ test('P3: Admin verwirft eine Meldung (banevent Report)', async ({ page }) => {
     await expect(modal.getByText(marker)).toHaveCount(0, { timeout: 15_000 })
 })
 
-test('P3: Admin bannt den gemeldeten Autor (banpubkey)', async ({ page }) => {
+// „Autor bannen" (banpubkey) ist vorerst NICHT im UI angeboten (bewusst deaktiviert,
+// auch in der Melde-Queue). Test bleibt erhalten, aber geskippt — beim Reaktivieren
+// des banReportedUser-Buttons (⚡directory) wieder einschalten.
+test.skip('P3: Admin bannt den gemeldeten Autor (banpubkey)', async ({ page }) => {
     const marker = `BanRep-${Math.floor(Math.random() * 1e9)}`
     seedReport(ADMIN_HEX, pubOf(REPORT_BAN_TARGET), DUMMY_EVENT_ID, 'spam', marker)
 

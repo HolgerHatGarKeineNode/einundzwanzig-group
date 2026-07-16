@@ -2096,13 +2096,13 @@ test('P1: Admin sieht Moderation im Nachrichten-Menü (Web + native)', async ({ 
     const marker = `Mod-Gate-${Math.floor(Math.random() * 1e9)}`
     seedMessage(MOD_AUTHOR, 'mod', marker)
 
-    // Web-Dropdown: beide Moderations-Einträge sichtbar.
+    // Web-Dropdown: „Nachricht entfernen" sichtbar; „Autor bannen" bewusst deaktiviert.
     await openRoomWith(page, ADMIN, 'mod')
     await openRowMenu(page, marker)
     await expect(page.getByRole('menuitem', { name: 'Nachricht entfernen' })).toBeVisible()
-    await expect(page.getByRole('menuitem', { name: 'Autor bannen' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Autor bannen' })).toHaveCount(0)
 
-    // Native App (Vollbild-Modal): dieselben Einträge im message-menu-Modal.
+    // Native App (Vollbild-Modal): dasselbe im message-menu-Modal.
     await page.addInitScript(() => {
         ;(window as unknown as { __nostrMobile: boolean }).__nostrMobile = true
     })
@@ -2113,7 +2113,7 @@ test('P1: Admin sieht Moderation im Nachrichten-Menü (Web + native)', async ({ 
     await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
     const modal = page.locator('dialog[data-modal="message-menu"]')
     await expect(modal.getByRole('button', { name: 'Nachricht entfernen' })).toBeVisible()
-    await expect(modal.getByRole('button', { name: 'Autor bannen' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'Autor bannen' })).toHaveCount(0)
 })
 
 test('P1: Nicht-Admin sieht keine Moderation (Gating)', async ({ page }) => {
@@ -2146,7 +2146,10 @@ test('P1: Admin entfernt fremde Nachricht (banevent)', async ({ page }) => {
     await expect.poll(() => (queryRelayEvent((e) => e.content === marker, 'mod') ? 1 : 0), { timeout: 15_000 }).toBe(0)
 })
 
-test('P1: Admin bannt Autor (banpubkey) — Nachricht verschwindet', async ({ page }) => {
+// „Autor bannen" (banpubkey) ist vorerst NICHT im UI angeboten (bewusst deaktiviert).
+// Der destruktive Ban-Flow bleibt als Test erhalten, aber geskippt — beim Reaktivieren
+// der Menü-Einträge (chat-row/⚡room) wieder einschalten.
+test.skip('P1: Admin bannt Autor (banpubkey) — Nachricht verschwindet', async ({ page }) => {
     seedAuthor(BAN_AUTHOR, 'mod')
     const marker = `Mod-Ban-${Math.floor(Math.random() * 1e9)}`
     seedMessage(BAN_AUTHOR, 'mod', marker)
