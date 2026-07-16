@@ -126,6 +126,27 @@ test('P1: Chat persistiert in IndexedDB und hydriert nach Reload aus dem Cache',
     await expect(page.getByText(DANKE)).toBeVisible({ timeout: 30_000 })
 })
 
+test('REPRO: Warm-Reload (Cache) — Live-Nachricht streamt weiter rein', async ({ page }) => {
+    await useZooid(page)
+    await loginNsec(page, NSEC)
+    await page.goto('/rooms/welcome')
+
+    await expect(page.getByText(WELCOME)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(DANKE)).toBeVisible()
+    // Cache befüllt (events + tracker) → nächster Boot nimmt den WARMEN Pfad.
+    await expect.poll(() => messageCached(page, DANKE), { timeout: 15_000 }).toBe(true)
+
+    // Relay bleibt UP (kein routeWebSocket-Block!) → nach dem Reload ist der Cache warm
+    // UND die Live-Sub soll neue Events weiter reinstreamen.
+    await page.reload()
+    await expect(page.getByText(DANKE)).toBeVisible({ timeout: 30_000 })
+
+    // Jetzt eine NEUE Nachricht direkt ins Relay — muss live erscheinen (ohne Raum-Neubetreten).
+    const marker = `WarmLive-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome', '-c', `E2E ${marker}`, ZOOID_WS])
+    await expect(page.getByText(`E2E ${marker}`)).toBeVisible({ timeout: 15_000 })
+})
+
 /** Ist die pubkey-Cache-DB weg (nach Logout GANZ gelöscht, nicht nur geleert)? */
 function cacheDbGone(page: Page): Promise<boolean> {
     return page.evaluate(async (dbName) => {

@@ -1,7 +1,7 @@
 import { test, expect } from './support/fixtures'
 import { ZAP_RESPONSE, type SignedEvent, type Zapper } from '@welshman/util'
 import { request } from '@welshman/net'
-import { chooseZapMethod, payZapAuto, watchZapReceipt } from '../../packages/einundzwanzig-group/js/zaps'
+import { chooseZapMethod, payZapAuto, payZapPlain, watchZapReceipt, canPay, plainInvoiceQuery } from '../../packages/einundzwanzig-group/js/zaps'
 
 /**
  * ZAPS.md Z2 JS-Unit (welshman-app-frei): der Zahlweg-Router + die Glue der beiden
@@ -120,5 +120,61 @@ test.describe('watchZapReceipt (Z2b: Live-Sub auf 9735)', () => {
 
         expect(opts!.filters[0]['#e']).toBeUndefined()
         expect(opts!.filters[0]['#p']).toEqual(['bob'])
+    })
+})
+
+/**
+ * Plain-LNURL-Pay (nostrless, Empfänger ohne NIP-57 wie bitrefill.com): der Callback wird
+ * NUR mit amount(+comment) aufgerufen, es entsteht kein 9734/9735 → im Raum nicht sichtbar.
+ */
+test.describe('canPay (LNURL-Callback vorhanden = zahlbar, schwächer als canZap)', () => {
+    test('true mit callback, false ohne', () => {
+        expect(canPay(zapper)).toBe(true)
+        expect(canPay({ ...zapper, callback: undefined })).toBe(false)
+        expect(canPay(undefined)).toBe(false)
+    })
+})
+
+test.describe('plainInvoiceQuery (Callback-Query ohne nostr)', () => {
+    test('nur amount in msats, wenn kein Kommentar/commentAllowed', () => {
+        expect(plainInvoiceQuery(zapper, 21)).toBe('?amount=21000')
+    })
+
+    test('Kommentar nur wenn der Server ihn erlaubt (commentAllowed > 0), URL-kodiert', () => {
+        const z = { ...zapper, commentAllowed: 50 } as Zapper
+        expect(plainInvoiceQuery(z, 21, 'gm ⚡')).toBe('?amount=21000&comment=gm%20%E2%9A%A1')
+    })
+
+    test('ohne commentAllowed wird der Kommentar weggelassen', () => {
+        expect(plainInvoiceQuery(zapper, 5, 'hallo')).toBe('?amount=5000')
+    })
+
+    test('Kommentar wird auf die erlaubte Länge gekürzt', () => {
+        const z = { ...zapper, commentAllowed: 3 } as Zapper
+        expect(plainInvoiceQuery(z, 1, 'abcdef')).toBe('?amount=1000&comment=abc')
+    })
+
+    test('kürzt nach Code-Points, ohne astrales Emoji zu zerteilen (kein URIError)', () => {
+        const z = { ...zapper, commentAllowed: 3 } as Zapper
+        // 'ab😀' = 3 Code-Points → bleibt vollständig; naives slice(0,3) hätte das 😀 zerschnitten.
+        expect(() => plainInvoiceQuery(z, 1, 'ab😀x')).not.toThrow()
+        expect(plainInvoiceQuery(z, 1, 'ab😀x')).toBe('?amount=1000&comment=ab%F0%9F%98%80')
+    })
+})
+
+test.describe('payZapPlain (Rechnung holen + zahlen, KEIN Receipt-Load)', () => {
+    test('holt die Plain-Rechnung und zahlt sie', async () => {
+        const paid: string[] = []
+        await payZapPlain(
+            { zapper, sats: 21, comment: '⚡' },
+            {
+                request: async () => 'lnbc210n1plainstub',
+                pay: async (inv: string) => {
+                    paid.push(inv)
+                    return { preimage: 'stub' }
+                },
+            },
+        )
+        expect(paid).toEqual(['lnbc210n1plainstub'])
     })
 })

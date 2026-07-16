@@ -73,6 +73,60 @@ test('M4: neue Nachricht erscheint live', async ({ page }) => {
     await expect(page.getByText(`E2E ${marker}`)).toBeVisible({ timeout: 15_000 })
 })
 
+/** Setzt document.visibilityState und feuert visibilitychange (Emulation App-Background/Foreground). */
+async function setVisibility(page: Page, state: 'hidden' | 'visible'): Promise<void> {
+    await page.evaluate((s) => {
+        Object.defineProperty(document, 'visibilityState', { value: s, configurable: true })
+        Object.defineProperty(document, 'hidden', { value: s === 'hidden', configurable: true })
+        document.dispatchEvent(new Event('visibilitychange'))
+    }, state)
+}
+
+/**
+ * Foreground-Resync: Im Android-WebView tötet der App-Hintergrund den WebSocket samt der
+ * Live-REQ (`listenRoom`) — neue Events kamen erst beim Raum-Neubetreten. Fix: beim Zurückkommen
+ * (visibilitychange→visible nach echtem Hintergrund) sendet `resync()` die Live-Subs neu + lädt
+ * Verpasstes nach. Zwei Beweise auf EINEM Pfad:
+ *   1. CATCH-UP: eine bei TOTER Live-Sub publizierte Nachricht bleibt aus und kommt erst nach
+ *      dem Foreground rein (via resyncs loadRoomMessages) — OHNE Raum-Neubetreten.
+ *   2. DAUERHAFT LIVE: eine NACH dem Foreground publizierte Nachricht erscheint ebenfalls — die
+ *      kann NUR die neu gesendete listenRoom-Live-Sub liefern (der Catch-up-Load lief schon).
+ * Wird ROT, wenn man den resync/visibilitychange-Pfad ODER die listenRoom-Neusendung entfernt.
+ */
+test('M4b: Foreground-Resync — Catch-up UND dauerhaft neue Live-Sub', async ({ page }) => {
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+
+    // Hintergrund simulieren: _hiddenAt weit genug zurückdrehen (> 2 s Schwelle) UND die Live-Sub
+    // töten (Room-AbortController abbrechen — genau was der WebView-Hintergrund dem Socket antut).
+    await setVisibility(page, 'hidden')
+    await page.evaluate(() => {
+        const el = [...document.querySelectorAll('div')].find(
+            (e) => (e as unknown as { _x_dataStack?: unknown[] })._x_dataStack?.some(
+                (s) => typeof (s as { setup?: unknown }).setup === 'function' && '_controller' in (s as object),
+            ),
+        )
+        const d = (window as unknown as { Alpine: { $data: (e: Element) => { _controller?: AbortController; _hiddenAt: number } } }).Alpine.$data(el as Element)
+        d._controller?.abort()
+        d._hiddenAt = Date.now() - 5000 // echter Background (> 2 s Schwelle)
+    })
+
+    // Nachricht bei TOTER Live-Sub → darf NICHT erscheinen (Reproduktion des Bugs).
+    const missed = `Missed-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome', '-c', `E2E ${missed}`, ZOOID_WS])
+    await expect(page.getByText(`E2E ${missed}`)).toBeHidden({ timeout: 4000 })
+
+    // Foreground → resync(): Catch-up holt die verpasste Nachricht.
+    await setVisibility(page, 'visible')
+    await expect(page.getByText(`E2E ${missed}`)).toBeVisible({ timeout: 15_000 })
+
+    // Zweite Nachricht NACH dem Foreground → nur die frisch gesendete listenRoom-Live-Sub kann sie
+    // liefern (der einmalige Catch-up-Load ist durch). Beweist die dauerhafte Re-Subscription.
+    const live = `Live-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome', '-c', `E2E ${live}`, ZOOID_WS])
+    await expect(page.getByText(`E2E ${live}`)).toBeVisible({ timeout: 15_000 })
+})
+
 /**
  * IMG (PLAN4) — eine Bild-URL im Nachrichtentext rendert als Inline-Bild über den
  * Bild-Proxy (Preset `msg`), Klick öffnet die Lightbox (Preset `full`), Esc schließt.
