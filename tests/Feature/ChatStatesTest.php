@@ -49,7 +49,7 @@ test('Raum-Menü (C2): Löschen nur bei eigener, Fork off! nur bei fremder Nachr
     $res->assertSee('askReport(m)', false);
 
     // Native Modal (Seam auf isMobile): dieselben Guards über menuFor.
-    $res->assertSee('x-show="menuFor?.mine"', false);
+    $res->assertSee('x-show="!_menuInThread && menuFor?.mine"', false);
     $res->assertSee('x-show="!menuFor?.mine"', false);
 
     // Fork-off!-Modal: Grund-Auswahl (NIP-56) + Bestätigen (Flux rendert das Modal als
@@ -87,7 +87,7 @@ test('Raum-Menü (C4): Mention-Popover + Kopier-/Info-Einträge + Info-Modal —
     // @-Mention-Autocomplete: Popover hinter mentionOpen, Auswahl ruft pickMention.
     $res->assertSee('x-if="mentionOpen"', false);
     $res->assertSee('pickMention(item)', false);
-    $res->assertSee('onComposerInput($event.target)', false);
+    $res->assertSee('onComposerInput($event.target,', false);
 
     // Web-Popover: Kopier-/Info-Einträge (nur lesen).
     $res->assertSee('copyNevent(m)', false);
