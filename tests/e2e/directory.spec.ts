@@ -1,7 +1,7 @@
 import { test, expect, type Page } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { useZooid, ZOOID_PORT } from './support/zooid'
+import { useZooid, ZOOID_PORT, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
@@ -192,4 +192,100 @@ test('P2: No-op-Save lässt den Space-Namen unverändert', async ({ page }) => {
     } finally {
         mgmt(`{"method":"changerelayname","params":[${JSON.stringify(ORIG)}]}`)
     }
+})
+
+// ── P3: Melde-Queue (NIP-56 kind 1984) ──────────────────────────────────────
+const DUMMY_EVENT_ID = 'a'.repeat(64)
+// Wegwerf-„gemeldete Autoren" — foreign zu allen echten Mitgliedern. Der Ban-Test
+// bannt seinen eigenen (REPORT_BAN_TARGET), damit kein echtes Mitglied getroffen wird.
+const REPORT_TARGET = '3333333333333333333333333333333333333333333333333333333333333333'
+const REPORT_BAN_TARGET = '4444444444444444444444444444444444444444444444444444444444444444'
+
+/** Pubkey (hex) eines Secrets via nak. */
+function pubOf(sec: string): string {
+    return execFileSync(NAK, ['key', 'public', sec]).toString().trim()
+}
+
+/** Seedet eine „Fork off!"-Meldung (kind 1984): ["e",id,reason]+["p",autor], content=Freitext. */
+function seedReport(reporterSec: string, reportedPubkey: string, reportedId: string, reason: string, content: string): void {
+    execFileSync(NAK, [
+        'event', '--auth', '--sec', reporterSec, '-k', '1984',
+        '-t', `e=${reportedId};${reason}`, '-t', `p=${reportedPubkey}`, '-c', content, ZOOID_WS,
+    ])
+}
+
+test('P3: Admin sieht die Melde-Queue mit der Meldung', async ({ page }) => {
+    const marker = `Report-${Math.floor(Math.random() * 1e9)}`
+    seedReport(ADMIN_HEX, pubOf(REPORT_TARGET), DUMMY_EVENT_ID, 'spam', marker)
+
+    await openDirectoryAs(page, ADMIN_HEX)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+
+    await page.getByRole('button', { name: /Meldungen/ }).click()
+    const modal = page.locator('dialog[data-modal="action-items"]')
+    // Freitext + Grund-Label der Meldung sichtbar — auf die Marker-Zeile gescopt
+    // (parallele Tests seeden mehrere Reports, „Spam" ist nicht eindeutig).
+    const row = modal.locator('.surface-card', { hasText: marker })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await expect(row.getByText('Spam', { exact: true })).toBeVisible()
+})
+
+test('P3: normaler User sieht keine Melde-Queue', async ({ page }) => {
+    seedReport(ADMIN_HEX, pubOf(REPORT_TARGET), DUMMY_EVENT_ID, 'spam', `NoAdmin-${Math.floor(Math.random() * 1e9)}`)
+    await openDirectory(page)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: /Meldungen/ })).toBeHidden()
+})
+
+test('P3: Admin verwirft eine Meldung (banevent Report)', async ({ page }) => {
+    const marker = `Dismiss-${Math.floor(Math.random() * 1e9)}`
+    seedReport(ADMIN_HEX, pubOf(REPORT_TARGET), DUMMY_EVENT_ID, 'other', marker)
+
+    await openDirectoryAs(page, ADMIN_HEX)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+
+    await page.getByRole('button', { name: /Meldungen/ }).click()
+    const modal = page.locator('dialog[data-modal="action-items"]')
+    const row = modal.locator('.surface-card', { hasText: marker })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.getByRole('button', { name: 'Verwerfen' }).click()
+
+    // Meldung verschwindet aus der Queue (optimistisch removeEvent nach banevent).
+    await expect(modal.getByText(marker)).toHaveCount(0, { timeout: 15_000 })
+})
+
+test('P3: Admin bannt den gemeldeten Autor (banpubkey)', async ({ page }) => {
+    const marker = `BanRep-${Math.floor(Math.random() * 1e9)}`
+    seedReport(ADMIN_HEX, pubOf(REPORT_BAN_TARGET), DUMMY_EVENT_ID, 'spam', marker)
+
+    await openDirectoryAs(page, ADMIN_HEX)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+
+    await page.getByRole('button', { name: /Meldungen/ }).click()
+    const modal = page.locator('dialog[data-modal="action-items"]')
+    const row = modal.locator('.surface-card', { hasText: marker })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.getByRole('button', { name: 'Autor bannen' }).click()
+
+    await expect(modal.getByText(marker)).toHaveCount(0, { timeout: 15_000 })
+})
+
+/**
+ * P3 (Regression, ultracode-Finding HIGH) — ein Report mit KAPUTTEM p-Tag (kein
+ * 64-hex) darf die ganze Melde-Queue nicht lahmlegen (npubEncode würde sonst im
+ * derived-map werfen). Die Ableitung validiert den Pubkey → ungültige Meldung wird
+ * als „unbekannt" gezeigt, gültige Meldungen bleiben sichtbar.
+ */
+test('P3: kaputter Report-Pubkey legt die Queue nicht lahm', async ({ page }) => {
+    const good = `Good-${Math.floor(Math.random() * 1e9)}`
+    seedReport(ADMIN_HEX, 'not-a-valid-hex-pubkey', DUMMY_EVENT_ID, 'spam', `Bad-${Math.floor(Math.random() * 1e9)}`)
+    seedReport(ADMIN_HEX, pubOf(REPORT_TARGET), DUMMY_EVENT_ID, 'other', good)
+
+    await openDirectoryAs(page, ADMIN_HEX)
+    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+
+    await page.getByRole('button', { name: /Meldungen/ }).click()
+    const modal = page.locator('dialog[data-modal="action-items"]')
+    // Trotz der kaputten Meldung rendert die Queue die gültige.
+    await expect(modal.getByText(good)).toBeVisible({ timeout: 15_000 })
 })
