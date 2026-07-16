@@ -1,5 +1,6 @@
 import { test, expect, type Page } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { useZooid, ZOOID_WS, ZOOID_PORT } from './support/zooid'
 import { loginNsec } from './support/login'
 
@@ -2036,4 +2037,127 @@ test('Thread: Ansicht startet beim Laden ganz unten (letzte Antwort)', async ({ 
             { timeout: 15_000 },
         )
         .toBe('ok')
+})
+
+// ── P1: Nachrichten-Moderation (NIP-86, Admin) ──────────────────────────────
+// Der Relay-Owner (ADMIN) ist der einzige NIP-86-Admin. Moderations-Einträge im
+// Nachrichten-„…"-Menü (banevent/banpubkey) sind nur für ihn sichtbar und nur an
+// FREMDEN Nachrichten. Alle Tests laufen im dedizierten „mod"-Raum mit WEGWERF-
+// Autoren (allowpubkey + join) — foreign zu ADMIN UND VIEWER, und Bannen trifft
+// nie ein echtes Mitglied (welcome/Directory bleiben unberührt, [[e2e-dedicated-test-rooms]]).
+const HTTP = `http://localhost:${ZOOID_PORT}/`
+
+/** NIP-86-Management-Call als ADMIN (NIP-98 HTTP-Auth), wie das Seed-Skript. */
+function mgmt(body: string): void {
+    const hash = createHash('sha256').update(body).digest('hex')
+    const evt = execFileSync(NAK, ['event', '-k', '27235', '--sec', ADMIN, '-t', `u=${HTTP}`, '-t', 'method=POST', '-t', `payload=${hash}`])
+        .toString()
+        .trim()
+    const auth = Buffer.from(evt).toString('base64')
+    execFileSync('curl', ['-s', '-X', 'POST', HTTP, '-H', 'Content-Type: application/nostr+json+rpc', '-H', `Authorization: Nostr ${auth}`, '-d', body])
+}
+
+/** Wegwerf-Autor als Relay-Member zulassen + dem Raum beitreten; gibt seinen Pubkey. */
+function seedAuthor(sec: string, h: string): string {
+    const pub = execFileSync(NAK, ['key', 'public', sec]).toString().trim()
+    mgmt(`{"method":"allowpubkey","params":["${pub}"]}`)
+    execFileSync(NAK, ['event', '--auth', '--sec', sec, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
+    return pub
+}
+
+/** Publiziert eine kind-9-Nachricht als `sec` im Raum `h`; gibt den Marker-Text. */
+function seedMessage(sec: string, h: string, marker: string): void {
+    execFileSync(NAK, ['event', '--auth', '--sec', sec, '-k', '9', '-t', `h=${h}`, '-c', marker, ZOOID_WS])
+}
+
+/** Loggt mit beliebigem Secret ein und öffnet einen Raum (Admin-Login = ADMIN). */
+async function openRoomWith(page: Page, secret: string, h: string): Promise<void> {
+    await useZooid(page)
+    await loginNsec(page, secret)
+    await page.goto(`/rooms/${h}`)
+}
+
+// Zwei getrennte Wegwerf-Autoren, damit der destruktive Ban-Test (banpubkey löscht
+// ALLE Events des Autors) den Delete-/Gating-Autor nicht mit abräumt (parallele
+// Tests teilen die zooid-Instanz eines Workers).
+const MOD_AUTHOR = '1111111111111111111111111111111111111111111111111111111111111111'
+const BAN_AUTHOR = '2222222222222222222222222222222222222222222222222222222222222222'
+
+/** Öffnet das „…"-Menü der Marker-Zeile (Web-Dropdown) und gibt die Zeile zurück. */
+async function openRowMenu(page: Page, marker: string): Promise<void> {
+    const row = page.locator('div.group', { hasText: marker })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.click() // Touch/Tap blendet die Aktionen ein
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+}
+
+test('P1: Admin sieht Moderation im Nachrichten-Menü (Web + native)', async ({ page }) => {
+    seedAuthor(MOD_AUTHOR, 'mod')
+    const marker = `Mod-Gate-${Math.floor(Math.random() * 1e9)}`
+    seedMessage(MOD_AUTHOR, 'mod', marker)
+
+    // Web-Dropdown: beide Moderations-Einträge sichtbar.
+    await openRoomWith(page, ADMIN, 'mod')
+    await openRowMenu(page, marker)
+    await expect(page.getByRole('menuitem', { name: 'Nachricht entfernen' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Autor bannen' })).toBeVisible()
+
+    // Native App (Vollbild-Modal): dieselben Einträge im message-menu-Modal.
+    await page.addInitScript(() => {
+        ;(window as unknown as { __nostrMobile: boolean }).__nostrMobile = true
+    })
+    await page.goto('/rooms/mod')
+    const row = page.locator('div.group', { hasText: marker })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.click()
+    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+    const modal = page.locator('dialog[data-modal="message-menu"]')
+    await expect(modal.getByRole('button', { name: 'Nachricht entfernen' })).toBeVisible()
+    await expect(modal.getByRole('button', { name: 'Autor bannen' })).toBeVisible()
+})
+
+test('P1: Nicht-Admin sieht keine Moderation (Gating)', async ({ page }) => {
+    seedAuthor(MOD_AUTHOR, 'mod')
+    const marker = `Mod-NoAdmin-${Math.floor(Math.random() * 1e9)}`
+    seedMessage(MOD_AUTHOR, 'mod', marker)
+
+    // VIEWER (NSEC) ist kein Admin; die Nachricht ist FREMD (MOD_AUTHOR) → das Gate
+    // ist rein isAdmin, nicht m.mine. Beide Einträge fehlen.
+    await openRoom(page, 'mod')
+    await openRowMenu(page, marker)
+    await expect(page.getByRole('menuitem', { name: 'Antworten', exact: true })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Nachricht entfernen' })).toHaveCount(0)
+    await expect(page.getByRole('menuitem', { name: 'Autor bannen' })).toHaveCount(0)
+})
+
+test('P1: Admin entfernt fremde Nachricht (banevent)', async ({ page }) => {
+    seedAuthor(MOD_AUTHOR, 'mod')
+    const marker = `Mod-Del-${Math.floor(Math.random() * 1e9)}`
+    seedMessage(MOD_AUTHOR, 'mod', marker)
+
+    await openRoomWith(page, ADMIN, 'mod')
+    await openRowMenu(page, marker)
+    await page.getByRole('menuitem', { name: 'Nachricht entfernen' }).click()
+    await page.getByRole('button', { name: 'Entfernen', exact: true }).click()
+
+    // Lokal verschwunden (optimistisches repository.removeEvent nach Ban-Erfolg)…
+    await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+    // …und relay-seitig gebannt: die nak-Query findet das Event nicht mehr.
+    await expect.poll(() => (queryRelayEvent((e) => e.content === marker, 'mod') ? 1 : 0), { timeout: 15_000 }).toBe(0)
+})
+
+test('P1: Admin bannt Autor (banpubkey) — Nachricht verschwindet', async ({ page }) => {
+    seedAuthor(BAN_AUTHOR, 'mod')
+    const marker = `Mod-Ban-${Math.floor(Math.random() * 1e9)}`
+    seedMessage(BAN_AUTHOR, 'mod', marker)
+
+    await openRoomWith(page, ADMIN, 'mod')
+    await openRowMenu(page, marker)
+    await page.getByRole('menuitem', { name: 'Autor bannen' }).click()
+    await page.getByRole('button', { name: 'Bannen', exact: true }).click()
+
+    // Lokal verschwunden (removeEvent über alle geladenen Nachrichten des Autors)…
+    await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+    // …und relay-seitig weg (banpubkey löscht alle Events des Autors).
+    await expect.poll(() => (queryRelayEvent((e) => e.content === marker, 'mod') ? 1 : 0), { timeout: 15_000 }).toBe(0)
 })
