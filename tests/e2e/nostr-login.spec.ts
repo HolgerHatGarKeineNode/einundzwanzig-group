@@ -102,6 +102,9 @@ test.describe('Nostr-Login (E2E)', () => {
     test('Logout leert beide Sessions und das Gate sperrt wieder', async ({ page }) => {
         await loginNsec(page, NSEC)
 
+        // Abmelden liegt hinter dem Profil-Chip-Popover (Kopf-Umbau ⚡spaces.blade.php):
+        // erst öffnen, dann den (vorher display:none) Abmelden-Button klicken.
+        await page.getByRole('button', { name: /Angemeldet als/ }).click()
         await page.getByRole('button', { name: 'Abmelden' }).click()
         await page.waitForURL('**/nostr-login')
 

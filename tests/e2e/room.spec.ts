@@ -1777,13 +1777,16 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     await expect(dialog.getByText(marker).first()).toBeVisible() // Wurzel gerendert
 
     // 3) Antwort schreiben → kind-1111 am Relay.
-    const sendReply = dialog.getByRole('button', { name: 'Antwort senden' })
+    const sendReply = page.getByRole('button', { name: 'Antwort senden' })
     const c1 = `REPLY-${Math.floor(Math.random() * 1e9)}`
-    await dialog.getByPlaceholder('Im Thread antworten…').fill(c1)
+    await page.getByPlaceholder('Im Thread antworten…').fill(c1)
     await expect(sendReply).toBeEnabled({ timeout: 15_000 })
     await sendReply.click()
     await expect(dialog.getByText(c1, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(dialog.getByText('1 Antwort', { exact: true })).toBeVisible({ timeout: 15_000 })
+    // Zähler steht im GETEILTEN app-header (Subtitle-Slot, außerhalb des role=dialog-Bereichs,
+    // der nur Root+Kommentare umfasst) → page-scoped, mit `banner` disambiguiert (die gleichlautende
+    // Pille an der — jetzt verdeckten — Raum-Zeile trägt denselben Text, nur unsichtbar im DOM).
+    await expect(page.getByRole('banner').getByText('1 Antwort', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     let comment: RelayEvent | undefined
     await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
@@ -1801,11 +1804,11 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     await c1Row.hover()
     await c1Row.getByRole('button', { name: 'Antworten', exact: true }).click()
     const c2 = `NESTED-${Math.floor(Math.random() * 1e9)}`
-    await dialog.getByPlaceholder('Im Thread antworten…').fill(c2)
+    await page.getByPlaceholder('Im Thread antworten…').fill(c2)
     await expect(sendReply).toBeEnabled({ timeout: 15_000 })
     await sendReply.click()
     await expect(dialog.getByText(c2, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(dialog.getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('banner').getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
     // Flach/chronologisch (P3 4.2): die verschachtelte Antwort trägt KEINE depth-Einrückung,
     // der Eltern-Bezug erscheint als „Antwort auf <Autor>"-Zeile (replyToName). Genau eine,
     // da c1 top-level (leer) und nur c2 ein Parent im Thread hat.
@@ -1819,7 +1822,7 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     expect(nt.tags.find((t) => t[0] === 'h')?.[1]).toBe('thread') // auch nested trägt das Root-`h` (P1, aus dem Root, nicht dem Parent)
 
     // 5) Zurück im Feed: der Antworten-Indikator erscheint an der Nachricht.
-    await dialog.getByRole('button', { name: 'Zurück' }).click()
+    await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(row.getByText('2 Antworten')).toBeVisible({ timeout: 15_000 })
 })
 
@@ -1842,8 +1845,8 @@ test('P3(4.2): Reaktion auf einen Thread-Kommentar erscheint als Chip (geerbte R
     await row.getByRole('button', { name: 'Im Thread antworten' }).click()
     const dialog = page.getByRole('dialog', { name: 'Thread' })
     const c1 = `TC-${Math.floor(Math.random() * 1e9)}`
-    await dialog.getByPlaceholder('Im Thread antworten…').fill(c1)
-    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await page.getByPlaceholder('Im Thread antworten…').fill(c1)
+    const send = page.getByRole('button', { name: 'Antwort senden' })
     await expect(send).toBeEnabled({ timeout: 15_000 })
     await send.click()
     await expect(dialog.getByText(c1, { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -1923,7 +1926,7 @@ test('P4: Lotus kind-10 In-Chat-Thread wird gelesen (Root/Reply-Marker, Indikato
     await expect(dialog.getByText(/Antwort auf/).first()).toBeVisible({ timeout: 15_000 })
 
     // 6) Kein Geister-Thread: der Zähler ist GENAU die zwei kind-10 (keine Fremd-Buckets).
-    await expect(dialog.getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('banner').getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     // 7) Regression-Guard: Wir antworten auf das FREMDE kind-10. Unser Write bleibt kind-1111,
     //    MUSS aber an der echten kind-9-Wurzel rooten (E=rootId) — sonst re-rootet welshman den
@@ -1932,8 +1935,8 @@ test('P4: Lotus kind-10 In-Chat-Thread wird gelesen (Root/Reply-Marker, Indikato
     await l1Row.hover()
     await l1Row.getByRole('button', { name: 'Antworten', exact: true }).click()
     const r1 = `OURREPLY-${Math.floor(Math.random() * 1e9)}`
-    const sendReply = dialog.getByRole('button', { name: 'Antwort senden' })
-    await dialog.getByPlaceholder('Im Thread antworten…').fill(r1)
+    const sendReply = page.getByRole('button', { name: 'Antwort senden' })
+    await page.getByPlaceholder('Im Thread antworten…').fill(r1)
     await expect(sendReply).toBeEnabled({ timeout: 15_000 })
     await sendReply.click()
     // Unsere Antwort bleibt im Thread sichtbar (nicht spurlos verschwunden).
@@ -1943,7 +1946,7 @@ test('P4: Lotus kind-10 In-Chat-Thread wird gelesen (Root/Reply-Marker, Indikato
     const or = ourReply as RelayEvent
     expect(or.tags.find((t) => t[0] === 'E')?.[1]).toBe(rootId) // an der kind-9-Wurzel gerootet, NICHT am kind-10
     expect(or.tags.find((t) => t[0] === 'K')?.[1]).toBe('9') // Root-Kind = 9 (nicht 10)
-    await expect(dialog.getByText('3 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('banner').getByText('3 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
 })
 
 /**
@@ -1966,8 +1969,8 @@ test('P3(4.2): Reaction-Picker im Thread schließt den Thread nicht (teleportier
     await row.getByRole('button', { name: 'Im Thread antworten' }).click()
     const dialog = page.getByRole('dialog', { name: 'Thread' })
     const c1 = `PC-${Math.floor(Math.random() * 1e9)}`
-    await dialog.getByPlaceholder('Im Thread antworten…').fill(c1)
-    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await page.getByPlaceholder('Im Thread antworten…').fill(c1)
+    const send = page.getByRole('button', { name: 'Antwort senden' })
     await expect(send).toBeEnabled({ timeout: 15_000 })
     await send.click()
     await expect(dialog.getByText(c1, { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -2007,8 +2010,8 @@ test('C6b: Threads-Übersicht auf der Startseite + Deep-Link in den Raum', async
     await row.getByRole('button', { name: 'Im Thread antworten' }).click()
     const dialog = page.getByRole('dialog', { name: 'Thread' })
     const reply = `SR-${Math.floor(Math.random() * 1e9)}`
-    await dialog.getByPlaceholder('Im Thread antworten…').fill(reply)
-    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await page.getByPlaceholder('Im Thread antworten…').fill(reply)
+    const send = page.getByRole('button', { name: 'Antwort senden' })
     await expect(send).toBeEnabled({ timeout: 15_000 })
     await send.click()
     await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
@@ -2016,7 +2019,7 @@ test('C6b: Threads-Übersicht auf der Startseite + Deep-Link in den Raum', async
     // liegt — sonst bricht die Navigation den optimistischen In-Flight-Publish ab (bei echten
     // Nutzern via wire:navigate bleibt der Socket erhalten; hier ist es ein voller Reload).
     await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
-    await dialog.getByRole('button', { name: 'Zurück' }).click()
+    await page.getByRole('button', { name: 'Zurück' }).click()
 
     // Startseite → „Threads"-Tab öffnen → Karte zeigt den Thread (Root-Snippet).
     await page.goto('/spaces')
@@ -2053,13 +2056,13 @@ test('P2: Antworten-Pille navigiert auf die teilbare Thread-Route (kein Modal)',
     await row.getByRole('button', { name: 'Im Thread antworten' }).click()
     const dialog = page.getByRole('dialog', { name: 'Thread' })
     const reply = `PR-${Math.floor(Math.random() * 1e9)}`
-    await dialog.getByPlaceholder('Im Thread antworten…').fill(reply)
-    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await page.getByPlaceholder('Im Thread antworten…').fill(reply)
+    const send = page.getByRole('button', { name: 'Antwort senden' })
     await expect(send).toBeEnabled({ timeout: 15_000 })
     await send.click()
     await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
-    await dialog.getByRole('button', { name: 'Zurück' }).click()
+    await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(dialog).toBeHidden()
 
     // Die Pille ist ein echter Link (teilbar/mittelklick) auf die Thread-Route.
@@ -2072,6 +2075,231 @@ test('P2: Antworten-Pille navigiert auf die teilbare Thread-Route (kein Modal)',
     await expect(page).toHaveURL(/\/rooms\/[^/]+\/thread\/nevent1[0-9a-z]+/, { timeout: 15_000 })
     await expect(page.getByRole('dialog', { name: 'Thread' })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('dialog', { name: 'Thread' }).getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+})
+
+/**
+ * Thread-Umbau (Warm-Open, a) — die Antworten-Pille rebootet die Chat-Insel NICHT mehr
+ * (früher `<a wire:navigate>`), sondern öffnet den Thread WARM via `openThread()` und
+ * spiegelt die URL selbst per `pushState`. Beweis: ein VOR dem Klick gesetzter `window`-
+ * Sentinel überlebt den Klick nur, wenn kein echter Seiten-/Insel-Reboot stattfand — ein
+ * `wire:navigate`-Reboot oder ein voller Reload hätten `window` gewischt. Die URL wechselt
+ * dabei trotzdem korrekt auf die teilbare Thread-Route (P2-Verhalten bleibt erhalten, nur
+ * der Transportweg ändert sich).
+ */
+test('Thread-Umbau (a): Antworten-Pille öffnet den Thread WARM (kein Insel-Reboot)', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `WARM-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    const reply = `WR-${Math.floor(Math.random() * 1e9)}`
+    await page.getByPlaceholder('Im Thread antworten…').fill(reply)
+    const send = page.getByRole('button', { name: 'Antwort senden' })
+    await expect(send).toBeEnabled({ timeout: 15_000 })
+    await send.click()
+    await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await page.getByRole('button', { name: 'Zurück' }).click()
+    await expect(dialog).toBeHidden()
+
+    // Sentinel VOR dem Pillen-Klick setzen — ein Full-Reload/wire:navigate-Reboot würde
+    // `window` wischen, ein warmes In-Insel-Öffnen (pushState) lässt ihn unangetastet.
+    await page.evaluate(() => {
+        ;(window as unknown as { __warm?: number }).__warm = 1
+    })
+
+    const pill = row.getByRole('link', { name: /Thread öffnen/ })
+    await expect(pill).toBeVisible({ timeout: 15_000 })
+    await pill.click()
+
+    await expect(page).toHaveURL(/\/rooms\/[^/]+\/thread\/nevent1[0-9a-z]+/, { timeout: 15_000 })
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+    // KERN: `window` überlebte den Klick — kein Reboot, warmes Öffnen in derselben Insel.
+    expect(await page.evaluate(() => (window as unknown as { __warm?: number }).__warm)).toBe(1)
+})
+
+/**
+ * Thread-Umbau (Kopf-Zurück, b) — Architektur überarbeitet: KEIN `pushState`/eigener
+ * popstate-Handler mehr. `openThread` spiegelt die URL nur noch KOSMETISCH per
+ * `replaceState` (kein neuer history-Eintrag) — Browser-Back ist also NICHT mehr der
+ * Schließen-Mechanismus (das war nie sauber mit Livewire vereinbar, s. Bug-Report der
+ * Vorversion dieses Tests: `state:null` bei einem frischen Seitenaufruf, kein Livewire-
+ * Snapshot zum Restaurieren). Schließen läuft jetzt AUSSCHLIESSLICH über den geteilten
+ * Kopf-„Zurück"-Pfeil (`backFromThread()`), der den Thread WARM abbaut und die Adress-
+ * zeile per `replaceState` auf `/rooms/{h}` zurücksetzt. Beweis „warm" (kein Reboot):
+ * derselbe `window`-Sentinel-Trick wie in (a) — er überlebt den ganzen Zyklus
+ * Pille-Klick → Kopf-Zurück-Klick.
+ */
+test('Thread-Umbau (b): Kopf-Zurück-Pfeil schließt den warm geöffneten Thread wieder auf den Raum', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `WBACK-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    const reply = `WBR-${Math.floor(Math.random() * 1e9)}`
+    await page.getByPlaceholder('Im Thread antworten…').fill(reply)
+    const send = page.getByRole('button', { name: 'Antwort senden' })
+    await expect(send).toBeEnabled({ timeout: 15_000 })
+    await send.click()
+    await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await page.getByRole('button', { name: 'Zurück' }).click()
+    await expect(dialog).toBeHidden()
+
+    // Sentinel VOR dem Pillen-Klick — überlebt nur ein warmes In-Insel-Öffnen/Schließen,
+    // kein Full-Reload/wire:navigate-Reboot hätte `window` unangetastet gelassen.
+    await page.evaluate(() => {
+        ;(window as unknown as { __warm?: number }).__warm = 1
+    })
+
+    const pill = row.getByRole('link', { name: /Thread öffnen/ })
+    await expect(pill).toBeVisible({ timeout: 15_000 })
+    await pill.click()
+    await expect(page).toHaveURL(/\/rooms\/[^/]+\/thread\/nevent1[0-9a-z]+/, { timeout: 15_000 })
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+
+    // Kopf-Zurück-Pfeil (geteilter app-header-Button, backFromThread()) → warm zu, URL
+    // per replaceState zurück auf die Raum-Basis (kein „/thread/…" mehr).
+    await page.getByRole('button', { name: 'Zurück' }).click()
+    await expect(dialog).toBeHidden({ timeout: 15_000 })
+    await expect(page).toHaveURL(/\/rooms\/[^/]+$/, { timeout: 15_000 })
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    expect(await page.evaluate(() => (window as unknown as { __warm?: number }).__warm)).toBe(1)
+})
+
+/**
+ * Thread-Umbau (Deep-Link kalt, c) — ein FRISCHER, direkter Aufruf der teilbaren Thread-
+ * Route (`page.goto`, kein Klick/wire:navigate) öffnet den Thread beim Setup mit push=false
+ * (die URL steht schon). Der Kopf-„Zurück"-Pfeil räumt anschließend per `replaceState` auf
+ * den Raum zurück (kein eigener history-Eintrag gepusht, s. `backFromThread()`).
+ */
+test('Thread-Umbau (c): kalter Deep-Link-Aufruf öffnet den Thread, Kopf-Zurück führt in den Raum', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    const marker = `DEEP-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    const reply = `DR-${Math.floor(Math.random() * 1e9)}`
+    await page.getByPlaceholder('Im Thread antworten…').fill(reply)
+    const send = page.getByRole('button', { name: 'Antwort senden' })
+    await expect(send).toBeEnabled({ timeout: 15_000 })
+    await send.click()
+    await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await page.getByRole('button', { name: 'Zurück' }).click()
+    await expect(dialog).toBeHidden()
+
+    const pill = row.getByRole('link', { name: /Thread öffnen/ })
+    await expect(pill).toBeVisible({ timeout: 15_000 })
+    const href = await pill.getAttribute('href')
+    expect(href).toBeTruthy()
+
+    // Frischer, KALTER Direktaufruf der Thread-Route — die Insel bootet neu (voller Reload,
+    // kein wire:navigate) und muss den Deep-Link (`_deepThreadNevent`) selbst konsumieren.
+    await page.goto(href as string)
+    const coldDialog = page.getByRole('dialog', { name: 'Thread' })
+    await expect(coldDialog).toBeVisible({ timeout: 15_000 })
+    await expect(coldDialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Kopf-Zurück-Pfeil → zurück in den Raum (kein Modal-Overlay mehr, Composer sichtbar).
+    await page.getByRole('button', { name: 'Zurück' }).click()
+    await expect(coldDialog).toBeHidden({ timeout: 15_000 })
+    await expect(page).toHaveURL(/\/rooms\/[^/]+$/, { timeout: 15_000 })
+    await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+})
+
+/**
+ * Thread-Umbau (Design, d) — der gepinnte Thread-Root ist standardmäßig auf 2 Zeilen
+ * geklammert (`line-clamp-1`, Redesign: schlanker Zitat-Anker statt Karte, kein eigener
+ * „mehr anzeigen"-Textbutton mehr — die GANZE Kopf-Leiste [Avatar, Name, nip05, Zeit,
+ * Chevron] IST der Toggle, `:disabled="!overflow"`, `:aria-expanded="overflow ? expanded
+ * : null"`). Positiv: ein Root mit vielen Zeilen zeigt Überlauf → Toggle ENABLED,
+ * `aria-expanded="false"`, Chevron sichtbar; Klick hebt `line-clamp-1` auf + toggelt
+ * `aria-expanded` auf `"true"` — geprüft über den KLASSENWECHSEL am Root-Body (nicht über
+ * Text-„Sichtbarkeit": von `line-clamp` visuell geklippter Text bleibt für Playwright
+ * trotzdem `visible`, da nur ein Vorfahre per CSS clippt, keine harte Ausblendung).
+ * Gegenprobe: ein kurzer Root (eine Zeile, kein Überlauf) → Toggle DISABLED, kein
+ * `aria-expanded`, kein sichtbarer Chevron (ersetzt die alte „Button fehlt komplett"-Prüfung,
+ * die mit dem neuen „immer-da-aber-disabled"-Button bedeutungslos wäre).
+ */
+test('Thread-Umbau (d): langer Root ist geklammert + Kopf-Leiste expandiert (inkl. aria-expanded); kurzer Root mit deaktiviertem Toggle', async ({ page }) => {
+    await openRoom(page, 'thread')
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+
+    // Langer Root: viele literale Zeilen (whitespace-pre-wrap rendert sie 1:1) — überläuft
+    // die 1-Zeilen-Klammer sicher, unabhängig von Viewport-Breite.
+    const marker = `CLAMP-${Math.floor(Math.random() * 1e9)}`
+    const longRoot = Array.from({ length: 10 }, (_, i) => `${marker}-Zeile${i}`).join('\n')
+    await composer.fill(longRoot)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(new RegExp(`${marker}-Zeile0`)).first()).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    await expect(dialog).toBeVisible()
+
+    // Die ganze Kopf-Leiste ist der Toggle-Button (enthält den Root-Autornamen „Alice Test");
+    // dialog-scoped, um nicht mit der jetzt verdeckten Raum-Zeile zu kollidieren.
+    const toggle = dialog.locator('button').filter({ hasText: 'Alice Test' })
+    const rootBody = dialog.locator('.chat-content').first()
+    await expect(rootBody).toHaveClass(/line-clamp-1/)
+    await expect(toggle).toBeEnabled({ timeout: 15_000 })
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    // `.last()`: die nip05-Badge (auch verborgen via x-show) rendert ebenfalls ein <svg> davor;
+    // der Chevron ist stets das letzte Kind der Kopf-Leiste.
+    await expect(toggle.locator('svg').last()).toBeVisible()
+
+    await toggle.click()
+    await expect(rootBody).not.toHaveClass(/line-clamp-1/)
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await toggle.click()
+    await expect(rootBody).toHaveClass(/line-clamp-1/)
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    await page.getByRole('button', { name: 'Zurück' }).click()
+    await expect(dialog).toBeHidden()
+
+    // Gegenprobe: kurzer Root (eine Zeile) → kein Überlauf, Toggle bleibt DEAKTIVIERT
+    // (der Button existiert immer, ist aber ohne Überlauf ohne Funktion), kein aria-expanded.
+    const shortMarker = `SHORT-${Math.floor(Math.random() * 1e9)}`
+    await composer.fill(shortMarker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(shortMarker, { exact: true })).toBeVisible({ timeout: 15_000 })
+    const shortRow = page.locator('div.group', { hasText: shortMarker })
+    await shortRow.hover()
+    await shortRow.getByRole('button', { name: 'Im Thread antworten' }).click()
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText(shortMarker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const shortToggle = dialog.locator('button').filter({ hasText: 'Alice Test' })
+    await expect(shortToggle).toBeDisabled({ timeout: 15_000 })
+    await expect(shortToggle).not.toHaveAttribute('aria-expanded', /.+/)
+    await expect(shortToggle.locator('svg').last()).toBeHidden()
 })
 
 /**
@@ -2148,8 +2376,8 @@ test('Thread: Ansicht startet beim Laden ganz unten (letzte Antwort)', async ({ 
     await row.getByRole('button', { name: 'Im Thread antworten' }).click()
     const dialog = page.getByRole('dialog', { name: 'Thread' })
     await expect(dialog).toBeVisible()
-    const sendReply = dialog.getByRole('button', { name: 'Antwort senden' })
-    const input = dialog.getByPlaceholder('Im Thread antworten…')
+    const sendReply = page.getByRole('button', { name: 'Antwort senden' })
+    const input = page.getByPlaceholder('Im Thread antworten…')
     for (let i = 0; i < 6; i++) {
         const reply = `R${i}-${Math.floor(Math.random() * 1e9)} ${'wort '.repeat(14)}`
         await input.fill(reply)
@@ -2159,7 +2387,7 @@ test('Thread: Ansicht startet beim Laden ganz unten (letzte Antwort)', async ({ 
     }
 
     // Schließen + erneut öffnen → frischer Load-Pfad (openThread lädt warm aus dem Repo).
-    await dialog.getByRole('button', { name: 'Zurück' }).click()
+    await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(dialog).toBeHidden()
     await row.hover()
     await row.getByRole('button', { name: 'Im Thread antworten' }).click()
