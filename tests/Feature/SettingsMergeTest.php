@@ -39,19 +39,36 @@ test('Space & Räume: der einzige Space-Wechsel-Ort (Single-Space) mit ready-Gua
     $res->assertSee('x-if="!ready"', false);
 });
 
-test('Wallet: Einstieg verlinkt die Wallet-Route (Betrieb bleibt eigener Tab)', function () {
-    settings()->assertSee('href="'.route('group.wallet').'"', false);
+test('Wallet: KEIN Hub-Eintrag auf Web (eigener Peer-Tab); Sektion nur wenn Registry sie listet', function () {
+    // Sektions-spezifischer Marker (NICHT die Wallet-Route — die steht ohnehin im
+    // Bottom-Nav-Peer-Tab; genau das ist der Punkt: doppelter Einstieg vermieden).
+    // Web-Registry ohne 'wallet' → keine Wallet-Sektion im Hub.
+    settings()->assertDontSee('id="settings-wallet"', false);
+
+    // Ein Host, der 'wallet' listet (z.B. Package-Default ohne Wallet-Tab) → Sektion da.
+    config(['group.settings' => ['account', 'wallet']]);
+    settings()->assertSee('id="settings-wallet"', false);
 });
 
-test('Netzwerk & Relays: read-only, nur wenn der Host es einblendet (config-Gate)', function () {
-    // Web-Default: kein show_relays → Sektion aus (Web-Umfang ohne Relays).
+test('Netzwerk & Relays: read-only, Sichtbarkeit über die Registry (nicht mehr show_relays)', function () {
+    // Web-Registry ohne 'relays' → Sektion aus (Web-Umfang ohne Relay-Editor).
     settings()->assertDontSee('Netzwerk &amp; Relays', false);
 
-    // Host schaltet ein (Mobile) → read-only Relay-Insel erscheint.
-    config(['group.show_relays' => true]);
+    // Host listet 'relays' (Mobile) → read-only Relay-Insel erscheint.
+    config(['group.settings' => ['account', 'relays']]);
     $res = settings();
     $res->assertSee('Netzwerk &amp; Relays', false);
     $res->assertSee('x-data="nostrRelays"', false);
+});
+
+test('Registry steuert Präsenz UND Reihenfolge der Sektionen', function () {
+    // Umgedrehte Registry → Sektions-Markup erscheint in genau dieser Reihenfolge.
+    config(['group.settings' => ['session', 'account']]);
+    $h = settings()->getContent();
+
+    expect(strpos($h, 'settings-logout'))->toBeLessThan(strpos($h, 'settings-account'));
+    // Nicht gelistete Sektion (space) fehlt komplett.
+    expect($h)->not->toContain('settings-space');
 });
 
 test('Darstellung: EIN Theme-Regler über $flux.appearance, kein hartes class="dark"', function () {

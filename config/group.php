@@ -22,4 +22,16 @@ return [
         ['key' => 'wallet', 'route' => 'group.wallet', 'icon' => 'bolt', 'label' => 'Wallet', 'gate' => 'nostr'],
         ['key' => 'settings', 'route' => 'group.settings', 'icon' => 'cog-6-tooth', 'label' => 'Einstellungen', 'gate' => 'nostr'],
     ],
+
+    /*
+     * Settings-Registry des Web-Hosts (§4.1): geordnete Section-Keys, die der
+     * verschmolzene Settings-Hub (`group.settings`) iteriert. Bewusst OHNE `wallet`
+     * (Wallet ist ein eigener Bottom-Nav-Peer-Tab, kein Hub-Eintrag → kein doppelter
+     * Einstieg) und OHNE `relays` (die read-only NIP-65-Liste ist Fachjargon/selten
+     * gebraucht → nur auf dem Mobile-Host für Power-User). Reihenfolge = Nutzer-
+     * Mentalmodell: Identität → Space → Medien → Darstellung → Sitzung.
+     *
+     * @var list<string>
+     */
+    'settings' => ['account', 'space', 'blossom', 'appearance', 'session'],
 ];
