@@ -45,7 +45,7 @@ rsync -az --delete \
     --exclude='/playwright-report/' \
     --exclude='.env' \
     --exclude='.env.*' \
-    --exclude='/database/*.sqlite' \
+    --exclude='/database/*.sqlite*' \
     --exclude='/storage/logs/*' \
     --exclude='/storage/framework/cache/data/*' \
     --exclude='/storage/framework/sessions/*' \
