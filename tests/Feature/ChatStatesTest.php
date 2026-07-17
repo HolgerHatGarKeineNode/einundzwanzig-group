@@ -130,7 +130,9 @@ test('Raum (C5): Poll-Karte rendert Optionen/Vote + Erstellen-Trigger + Create-M
 });
 
 test('Space-Einstellungen: ready-Guard verhindert Empty-Flash', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.space.settings'))->assertOk();
+    // space.settings → Redirect auf den verschmolzenen Hub (group.settings); der
+    // Space-Skeleton lebt jetzt dort (P1-Konsolidierung).
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
 
     // Empty erst nach ready — Skeleton davor (Fix-A-Muster).
     $res->assertSee('x-if="!ready"', false);
