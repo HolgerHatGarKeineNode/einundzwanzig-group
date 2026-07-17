@@ -307,8 +307,34 @@ config/Views müssen aber im Mobile-Repo selbst geändert werden. (Nur Android/W
 
 ## Offene Fragen
 
+### Über-Nacht-Lauf 2026-07-17 — Status & zurückgestellte Entscheidungen
+
+**Umgesetzt (Branches, kein Push, kein Deploy):** P1 (Konsolidierung), P2 (Registry +
+7 Partials), P3 (Wallet-`:back` host-aware), P4 (A11y-Kontrast-Fix). Mobile-Slice
+(twenty-one-companion): Registry, `show_relays` raus, `space.settings` aus `match`.
+Host-Feature-Suite 128/128 grün.
+
+**Entschieden im Lauf (nach Web-UX-Recherche):**
+- Web zeigt **keine** Relays (read-only NIP-65 = Jargon/selten → nur Mobile). Löst die
+  erste Frage unten auf.
+- **Wallet ist auf BEIDEN Hosts ein Peer-Tab** (Web-Nav: Chat·Wallet·Einstellungen) →
+  `wallet`-Sektion in beiden Host-Registries entfernt; `:back` leitet sich aus der
+  nav-Registry ab.
+
+**ZURÜCKGESTELLT für den User/design-lead (Konflikt, nicht einseitig entschieden):**
+1. **Mobile „Mehr → Einstellungen"-Karte:** zeigt heute auf `route('profile')` = die
+   **Portal-/App-Settings** (Sprache & Region, Portal-Konto), NICHT auf `group.settings`
+   = die **Nostr-Settings**. Zwei verschiedene Domänen. Direktes Umbiegen würde die
+   Portal-Settings verwaisen. → Produkt-Entscheid: wie beide Settings-Flächen auf Mobile
+   koexistieren/verschmelzen. (Datei: `twenty-one-companion/resources/views/pages/more/⚡index.blade.php`.)
+2. **Package-Redirect `/settings/space` + nav-`match`-Reduktion:** als Safety-Net
+   BEHALTEN. Entfernen braucht koordinierten Release + Update der Host-e2e-Specs
+   (`tests/e2e/theme.spec.ts`, `verein-gate.spec.ts` fahren `/settings/space` an).
+
+---
+
 - Bleibt „Netzwerk & Relays" wirklich Mobile-only, oder soll der Web-Client sie
-  read-only ebenfalls zeigen? (Aktuell: Web aus.)
+  read-only ebenfalls zeigen? (Entschieden 2026-07-17: Web aus — s. o.)
 - Soll `docs/plans/` dieses Doc committet werden (Standard-Ort) oder lokal bleiben?
   (`/plans/` ist gitignored, `docs/` nicht.)
 - P2 Consumer-Config-Rollout: zeitgleich mit dem Package-Release oder gestaffelt
