@@ -129,6 +129,147 @@ test('M4b: Foreground-Resync — Catch-up UND dauerhaft neue Live-Sub', async ({
 })
 
 /**
+ * Wartet, bis storage.ts' 3s-Batch die Seed-Nachricht tatsächlich in die IndexedDB
+ * geschrieben hat — sonst wäre ein Reload direkt danach fälschlich „kalt" (repository
+ * NICHT warm aus dem Cache) und M4c würde ihre Vorbedingung nie erreichen.
+ */
+async function waitForCachePersisted(page: Page, needle: string): Promise<void> {
+    await expect
+        .poll(
+            () =>
+                page.evaluate(async (text) => {
+                    const dbs = await indexedDB.databases()
+                    const name = dbs.find((d) => d.name?.startsWith('einundzwanzig-cache-'))?.name
+                    if (!name) {
+                        return false
+                    }
+                    return await new Promise<boolean>((resolve) => {
+                        const req = indexedDB.open(name)
+                        req.onsuccess = () => {
+                            const all = req.result.transaction('events', 'readonly').objectStore('events').getAll()
+                            all.onsuccess = () =>
+                                resolve(
+                                    (all.result as { kind: number; content: string }[]).some(
+                                        (e) => e.kind === 9 && e.content.includes(text),
+                                    ),
+                                )
+                            all.onerror = () => resolve(false)
+                        }
+                        req.onerror = () => resolve(false)
+                    })
+                }, needle),
+            { timeout: 8000 },
+        )
+        .toBe(true)
+}
+
+/** Liest `_initialLoadDone` der Room-Insel via Alpine `$data` (gleiche Handle-Technik wie M4b). */
+async function waitForInitialLoadDone(page: Page): Promise<void> {
+    await expect
+        .poll(
+            () =>
+                page.evaluate(() => {
+                    const el = [...document.querySelectorAll('div')].find(
+                        (e) => (e as unknown as { _x_dataStack?: unknown[] })._x_dataStack?.some(
+                            (s) => typeof (s as { setup?: unknown }).setup === 'function' && '_controller' in (s as object),
+                        ),
+                    )
+                    if (!el) {
+                        return false
+                    }
+                    const d = (window as unknown as { Alpine: { $data: (e: Element) => { _initialLoadDone?: boolean } } }).Alpine.$data(el as Element)
+                    return Boolean(d._initialLoadDone)
+                }),
+            { timeout: 20_000 },
+        )
+        .toBe(true)
+}
+
+/**
+ * Hält den Test-Relay „scheintot": jede REQ der Seite bekommt sofort ein leeres EOSE
+ * zurück, OHNE je den echten zooid zu erreichen (Verlauf UND Live-Sub bleiben aus) —
+ * simuliert den WebView-Kaltstart-Race (Socket „lebt" noch, liefert aber nichts).
+ * EVENT/AUTH/CLOSE laufen unangetastet durch. Der zurückgegebene `unblock()` lässt ab
+ * da alles normal durch (der Socket „kommt zurück").
+ */
+async function installDeadRelay(page: Page): Promise<() => void> {
+    let blocked = true
+    await page.routeWebSocket(
+        (url) => url.href.startsWith(ZOOID_WS),
+        (ws) => {
+            const server = ws.connectToServer()
+            ws.onMessage((message) => {
+                if (blocked) {
+                    try {
+                        const parsed = JSON.parse(message.toString()) as unknown[]
+                        if (parsed[0] === 'REQ') {
+                            ws.send(JSON.stringify(['EOSE', parsed[1]]))
+                            return
+                        }
+                    } catch {
+                        // kein JSON/REQ (z.B. AUTH) → normal durchlassen
+                    }
+                }
+                server.send(message)
+            })
+        },
+    )
+    return () => {
+        blocked = false
+    }
+}
+
+/**
+ * M4c (Netload-leer-bei-warmem-Cache → Resync) — Regression: Ein Notification-Tap lädt
+ * die Seite per `webView.loadUrl` NEU, während Socket UND NIP-42-AUTH nach langer Pause
+ * tot sind. welshmans `loadRoomMessages()` rejected dabei NICHT — es RESOLVED LEER. Der
+ * `visibilitychange`-Resync (M4b) greift hier NICHT: die Insel wird erst NACH dem Reload
+ * geboren, sieht also nie ein `hidden`-Event. Der Fix im `.finally()` von `setup()` prüft
+ * den Widerspruch (leerer Netz-Load bei GEFÜLLTEM Cache) und triggert `resync()` selbst.
+ *
+ * Simuliert NICHT den Android-WebView-Lebenszyklus (im Web-E2E nicht reproduzierbar,
+ * siehe M4b), sondern die BEDINGUNG: der Test-Relay beantwortet nach dem Reload jede
+ * Anfrage sofort mit leerem EOSE (kein Event, kein echter Server-Kontakt) — der Cache
+ * bleibt warm (IndexedDB-Boot-Load), das Netz liefert nichts. Erst nach `unblock()`
+ * (Relay „lebt" wieder) holt resyncs 2,5s-Nachzügler die verpasste Nachricht nach —
+ * OHNE dass der Raum verlassen/neu betreten wird. Wird ROT, wenn die
+ * `netloadEmpty`-Prüfung im `.finally()` entfernt wird.
+ */
+test('M4c: leerer Netz-Load bei warmem Cache löst Resync aus (Notification-Kaltstart)', async ({ page }) => {
+    // Voller Reload + IndexedDB-Boot-Load ist teurer als die übrigen Room-Tests — unter voller
+    // Suite-Parallelität (6 Worker, viele gleichzeitige Chromium-Boots) reicht Playwrights
+    // Default-Testtimeout (30s) sonst knapp nicht, obwohl die einzelnen `expect`-Timeouts unten
+    // eingehalten werden (das Gesamt-Testtimeout deckelt sie sonst vorzeitig).
+    test.setTimeout(60_000)
+    await openRoom(page)
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+    await waitForCachePersisted(page, 'Willkommen im Space!')
+
+    const unblock = await installDeadRelay(page)
+    await page.reload()
+
+    // Warmer Cache-Pfad: die Nachricht steht sofort da — OHNE dass das Netz je etwas lieferte.
+    // Voller Reload (Vite-Bundle + WASM-Sig-Verifikation + IndexedDB-Boot-Load) statt eines
+    // billigen State-Wechsels → großzügiges Timeout gegen CI-/Parallel-Last (kein Bezug zum
+    // 2,5s-Nachzügler unten, dessen Fenster erst NACH `_initialLoadDone` zu laufen beginnt).
+    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 30_000 })
+    // Wartet, bis setup()s finally gelaufen ist (und, mit Fix, resync() bereits feuerte) —
+    // der Nachzügler-Timer läuft ab hier; alles Folgende muss deutlich unter 2,5 s bleiben.
+    await waitForInitialLoadDone(page)
+
+    // Bei „totem" Relay publizierte Nachricht → darf NICHT ankommen (weder Catch-up noch Live).
+    const missed = `Cold-${Math.floor(Math.random() * 1e9)}`
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome', '-c', `E2E ${missed}`, ZOOID_WS])
+    await expect(page.getByText(`E2E ${missed}`)).toBeHidden({ timeout: 500 })
+
+    // Relay „kommt zurück" → resyncs eigener 2,5s-Nachzügler (bridge.ts resync()) holt die
+    // verpasste Nachricht nach, OHNE Raum-Neubetreten. Kann NUR der Fix ausgelöst haben:
+    // der visibilitychange-Pfad sah nie ein `hidden` (diese Insel wurde nach dem Reload geboren).
+    unblock()
+    await expect(page.getByText(`E2E ${missed}`)).toBeVisible({ timeout: 15_000 })
+})
+
+/**
  * IMG (PLAN4) — eine Bild-URL im Nachrichtentext rendert als Inline-Bild über den
  * Bild-Proxy (Preset `msg`), Klick öffnet die Lightbox (Preset `full`), Esc schließt.
  */
