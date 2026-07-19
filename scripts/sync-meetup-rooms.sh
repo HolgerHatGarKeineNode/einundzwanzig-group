@@ -68,7 +68,16 @@ PY
 GATED=$(printf '%s\n' "$TSV" | grep -c . || true)
 
 # 3) EINMAL bestehende Räume holen (t=meetup) -> Menge der bestehenden d-Tag-Werte (=h).
+#    Exit-Code MUSS geprüft werden: ein fehlgeschlagener/getimeouteter Read liefert
+#    leere Ausgabe -> ohne Guard hielte das Skript alle Räume für "fehlend" und würde
+#    jeden gegateten Raum re-editieren (Churn + falsche created=-Zahl). Erfolgreicher
+#    req mit 0 Treffern (echter Erstlauf) ist rc=0 und erlaubt -> sauber unterscheidbar.
 EXISTING_RAW=$(timeout 40 "$NAK" req -k 39000 -t t=meetup --auth --sec "$BOT" "$WS" 2>/dev/null)
+REQ_RC=$?
+if [ "$REQ_RC" -ne 0 ]; then
+    echo "FEHLER: Bestandsabfrage der Räume fehlgeschlagen (rc=$REQ_RC) — Abbruch, um kein Massen-Re-Edit auszulösen." >&2
+    exit 1
+fi
 EXISTING=$(printf '%s' "$EXISTING_RAW" | python3 -c '
 import json, sys
 for line in sys.stdin:
