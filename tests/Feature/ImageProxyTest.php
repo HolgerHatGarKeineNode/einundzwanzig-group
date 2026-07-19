@@ -110,3 +110,40 @@ it('accepts image bytes served as application/octet-stream (Blossom)', function 
         ->assertOk()
         ->assertHeader('Content-Type', 'image/webp');
 });
+
+it('carries no session cookie (route runs outside the web middleware group)', function () {
+    Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
+
+    $response = $this->get('/img/avatar?src='.urlencode('https://1.1.1.1/nocookie.png'));
+
+    // Eine Session-Zeile pro Bild serialisiert auf SQLite alle parallelen
+    // Requests — der Endpunkt ist zustandslos und darf keine Session anfassen.
+    expect($response->headers->getCookies())->toBeEmpty();
+});
+
+it('hands cache hits to nginx via X-Accel-Redirect when configured', function () {
+    config()->set('image-proxy.x_accel_prefix', '/img-cache-internal');
+    Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
+
+    $src = 'https://1.1.1.1/accel.png';
+    $this->get('/img/avatar?src='.urlencode($src))->assertOk();
+
+    $hit = $this->get('/img/avatar?src='.urlencode($src));
+
+    $hit->assertOk()
+        ->assertHeader('Content-Type', 'image/webp')
+        ->assertHeader('X-Accel-Redirect', '/img-cache-internal/img-cache/avatar/'.sha1($src).'.webp');
+    expect($hit->getContent())->toBe('');
+});
+
+it('serves the body itself when no X-Accel prefix is configured', function () {
+    Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
+
+    $src = 'https://1.1.1.1/nobody.png';
+    $this->get('/img/avatar?src='.urlencode($src))->assertOk();
+
+    $hit = $this->get('/img/avatar?src='.urlencode($src));
+
+    $hit->assertOk()->assertHeaderMissing('X-Accel-Redirect');
+    expect($hit->getContent())->not->toBe('');
+});

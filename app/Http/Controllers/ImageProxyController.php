@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
@@ -65,7 +66,7 @@ class ImageProxyController extends Controller
         // 2 synchrone `dns_get_record` jeden Cache-Hit um hunderte ms verzögern.
         foreach (['webp' => 'image/webp', 'gif' => 'image/gif'] as $ext => $mime) {
             if ($disk->exists("$base.$ext")) {
-                return $this->respond($disk->get("$base.$ext"), $mime, $etag);
+                return $this->accelOrBody("$base.$ext", $disk, $mime, $etag);
             }
         }
 
@@ -82,6 +83,31 @@ class ImageProxyController extends Controller
         $disk->put($base.($mime === 'image/gif' ? '.gif' : '.webp'), $bytes);
 
         return $this->respond($bytes, $mime, $etag);
+    }
+
+    /**
+     * Cache-Hit ausliefern: wenn `IMG_PROXY_X_ACCEL_PREFIX` gesetzt ist, übergibt
+     * PHP nur den Pfad an nginx (`X-Accel-Redirect`) und ist sofort wieder frei —
+     * nginx schaufelt die Bytes per sendfile. Sonst (lokal, Tests, Mobile-Host
+     * ohne nginx-internal-Location) wie bisher der Body aus PHP.
+     *
+     * Der Prefix muss in nginx eine `internal;`-Location auf das Cache-Verzeichnis
+     * sein; ohne sie liefert nginx 404 — darum ist das Feature opt-in per env.
+     */
+    private function accelOrBody(string $path, Filesystem $disk, string $mime, string $etag): Response
+    {
+        $prefix = rtrim((string) config('image-proxy.x_accel_prefix'), '/');
+
+        if ($prefix === '') {
+            return $this->respond($disk->get($path), $mime, $etag);
+        }
+
+        return response('', 200, [
+            'Content-Type' => $mime,
+            'Cache-Control' => 'public, max-age=31536000, immutable',
+            'ETag' => $etag,
+            'X-Accel-Redirect' => $prefix.'/'.$path,
+        ]);
     }
 
     private function respond(string $body, string $mime, string $etag): Response
