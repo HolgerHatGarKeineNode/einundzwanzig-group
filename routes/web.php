@@ -1,15 +1,12 @@
 <?php
 
-use App\Http\Controllers\ImageProxyController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 
 Route::livewire('/', 'pages::home')->name('home');
 
-// PLAN4 IMG — Bild-Proxy: schneidet remote Nostr-Bilder zu + WebP + cached.
-// Öffentlich (Mobile ruft den gehosteten Endpunkt cross-origin); `src` untrusted
-// → SSRF-Schutz im Controller. Preset im Pfad begrenzt die Cache-Kardinalität.
-Route::get('/img/{preset}', ImageProxyController::class)->name('img');
+// PLAN4 IMG — Bild-Proxy liegt bewusst session-frei in routes/img.php
+// (in bootstrap/app.php ohne Middleware-Gruppe registriert).
 
 // PLAN4 — geteilter Profil-Cache (kind 0) für flicker-armen First-Paint der Insel.
 // Öffentlich (kind 0 ist public); Mobile ruft den gehosteten Endpunkt (Hybrid).
