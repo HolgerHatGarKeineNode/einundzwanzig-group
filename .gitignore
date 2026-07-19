@@ -48,4 +48,4 @@ yarn-error.log
 # Editor-/Backup-Cruft — Git ist das Backup
 *.bak
 
-/plans/
+plans/
