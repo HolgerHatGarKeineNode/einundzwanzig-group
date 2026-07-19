@@ -27,3 +27,12 @@ Schedule::call(function () {
 })->weekly()->name('img-cache-prune');
 
 // Der `nostr:warm-cache`-Schedule (§10/M7) wird vom einundzwanzig/group-Package registriert.
+
+// Meetup-Raum-Sync: neu vereinsmitglied-gegatete Meetups bekommen automatisch
+// ihren privaten NIP-29-Raum auf dem Prod-zooid (idempotent, legt nur Fehlendes an).
+// Bricht bei kaputter Gate-API/fehlendem Setup mit exit!=0 ab — Scheduler-Log zeigt das.
+Schedule::exec('bash '.base_path('scripts/sync-meetup-rooms.sh'))
+    ->dailyAt('04:17')
+    ->name('sync-meetup-rooms')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/sync-meetup-rooms.log'));
