@@ -1,6 +1,14 @@
 import { test, expect } from './support/fixtures'
-import { requestZap, type SignedEvent, type Zapper } from '@welshman/util'
-import { canZap, invoiceRequestError, mapZapError, zapRequestTemplate } from '../../packages/einundzwanzig-group/js/zaps'
+import { type SignedEvent, type Zapper } from '@welshman/util'
+import {
+    canZap,
+    invoiceRequestError,
+    lnurlCallbackUrl,
+    lnurlErrorReason,
+    mapZapError,
+    requestZapInvoice,
+    zapRequestTemplate,
+} from '../../packages/einundzwanzig-group/js/zaps'
 
 /**
  * ZAPS.md Z1 JS-Unit (welshman-app-frei): das Vorabgate + die kind-9734-Tag-Form +
@@ -48,56 +56,152 @@ test.describe('zapRequestTemplate (kind-9734-Tag-Form, sats→msats)', () => {
     })
 })
 
-test.describe('requestZap (LNURL-Callback-Vertrag → bolt11)', () => {
-    // Signierte 9734 (nur die von requestZap gelesenen Felder: amount-Tag).
+test.describe('lnurlCallbackUrl (LUD-06 `<callback><?|&>amount=`)', () => {
+    test('hängt mit ? an, wenn der Callback keinen Query-Teil hat', () => {
+        expect(lnurlCallbackUrl('https://ln.example/cb', { amount: '21000' })).toBe('https://ln.example/cb?amount=21000')
+    })
+
+    test('hängt mit & an, wenn der Callback schon einen Query-Teil trägt (sonst kaputte URL)', () => {
+        const url = lnurlCallbackUrl('https://ln.example/cb?id=7', { amount: '21000' })
+        expect(url).toBe('https://ln.example/cb?id=7&amount=21000')
+        expect(new URL(url).searchParams.get('amount')).toBe('21000')
+    })
+
+    test('leere Werte fallen raus (kein &comment=)', () => {
+        expect(lnurlCallbackUrl('https://ln.example/cb', { amount: '1000', comment: '' })).toBe('https://ln.example/cb?amount=1000')
+    })
+})
+
+test.describe('requestZapInvoice (LNURL-Callback-Vertrag → bolt11)', () => {
+    // Signierte 9734 (nur die von requestZapInvoice gelesenen Felder: amount-Tag + Event-JSON).
     const signed = { kind: 9734, tags: [['amount', '21000']], content: '⚡' } as unknown as SignedEvent
+
+    // Stub bildet eine echte Response nach: `requestZapInvoice` liest Status UND rohen
+    // Body (reale LNURL-Server antworten im Fehlerfall mit PLAIN TEXT, nicht mit JSON).
+    const withFetch = async <T>(handler: (url: string) => unknown, fn: () => Promise<T>, status = 200): Promise<T> => {
+        const orig = globalThis.fetch
+        globalThis.fetch = (async (url: string) => {
+            const out = handler(String(url))
+            return { status, text: async () => (typeof out === 'string' ? out : JSON.stringify(out)) }
+        }) as unknown as typeof fetch
+        try {
+            return await fn()
+        } finally {
+            globalThis.fetch = orig
+        }
+    }
 
     test('baut ?amount=&nostr=&lnurl= und liefert die bolt11 aus res.pr', async () => {
         let calledUrl = ''
+        const res = await withFetch(
+            (url) => {
+                calledUrl = url
+                return { pr: 'lnbc210n1teststub' }
+            },
+            () => requestZapInvoice({ zapper, event: signed }),
+        )
+        expect(res.invoice).toBe('lnbc210n1teststub')
+        expect(calledUrl).toContain('https://ln.example/lnurl/callback')
+        expect(calledUrl).toContain('amount=21000')
+        expect(calledUrl).toContain('nostr=')
+        expect(calledUrl).toContain(`lnurl=${zapper.lnurl}`)
+    })
+
+    // Der Kern-Regressionstest: `encodeURI` (welshman) lässt `& = + #` stehen → der `nostr`-
+    // Parameter wird zerschnitten (`&`,`#`) bzw. der content still verändert (`+`→Leerzeichen),
+    // was die Schnorr-Signatur der 9734 bricht. `encodeURIComponent` hält das Event heil.
+    for (const content of ['Kaffee & Kuchen', 'a&b=c', '1+1', 'Nr. #21', 'gm ⚡', '100% ja?']) {
+        test(`Kommentar ${JSON.stringify(content)} kommt unverändert im nostr-Parameter an`, async () => {
+            const event = { ...signed, content } as unknown as SignedEvent
+            let calledUrl = ''
+            await withFetch(
+                (url) => {
+                    calledUrl = url
+                    return { pr: 'lnbc1stub' }
+                },
+                () => requestZapInvoice({ zapper, event }),
+            )
+            const parsed = JSON.parse(new URL(calledUrl).searchParams.get('nostr') ?? '')
+            expect(parsed.content).toBe(content)
+            expect(new URL(calledUrl).searchParams.get('lnurl')).toBe(zapper.lnurl)
+        })
+    }
+
+    test('LUD-06-JSON-Fehler: reason landet in der Meldung', async () => {
+        const res = await withFetch(
+            () => ({ status: 'ERROR', reason: 'zu klein' }),
+            () => requestZapInvoice({ zapper, event: signed }),
+        )
+        expect(res.invoice).toBeUndefined()
+        expect(res.error).toContain('zu klein')
+    })
+
+    // primal.net antwortet gemessen mit PLAIN TEXT (`invalid zap request`, HTTP 406).
+    // welshmans fetchJson wirft daran und der echte Grund ging verloren.
+    test('Plain-Text-Fehlerbody wird ausgewertet statt verschluckt', async () => {
+        const res = await withFetch(
+            () => 'invalid zap request',
+            () => requestZapInvoice({ zapper, event: signed }),
+            406,
+        )
+        expect(res.invoice).toBeUndefined()
+        expect(res.error).toContain('HTTP 406')
+        expect(res.error).toContain('invalid zap request')
+    })
+
+    test('Netzwerkfehler wird als UNSER Ende der Leitung benannt', async () => {
         const orig = globalThis.fetch
-        globalThis.fetch = (async (url: string) => {
-            calledUrl = String(url)
-            return { json: async () => ({ pr: 'lnbc210n1teststub' }) }
+        globalThis.fetch = (async () => {
+            throw new TypeError('NetworkError when attempting to fetch resource.')
         }) as unknown as typeof fetch
         try {
-            const res = await requestZap({ zapper, event: signed })
-            expect(res.invoice).toBe('lnbc210n1teststub')
-            expect(calledUrl).toContain('https://ln.example/lnurl/callback')
-            expect(calledUrl).toContain('amount=21000')
-            expect(calledUrl).toContain('nostr=')
-            expect(calledUrl).toContain(`lnurl=${zapper.lnurl}`)
+            const res = await requestZapInvoice({ zapper, event: signed })
+            expect(res.error).toContain('nicht erreichbar')
+            expect(res.error).toContain('NetworkError')
         } finally {
             globalThis.fetch = orig
         }
     })
 
-    test('ohne pr → Fehler mit reason', async () => {
-        const orig = globalThis.fetch
-        globalThis.fetch = (async () => ({ json: async () => ({ reason: 'zu klein' }) })) as unknown as typeof fetch
-        try {
-            const res = await requestZap({ zapper, event: signed })
-            expect(res.invoice).toBeUndefined()
-            expect(res.error).toBe('zu klein')
-        } finally {
-            globalThis.fetch = orig
-        }
+    test('ohne callback → deutscher Fehler statt Netzwerk-Versuch', async () => {
+        const res = await requestZapInvoice({ zapper: { ...zapper, callback: undefined }, event: signed })
+        expect(res.error).toBe('Empfänger hat keinen Zahlungs-Endpoint.')
+    })
+})
+
+test.describe('lnurlErrorReason (auch Nicht-LUD-06-Fehlerformen)', () => {
+    test('LUD-06 reason hat Vorrang', () => {
+        expect(lnurlErrorReason({ status: 'ERROR', reason: 'Amount too low' })).toBe('Amount too low')
+    })
+
+    test('Alby-Form {error,message} wird gelesen statt verschluckt', () => {
+        expect(lnurlErrorReason({ error: true, message: 'invalid zap request' })).toBe('invalid zap request')
+    })
+
+    test('ohne verwertbaren Grund undefined (→ generische Meldung)', () => {
+        expect(lnurlErrorReason({ pr: null })).toBeUndefined()
+        expect(lnurlErrorReason(undefined)).toBeUndefined()
     })
 })
 
 test.describe('invoiceRequestError (Empfänger-LNURL liefert keine bolt11, ZAPS.md Z6)', () => {
-    test('generischer welshman-Fallback → entlastende deutsche Meldung (kein englisches Roh-Wort)', () => {
-        const msg = invoiceRequestError('Failed to request invoice')
-        expect(msg).toContain('Empfänger-Wallet')
-        expect(msg).not.toContain('Failed to request invoice')
+    test('Originaltext des Servers + HTTP-Status bleiben sichtbar', () => {
+        const msg = invoiceRequestError('invalid zap request', 406)
+        expect(msg).toContain('HTTP 406')
+        expect(msg).toContain('invalid zap request')
         // mapZapError reicht die (deutsche) Meldung unverändert bis zum Nutzer durch.
         expect(mapZapError(new Error(msg))).toBe(msg)
     })
 
-    test('ohne error (undefined) → dieselbe generische Meldung', () => {
-        expect(invoiceRequestError()).toContain('Empfänger-Wallet')
+    test('erfindet KEINE Ursache, wenn der Server keine Begründung liefert', () => {
+        const msg = invoiceRequestError()
+        expect(msg).toContain('ohne Begründung')
+        // Die alte Fassung behauptete eine Schuldzuweisung — die darf nie zurückkommen.
+        expect(msg).not.toContain('nicht an dir')
+        expect(msg).not.toContain('liegt beim Empfänger')
     })
 
-    test('echter LNURL-reason des Servers bleibt für den Nutzer sichtbar', () => {
+    test('nackter Servertext ohne Status wird trotzdem geführt', () => {
         expect(invoiceRequestError('Amount too low')).toContain('Amount too low')
     })
 })
