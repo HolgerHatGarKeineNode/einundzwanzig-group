@@ -169,7 +169,8 @@ test('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ pa
  *
  * - Standard-Raum   → unter „Andere Räume".
  * - `t=project-support` (Vereins-Antragsraum) → NICHT unter „Andere Räume",
- *   aber betretbar, sobald man Mitglied ist (dann „Meine Räume").
+ *   aber betretbar, sobald man Mitglied ist — dann in der EIGENEN Sektion
+ *   „Projektunterstützung", nicht zwischen den Standard-Räumen.
  * - `t=meetup`      → REGRESSION: unverändert raus aus „Andere Räume" und rein
  *   in den Meetup-Pool (die Entdecken-Karte zählt ihn).
  *
@@ -208,7 +209,35 @@ test('P4c: Antragsraum fällt aus „Andere Räume", bleibt aber als Mitglied er
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9000', '-t', `h=${propH}`, '-t', `p=${pubOf(NSEC)}`, ZOOID_WS])
     await page.reload()
 
-    // … und er taucht unter „Meine Räume" auf: kategorisiert, nicht versteckt.
-    await expect(page.getByText('Meine Räume')).toBeVisible({ timeout: 15_000 })
+    // … und er taucht in der eigenen Sektion auf: kategorisiert, nicht versteckt.
+    await expect(page.getByText('Projektunterstützung')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
+})
+
+/**
+ * Das Rollen-Gate der Kategorie: FREMDE Antragsräume gehören dem Vorstand
+ * (Space-Admin), nicht jedem Mitglied. Derselbe Raum, zwei Blicke:
+ *
+ * - Nicht-Admin, nicht Mitglied → sieht ihn nirgends (Test oben, ohne 9000-Schritt).
+ * - Admin, nicht Mitglied       → sieht ihn hier unter „Projektunterstützung".
+ *
+ * Kein Session-Wechsel in EINER Page (der zweite Login liefe gegen die bestehende
+ * Anmeldung) — die Nicht-Admin-Hälfte deckt der Test oben ab. Gegenprobe im
+ * selben Lauf: der Standard-Raum muss sichtbar sein, sonst misst der Test einen
+ * kaputten Seed statt des Gates.
+ */
+test('P4c: fremder Antragsraum erscheint beim Admin (Vorstand) unter „Projektunterstützung"', async ({ page }) => {
+    const rnd = Math.floor(Math.random() * 1e9)
+    const stdName = `Std-${rnd}`
+    const propName = `Prop-${rnd}`
+    const propH = `p${rnd.toString(16).padStart(12, '0')}`
+
+    createRoomNak(`std${rnd}`, stdName)
+    createRoomNak(propH, propName, ['-t', `t=project-support`, '-t', `i=proposal:${rnd}`])
+
+    // Admin (Relay-Owner = Vorstandsrolle): fremder Antragsraum, kategorisiert sichtbar.
+    await loginAdmin(page)
+    await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Projektunterstützung')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
