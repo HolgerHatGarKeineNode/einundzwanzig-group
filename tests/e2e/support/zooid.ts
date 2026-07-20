@@ -8,7 +8,12 @@ import { type Page } from '@playwright/test'
 // Prozess einmal ausgewertet ⇒ jeder Worker bekommt automatisch seine eigenen Ports und
 // spricht seine eigene zooid-Instanz + seinen eigenen `php artisan serve` an (siehe
 // fixtures.ts + zooid-testserver.sh). `ZOOID_WS` (ohne Slash) ist die nak-CLI-Ziel-URL.
-const SLOT = Number(process.env.TEST_PARALLEL_INDEX ?? '0')
+//
+// `E2E_SLOT_OFFSET` verschiebt BEIDE Port-Reihen um einen festen Betrag (Default 0 →
+// Verhalten unverändert). Nötig, wenn ein fremder Prozess einen der Slot-Ports belegt
+// (z.B. ein `php artisan serve` eines Nachbar-Repos auf 8137): dann bindet der eigene
+// serve nicht, und der Test spricht unbemerkt die FREMDE App an (404 statt Login).
+const SLOT = Number(process.env.TEST_PARALLEL_INDEX ?? '0') + Number(process.env.E2E_SLOT_OFFSET ?? '0')
 export const ZOOID_PORT = 3335 + SLOT
 export const SERVE_PORT = 8137 + SLOT
 export const ZOOID_WS = `ws://localhost:${ZOOID_PORT}`

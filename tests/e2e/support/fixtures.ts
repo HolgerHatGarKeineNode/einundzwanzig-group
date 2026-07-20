@@ -16,6 +16,14 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
  * das worker-scoped Backend automatisch pro Worker hochfährt.
  */
 
+/**
+ * Fester Versatz auf BEIDE Port-Reihen (serve + zooid), Default 0 → Verhalten
+ * unverändert. Rettung, wenn ein fremder Prozess einen Slot-Port belegt: sonst bindet
+ * der eigene `serve` nicht, `waitForHttp` bejaht die FREMDE App und der Test läuft
+ * gegen sie (404 statt Login). Spiegelt `E2E_SLOT_OFFSET` aus support/zooid.ts.
+ */
+const SLOT_OFFSET = Number(process.env.E2E_SLOT_OFFSET ?? '0')
+
 /** Pollt, bis `serve` HTTP beantwortet (< 500). Wirft nach `timeoutMs`. */
 const waitForHttp = async (url: string, timeoutMs = 60_000): Promise<void> => {
     const deadline = Date.now() + timeoutMs
@@ -40,7 +48,7 @@ export const test = base.extend<object, { workerBackend: void }>({
     // eigene zooid-Instanz (blockierend, race-frei) und startet den worker-eigenen serve.
     workerBackend: [
         async ({}, use, workerInfo) => {
-            const slot = workerInfo.parallelIndex
+            const slot = workerInfo.parallelIndex + SLOT_OFFSET
             const zooidPort = 3335 + slot
             const servePort = 8137 + slot
 
@@ -85,7 +93,7 @@ export const test = base.extend<object, { workerBackend: void }>({
 
     // baseURL je Worker auf dessen serve-Port (überschreibt use.baseURL aus der Config).
     baseURL: async ({}, use, testInfo) => {
-        await use(`http://127.0.0.1:${8137 + testInfo.parallelIndex}`)
+        await use(`http://127.0.0.1:${8137 + testInfo.parallelIndex + SLOT_OFFSET}`)
     },
 })
 
