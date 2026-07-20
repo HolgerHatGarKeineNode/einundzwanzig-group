@@ -161,3 +161,54 @@ test('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ pa
     await modal.getByRole('button', { name: 'Entfernen' }).click()
     await expect.poll(inRoom, { timeout: 15_000 }).toBe(false)
 })
+
+/**
+ * Raum-Kategorien end-to-end (39000-Marker → RoomView → Raumliste). Drei Räume
+ * derselben Sichtbarkeit (alle vom Relay ausgeliefert, keiner `hidden`), sodass
+ * die Unterschiede AUSSCHLIESSLICH aus dem Client-Filter stammen:
+ *
+ * - Standard-Raum   → unter „Andere Räume".
+ * - `t=project-support` (Vereins-Antragsraum) → NICHT unter „Andere Räume",
+ *   aber betretbar, sobald man Mitglied ist (dann „Meine Räume").
+ * - `t=meetup`      → REGRESSION: unverändert raus aus „Andere Räume" und rein
+ *   in den Meetup-Pool (die Entdecken-Karte zählt ihn).
+ *
+ * Kategorisieren heißt nicht verstecken — der zweite Teil des Tests ist der,
+ * der zählt.
+ */
+test('P4c: Antragsraum fällt aus „Andere Räume", bleibt aber als Mitglied erreichbar', async ({ page }) => {
+    const rnd = Math.floor(Math.random() * 1e9)
+    const stdName = `Std-${rnd}`
+    const propName = `Prop-${rnd}`
+    const meetupName = `Meet-${rnd}`
+    const propH = `p${rnd.toString(16).padStart(12, '0')}`
+
+    createRoomNak(`std${rnd}`, stdName)
+    createRoomNak(propH, propName, ['-t', `t=project-support`, '-t', `i=proposal:${rnd}`])
+    createRoomNak(`m${rnd}`, meetupName, ['-t', 't=meetup', '-t', `i=meetup:${rnd}`, '-t', `meetup_slug=meet-${rnd}`])
+
+    await login(page)
+
+    // Der Standard-Raum belegt, dass die Liste geladen ist und der Seed griff.
+    await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Andere Räume')).toBeVisible()
+
+    // Beide kategorisierten Räume sind aus der Standard-Liste raus …
+    await expect(page.getByText(propName, { exact: true })).toHaveCount(0)
+    await expect(page.getByText(meetupName, { exact: true })).toHaveCount(0)
+    // … der Meetup-Raum aber weiterhin im Meetup-Pool (Entdecken-Karte) — die
+    // Projektunterstützung darf dort NICHT mitgezählt werden.
+    const discover = page.getByRole('button', { name: /Meetup-Räume entdecken/ })
+    await expect(discover).toBeVisible({ timeout: 15_000 })
+    await discover.click()
+    await expect(page.getByText(meetupName, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(propName, { exact: true })).toHaveCount(0)
+
+    // Jetzt Mitglied im Antragsraum machen (kind 9000 → 39002) …
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9000', '-t', `h=${propH}`, '-t', `p=${pubOf(NSEC)}`, ZOOID_WS])
+    await page.reload()
+
+    // … und er taucht unter „Meine Räume" auf: kategorisiert, nicht versteckt.
+    await expect(page.getByText('Meine Räume')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
+})
