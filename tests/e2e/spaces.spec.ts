@@ -207,7 +207,12 @@ test('P4c: Antragsraum fällt aus „Andere Räume", bleibt aber als Mitglied er
 
     // Jetzt Mitglied im Antragsraum machen (kind 9000 → 39002) …
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9000', '-t', `h=${propH}`, '-t', `p=${pubOf(NSEC)}`, ZOOID_WS])
-    await page.reload()
+    // `goto('/spaces')` statt `reload()`: der Entdecken-Klick oben schaltet in den
+    // Meetup-Fokus, und der lebt seit dem Filter-URL-Sync in der URL (`?rt=meetups`).
+    // Ein reload() käme also im Meetup-Fokus zurück, wo die Projektunterstützungs-
+    // Sektion bewusst nicht gerendert wird — der Test prüfte dann den falschen Modus.
+    // Die parameterlose URL ist die frische Standard-Übersicht, die hier gemeint ist.
+    await page.goto('/spaces')
 
     // … und er taucht in der eigenen Sektion auf: kategorisiert, nicht versteckt.
     await expect(page.getByText('Projektunterstützung')).toBeVisible({ timeout: 15_000 })

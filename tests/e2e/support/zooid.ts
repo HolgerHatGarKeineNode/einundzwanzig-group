@@ -40,13 +40,40 @@ async function stubImages(page: Page): Promise<void> {
     )
 }
 
+// Feste Praesentationsdaten fuer die Meetup-Testraeume aus zooid-testserver.sh
+// (h=meetberlin/meetwien/meethamburg). `js/meetups.ts` laedt beim Space-Mount
+// IMMER die echte Prod-Portal-API (MEETUP_API_URL, hartkodiert, fail-soft) —
+// ohne Stub liefe das gegen einen echten Remote-Host, UND unsere erfundenen
+// Seed-Slugs haetten dort ohnehin nie einen Treffer (Land/Flagge blieben leer,
+// das Laender-Popover haette nichts zu filtern). Der Stub macht den
+// Praesentations-Join deterministisch und lokal, ohne `meetupPresentation.ts`
+// anzufassen. 3 Raeume, 2 Laender (DE/AT) — deckt sich mit dem Seed.
+const MEETUP_STUB_RECORDS = [
+    { name: 'Meetup Berlin', slug: 'meetup-berlin-e2e', city: 'Berlin', country: 'DE', logo: null, next_event_start: null },
+    { name: 'Meetup Wien', slug: 'meetup-wien-e2e', city: 'Wien', country: 'AT', logo: null, next_event_start: null },
+    { name: 'Meetup Hamburg', slug: 'meetup-hamburg-e2e', city: 'Hamburg', country: 'DE', logo: null, next_event_start: null },
+]
+
+/**
+ * Beantwortet den Meetup-Portal-Join lokal statt gegen die echte Prod-API zu
+ * gehen (siehe Kommentar oben) — deterministisch, kein Remote-Fetch, matcht
+ * exakt die `meetup_slug`-Tags der Seed-Räume.
+ */
+async function stubMeetupApi(page: Page): Promise<void> {
+    await page.route('https://portal.einundzwanzig.space/api/mobile/meetups', (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MEETUP_STUB_RECORDS) }),
+    )
+}
+
 /**
  * Zeigt welshman im Test auf den lokalen zooid statt auf öffentliche Relays —
  * via `window.__nostrRelays`, das core.ts VOR dem Init liest. Hermetisch. Stubbt
- * zugleich alle Bilder lokal (keine echten Remote-Fetches).
+ * zugleich alle Bilder lokal (keine echten Remote-Fetches) und den Meetup-
+ * Portal-Join (keine echten Remote-Fetches, deterministische Länder/Flaggen).
  */
 export async function useZooid(page: Page): Promise<void> {
     await stubImages(page)
+    await stubMeetupApi(page)
     await page.addInitScript((url) => {
         ;(window as unknown as { __nostrRelays: unknown }).__nostrRelays = {
             indexer: [url],

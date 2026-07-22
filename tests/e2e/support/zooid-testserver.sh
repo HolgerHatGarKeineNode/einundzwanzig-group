@@ -57,6 +57,8 @@ seeded_and_clean() {
     timeout 8 nak req -k 1068 -t h=poll --auth --sec "$USER" "$R" 2>/dev/null | grep -q 'Lieblingsfarbe' || return 1
     # C6b-thread-Raum: fehlt seine Mitgliedschaft (Relay von einem Seed-Skript ohne thread-Raum), frisch aufsetzen.
     timeout 8 nak req -k 39002 -d thread --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
+    # Meetup-Testräume: fehlt einer (Relay von einem Seed-Skript ohne Meetup-Räume), frisch aufsetzen.
+    timeout 8 nak req -k 39000 -d meethamburg --auth --sec "$USER" "$R" 2>/dev/null | grep -q 'meetup-hamburg-e2e' || return 1
     local n
     n=$(timeout 8 nak req -k 9 -t h=welcome --auth --sec "$USER" "$R" 2>/dev/null | grep -c '"kind":9')
     [ "${n:-999}" -le "$WELCOME_SEED" ]
@@ -121,6 +123,22 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=poll -t name=Umfragen -t about=C5-P
 # Dedizierter Schreib-Raum für die C6b-Tests (Thread-Ansicht/NIP-22-Kommentare):
 # schreiben Quote-Only-Nachrichten + kind-1111-Kommentare und dürfen „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=thread -t name=Threads -t about=C6b-Thread-Tests "$R" >/dev/null 2>&1 || true
+# Meetup-Testräume (E1/E2-Länderfilter): 3 Räume in 2 Ländern, undiskutiert/nicht
+# beigetreten (bleiben in „otherRooms" → entdeckbar über die „Meetup-Räume
+# entdecken"-Karte, wie die echten Prod-Meetups). Der `t`-Marker + `i`-Bindung +
+# `meetup_slug` landen direkt auf dem 39000 (9007 trägt beliebige Zusatz-Tags
+# unverändert durch, siehe zooid `UpdateMetadata` — kein separates 9002 nötig).
+# Die Slugs sind erfunden (E2E-only) und matchen bewusst NICHT die echte Portal-
+# API; die Länder/Städte kommen stattdessen aus dem lokalen Stub in
+# support/zooid.ts (stubMeetupApi), der genau diese Slugs joint — ohne den
+# Stub bliebe der Präsentations-Join leer (Land/Flagge), `isMeetup` selbst ist
+# davon unabhängig (kommt direkt aus dem 39000-Tag, siehe meetupPresentation.ts).
+nak event --auth --sec "$ADMIN" -k 9007 -t h=meetberlin -t name="Meetup Berlin" -t about=E2E-Meetup-Test \
+    -t t=meetup -t i=meetup:e2e-berlin -t meetup_slug=meetup-berlin-e2e "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$ADMIN" -k 9007 -t h=meetwien -t name="Meetup Wien" -t about=E2E-Meetup-Test \
+    -t t=meetup -t i=meetup:e2e-wien -t meetup_slug=meetup-wien-e2e "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$ADMIN" -k 9007 -t h=meethamburg -t name="Meetup Hamburg" -t about=E2E-Meetup-Test \
+    -t t=meetup -t i=meetup:e2e-hamburg -t meetup_slug=meetup-hamburg-e2e "$R" >/dev/null 2>&1 || true
 
 # NIP-86-Management (HTTP + NIP-98, als ADMIN). MUSS vor allen USER-Events laufen:
 # Der Relay ist member-only (public_write=false, wie Prod), also darf der Test-User
