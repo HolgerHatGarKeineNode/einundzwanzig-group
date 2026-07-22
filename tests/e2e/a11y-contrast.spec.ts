@@ -90,14 +90,39 @@ const measure = (page: Page): Promise<Measured[]> =>
         [LUM],
     ) as Promise<Measured[]>
 
-/** Bringt die Seite in den Zustand, in dem alle Brand-Farbträger gerendert sind. */
-async function openMeasurableSurfaces(page: Page): Promise<void> {
-    // Ohne geladene Raumliste ist das Tab-Badge (standardCount() > 0) nicht da —
-    // die Messung ginge am Ursprungsbefund vorbei.
+/**
+ * Bringt die Seite in den Zustand, in dem alle Brand-Farbträger gerendert sind.
+ *
+ * Zwei Phasen, weil sich die Oberflächen gegenseitig ausschließen: die Standard-
+ * Raumliste und der Meetup-Fokus sind nie gleichzeitig sichtbar. Was nicht gerendert
+ * ist, wird nicht gemessen — und ungemessen heißt hier ungeprüft, nicht in Ordnung.
+ */
+async function measureAllSurfaces(page: Page): Promise<Measured[]> {
+    // Phase 1 — Standardansicht. Ohne geladene Raumliste ist das Tab-Badge
+    // (standardCount() > 0) nicht da, und die Messung ginge am Ursprungsbefund vorbei.
     await expect(page.getByText('Willkommen', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     // npub-Chip und Signer-Badge leben im Profil-Popover.
-    await page.locator('button[aria-haspopup="true"]').first().click()
+    const profile = page.locator('button[aria-haspopup="true"]').first()
+    await profile.click()
     await page.waitForTimeout(400)
+    const phase1 = await measure(page)
+    await page.keyboard.press('Escape')
+
+    // Phase 2 — Meetup-Fokus + Land-Popover. Das check-Icon der Länder-Auswahl
+    // (text-brand-700) existiert NUR im geöffneten Popover; ohne diese Phase bliebe
+    // die Icon-Schwelle an genau einer der beiden Icon-Stellen ungeprüft.
+    const discover = page.getByRole('button', { name: /Meetup-Räume entdecken/ })
+    if (!(await discover.isVisible().catch(() => false))) {
+        return phase1
+    }
+    await discover.click()
+    const country = page.getByRole('button', { name: 'Land' })
+    if (!(await country.isVisible().catch(() => false))) {
+        return phase1
+    }
+    await country.click()
+    await page.waitForTimeout(400)
+    return [...phase1, ...(await measure(page))]
 }
 
 for (const theme of ['light', 'dark'] as const) {
@@ -117,14 +142,15 @@ for (const theme of ['light', 'dark'] as const) {
         } else {
             await expect(page.locator('html')).not.toHaveClass(/dark/, { timeout: 15_000 })
         }
-        await openMeasurableSurfaces(page)
-
-        const measured = await measure(page)
+        const measured = await measureAllSurfaces(page)
         console.log(`KONTRAST[${theme}] ` + JSON.stringify(measured, null, 1))
 
-        // Gegenprobe gegen einen leeren Lauf: misst der Test überhaupt etwas?
+        // Gegenprobe gegen einen leeren Lauf: misst der Test überhaupt etwas — und
+        // zwar BEIDE Sorten? Ohne diese zwei Zeilen bestünde der Test auch dann, wenn
+        // eine Oberfläche gar nicht mehr rendert und schlicht nichts gemessen wird.
         expect(measured.length, 'keine Brand-Farbträger gefunden — Messung wertlos').toBeGreaterThan(0)
         expect(measured.some((m) => m.kind === 'text'), 'kein Text-Träger gemessen').toBe(true)
+        expect(measured.some((m) => m.kind === 'icon'), 'kein Icon-Träger gemessen — Icon-Schwelle ungeprüft').toBe(true)
 
         for (const m of measured) {
             const min = m.kind === 'text' ? 4.5 : 3
