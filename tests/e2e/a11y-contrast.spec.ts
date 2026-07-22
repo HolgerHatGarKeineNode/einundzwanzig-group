@@ -1,16 +1,27 @@
-import { test, expect } from './support/fixtures'
+import { test, expect, type Page } from './support/fixtures'
 import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
 
 /**
  * A11y-Anker: misst den TATSÄCHLICH gerenderten Kontrast aller Brand-Textfarben
- * statt ihn nur zu rechnen. Eine Rechnung nimmt einen Hintergrund an; gemessen wird
- * der echte — und der ist hier durchweg schlechter als reines Weiß (gemessen
- * 4,41–5,12:1 statt der gerechneten 5,92:1). Fängt außerdem den Fall, dass eine
- * Utility-Klasse gar nicht greift (JIT-Miss, überschreibende Regel).
+ * statt ihn nur zu rechnen — in BEIDEN Themes.
+ *
+ * Warum messen und nicht rechnen: eine Rechnung muss den Hintergrund annehmen, und
+ * die Annahme „reines Weiß" war hier durchweg falsch. Getönte Chips sitzen auf
+ * Karten, Popovers und dem grauen Segmented-Control von `flux:tabs`. Gemessen lag
+ * das Tab-Badge mit `brand-800` bei 4,41:1, gerechnet hatte ich 5,92:1 — erst die
+ * Messung fand das. Nebenbei fängt der Test den Fall, dass eine Utility-Klasse gar
+ * nicht greift (JIT-Miss, überschreibende Regel).
  *
  * Der Anlass: `text-brand-600` auf `bg-brand-500/10` stand an elf Stellen im Repo
  * und lag bei 2,73:1 — unter jeder WCAG-Schwelle, auch der für Grafik.
+ *
+ * Zwei Schwellen, weil WCAG zwei Kriterien kennt — die Farbwahl folgt genau dem:
+ *   Text   → 1.4.3,  4,5:1 → brand-800, auf grauem Grund brand-900 (dark: brand-400)
+ *   Icons  → 1.4.11, 3:1   → brand-700                            (dark: brand-400)
+ * Klassifiziert wird über die KLASSE, nicht über die gerenderte Farbe: im Dark-Mode
+ * tragen Text und Icon dieselbe Farbe (brand-400), die Absicht steht aber weiter im
+ * Klassennamen.
  */
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 
@@ -21,21 +32,16 @@ const LUM = `(css) => {
     return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
 }`
 
-test('A11y: gerenderter Kontrast der Brand-Zähler erfüllt WCAG 1.4.3', async ({ page }) => {
-    await useZooid(page)
-    await loginNsec(page, NSEC)
-    // Warten, bis die Raumliste da ist — sonst ist das Tab-Badge (standardCount() > 0)
-    // noch nicht gerendert und die Messung überspringt genau den Ursprungsbefund.
-    await expect(page.getByText('Willkommen', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
-    // Profil-Popover öffnen: npub-Chip und Signer-Badge leben darin.
-    await page.locator('button[aria-haspopup="true"]').first().click()
-    await page.waitForTimeout(400)
+type Measured = { label: string; kind: 'text' | 'icon'; fg: string; bg: string; ratio: number }
 
-    const measured = await page.evaluate(
+/** Misst alle sichtbaren Brand-Farbträger im aktuellen Theme. */
+const measure = (page: Page): Promise<Measured[]> =>
+    page.evaluate(
         ([lumSrc]) => {
             const lum = eval(lumSrc) as (css: string) => number
-            // Effektive Hintergrundfarbe: den ersten Vorfahren mit nicht-transparentem
-            // Hintergrund suchen und die getönte Fläche darüber komponieren.
+            // Effektive Hintergrundfarbe: bis zum ersten opaken Vorfahren sammeln und
+            // die transparenten Schichten darüber komponieren. Ein einzelnes
+            // `backgroundColor` reicht nicht — getönte Chips sind halbtransparent.
             const effectiveBg = (el: Element): string => {
                 let node: Element | null = el
                 const layers: string[] = []
@@ -48,7 +54,10 @@ test('A11y: gerenderter Kontrast der Brand-Zähler erfüllt WCAG 1.4.3', async (
                     }
                     node = node.parentElement
                 }
-                let [r, g, b] = [255, 255, 255]
+                // Basis ist die Seitenfarbe des Themes, nicht pauschal Weiß.
+                const rootBg = getComputedStyle(document.documentElement).backgroundColor
+                const rootP = (rootBg.match(/[\d.]+/g) ?? []).map(Number)
+                let [r, g, b] = (rootP[3] ?? 1) > 0 && rootP.length >= 3 ? [rootP[0], rootP[1], rootP[2]] : [255, 255, 255]
                 for (const layer of layers.reverse()) {
                     const p = (layer.match(/[\d.]+/g) ?? []).map(Number)
                     const a = p[3] ?? 1
@@ -58,35 +67,71 @@ test('A11y: gerenderter Kontrast der Brand-Zähler erfüllt WCAG 1.4.3', async (
                 }
                 return `rgb(${r}, ${g}, ${b})`
             }
-            const out: Array<{ label: string; fg: string; bg: string; ratio: number }> = []
+            const out: Measured[] = []
             for (const el of Array.from(document.querySelectorAll('span, div, button'))) {
-                const cs = getComputedStyle(el)
                 if (!el.className || typeof el.className !== 'string') continue
                 if (!/text-brand-(700|800|900)/.test(el.className)) continue
                 if (!(el as HTMLElement).offsetParent) continue
-                const fg = cs.color
+                const fg = getComputedStyle(el).color
                 const bg = effectiveBg(el)
                 const lf = lum(fg)
                 const lb = lum(bg)
                 const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
-                out.push({ label: (el.textContent ?? '').trim().slice(0, 24), fg, bg, ratio: Math.round(ratio * 100) / 100 })
+                out.push({
+                    label: (el.textContent ?? '').trim().slice(0, 24),
+                    kind: /text-brand-700/.test(el.className) ? 'icon' : 'text',
+                    fg,
+                    bg,
+                    ratio: Math.round(ratio * 100) / 100,
+                })
             }
             return out
         },
         [LUM],
-    )
+    ) as Promise<Measured[]>
 
-    console.log('KONTRAST ' + JSON.stringify(measured, null, 1))
-    expect(measured.length).toBeGreaterThan(0)
+/** Bringt die Seite in den Zustand, in dem alle Brand-Farbträger gerendert sind. */
+async function openMeasurableSurfaces(page: Page): Promise<void> {
+    // Ohne geladene Raumliste ist das Tab-Badge (standardCount() > 0) nicht da —
+    // die Messung ginge am Ursprungsbefund vorbei.
+    await expect(page.getByText('Willkommen', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    // npub-Chip und Signer-Badge leben im Profil-Popover.
+    await page.locator('button[aria-haspopup="true"]').first().click()
+    await page.waitForTimeout(400)
+}
 
-    // Zwei Schwellen, weil WCAG zwei Kriterien kennt — und die Farbwahl folgt genau dem:
-    //   brand-800 (#98480f) trägt TEXT      → 1.4.3, 4,5:1
-    //   brand-700 (#c05c08) trägt ICONS     → 1.4.11 (UI-Komponenten/Grafik), 3:1
-    // Eine pauschale 4,5-Schwelle wäre für Icons falsch streng und würde die
-    // bewusste Zwei-Stufen-Wahl kaputt-„reparieren".
-    const TEXT_FG = new Set(['rgb(152, 72, 15)', 'rgb(123, 61, 16)']) // brand-800, brand-900
-    for (const m of measured) {
-        const min = TEXT_FG.has(m.fg) ? 4.5 : 3
-        expect(m.ratio, `${m.label || '(Icon)'} — ${m.fg} auf ${m.bg}, verlangt ${min}:1`).toBeGreaterThanOrEqual(min)
-    }
-})
+for (const theme of ['light', 'dark'] as const) {
+    test(`A11y: gerenderter Kontrast der Brand-Farben erfüllt WCAG (${theme})`, async ({ page }) => {
+        await useZooid(page)
+        // Theme VOR dem Login setzen, damit die erste Seite schon richtig rendert.
+        await page.addInitScript((t) => {
+            try {
+                localStorage.setItem('flux.appearance', t as string)
+            } catch {
+                /* kein localStorage → Test misst dann das Default-Theme */
+            }
+        }, theme)
+        await loginNsec(page, NSEC)
+        if (theme === 'dark') {
+            await expect(page.locator('html')).toHaveClass(/dark/, { timeout: 15_000 })
+        } else {
+            await expect(page.locator('html')).not.toHaveClass(/dark/, { timeout: 15_000 })
+        }
+        await openMeasurableSurfaces(page)
+
+        const measured = await measure(page)
+        console.log(`KONTRAST[${theme}] ` + JSON.stringify(measured, null, 1))
+
+        // Gegenprobe gegen einen leeren Lauf: misst der Test überhaupt etwas?
+        expect(measured.length, 'keine Brand-Farbträger gefunden — Messung wertlos').toBeGreaterThan(0)
+        expect(measured.some((m) => m.kind === 'text'), 'kein Text-Träger gemessen').toBe(true)
+
+        for (const m of measured) {
+            const min = m.kind === 'text' ? 4.5 : 3
+            expect(
+                m.ratio,
+                `[${theme}] ${m.label || '(Icon)'} — ${m.fg} auf ${m.bg}, verlangt ${min}:1`,
+            ).toBeGreaterThanOrEqual(min)
+        }
+    })
+}
