@@ -14,7 +14,16 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
     test('deckt alle signierten Kinds ab — inkl. der kritischen 27235 (Login + Admin)', () => {
         // Jeder Kind, den der Client signiert (Kind-Audit). 27235 ist am kritischsten:
         // ohne ihn kein Server-Login-Handoff und kein NIP-86-Relay-Admin.
-        const required = [0, 5, 7, 9, 1018, 1068, 1984, 9005, 9021, 9022, 9041, 9734, 10009, 22242, 27235, 28934, 28936]
+        //
+        // Die Liste war unvollständig und hat damit genau den Bug durchgelassen, den sie
+        // fangen soll: 1111 (Thread-Kommentar) fehlte in NIP46_PERMS, der Test fragte ihn
+        // nicht ab. Ergänzt wurden 1111 und die Admin-Kinds 9000/9001/9002/9007/9008 —
+        // wer hier einen Kind hinzufügt, muss ihn auch in NIP46_PERMS führen.
+        const required = [
+            0, 5, 7, 9, 1018, 1068, 1111, 1984,
+            9000, 9001, 9002, 9005, 9007, 9008, 9021, 9022, 9041, 9734,
+            10009, 22242, 27235, 28934, 28936,
+        ]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
         }
