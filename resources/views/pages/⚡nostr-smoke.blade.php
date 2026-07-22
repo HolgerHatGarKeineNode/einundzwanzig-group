@@ -39,7 +39,7 @@ new #[Layout('group::einundzwanzig')] #[Title('welshman Smoke-Test')] class exte
         <ul x-show="!loading" class="list-stagger space-y-3">
             <template x-for="(e, idx) in events" :key="e.id">
                 <li class="surface-card pressable p-4" :style="`--i:${idx}`">
-                    <div class="mb-1 text-xs text-brand-600 dark:text-brand-400"
+                    <div class="mb-1 text-xs text-brand-800 dark:text-brand-400"
                          x-text="e.pubkey.slice(0, 16) + '…'"></div>
                     <div class="text-sm leading-snug text-zinc-700 dark:text-zinc-300"
                          x-text="e.content.slice(0, 180)"></div>
