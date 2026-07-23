@@ -1574,3 +1574,90 @@ test('Anker 17: Fokus wandert nach „Alles", „Rückgängig" und „Alle anzei
     expect(active.tag).toBe('DIV')
     expect(active.tabindex).toBe('-1')
 })
+
+/**
+ * ANKER 18 — nach abgelaufener Frist tut „Rückgängig" NICHTS mehr.
+ *
+ * Der Riegel sitzt im KLICK (`undoClickAction`), nicht in der Sichtbarkeit — und das ist
+ * der Punkt: `canUndo()` hängt nur an `x-show`, und Alpine wertet einen Ausdruck erst
+ * neu aus, wenn sich eine REAKTIVE Abhängigkeit ändert. `Date.now()` ist keine. Im
+ * Zielszenario (gedrosselter Hintergrund-Tab, gestreckter Timer) bleibt die Leiste
+ * deshalb sichtbar UND klickbar, obwohl die zugesagten 10 s längst vorbei sind.
+ *
+ * Geklickt wird deshalb per `dispatchEvent` statt über die Sichtbarkeit: geprüft werden
+ * soll der Riegel im Code, nicht ob Alpine die Leiste zufällig schon ausgeblendet hat.
+ * Ein Test, der nur „der Knopf ist weg" prüft, ginge an der Zusage vorbei.
+ *
+ * Die Frist wird ECHT abgewartet (11,5 s bei 10 s Fenster), nicht per Attrappe verkürzt:
+ * `_undoUntil` von außen zu setzen prüfte den Vergleich gegen einen Wert, den der Test
+ * selbst erfunden hat.
+ */
+test('Anker 18: „Rückgängig" nach Ablauf der Frist stellt nichts wieder her', async ({ page }) => {
+    test.setTimeout(150_000)
+
+    const room = makeRoom()
+    await login(page)
+    await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
+    const marker = `Frist-${rnd()}`
+    publishMessage(room.h, marker)
+
+    await openUpdates(page)
+    const row = roomRow(page, room.name)
+    await expect(row).toBeVisible({ timeout: 30_000 })
+    expect((await row.getAttribute('aria-label')) ?? '', 'Ausgangslage: ungelesen').toContain(UNREAD_PREFIX)
+
+    await page.getByRole('button', { name: 'Alles als gelesen markieren' }).click()
+    await expect
+        .poll(async () => (await roomRow(page, room.name).getAttribute('aria-label')) ?? '', { timeout: 25_000 })
+        .not.toContain(UNREAD_PREFIX)
+
+    // **Das Zielszenario herstellen, nicht auf den Normalfall hoffen.** Im Normalfall
+    // räumt der 10-s-Timer den Puffer selbst weg (`undoSnapshot = null`) — dann liefe
+    // ein später Klick auch OHNE Riegel ins Leere, und dieser Anker prüfte nichts.
+    // Gemessen: mit entfernter Fristprüfung blieb er grün. Der Riegel greift genau dort,
+    // wo der Timer NICHT feuert (gedrosselter Hintergrund-Tab, gestreckter Timer) — also
+    // wird der Timer hier gestoppt: die Frist verstreicht, der Puffer bleibt.
+    await page.evaluate(() => {
+        const alpine = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine
+        const el = document.querySelector('[x-data="nostrUpdates"]') as Element
+        const data = alpine.$data(el) as { _undoTimer: ReturnType<typeof setTimeout> | null }
+        if (data._undoTimer) {
+            clearTimeout(data._undoTimer)
+            data._undoTimer = null
+        }
+    })
+
+    // Die Frist echt verstreichen lassen (Fenster 10 s) — nicht per Attrappe verkürzt.
+    const waitStart = Date.now()
+    await page.waitForTimeout(11_500)
+    const wall = Date.now() - waitStart
+    const undoState = await page.evaluate(() => {
+        const alpine = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine
+        const el = document.querySelector('[x-data="nostrUpdates"]') as Element
+        const d = alpine.$data(el) as { _undoUntil: number; _undoTimer: unknown }
+        return { undoUntil: d._undoUntil, now: Date.now(), timerLeft: d._undoTimer !== null }
+    })
+    console.log(
+        `[anker18] Wanduhr im Warten: ${wall} ms · _undoUntil-now = ${undoState.undoUntil - undoState.now} ms · Timer noch aktiv: ${undoState.timerLeft}`,
+    )
+    const stillOpen = await page.evaluate(() => {
+        const alpine = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine
+        const el = document.querySelector('[x-data="nostrUpdates"]') as Element
+        return (alpine.$data(el) as { canUndo(): boolean }).canUndo()
+    })
+    console.log(`[anker18] canUndo() nach 11,5 s: ${stillOpen}`)
+    expect(stillOpen, 'die Frist muss abgelaufen sein, sonst prüft der Klick den falschen Zustand').toBe(false)
+
+    // Klick erzwingen — über das STRUKTUR-Attribut, nicht über die Rolle: nach Ablauf
+    // hat der Timer die Leiste per `x-show` ausgeblendet, und rollenbasierte Locators
+    // ignorieren verborgene Elemente (der erste Versuch lief genau deshalb in einen
+    // Timeout). Der Knopf bleibt im DOM — und genau ihn muss der Riegel abfangen, denn
+    // im Zielszenario (gedrosselter Tab) wäre er sogar sichtbar.
+    await page.locator('[x-ref="undoBtn"]').dispatchEvent('click')
+    await page.waitForTimeout(2500)
+
+    const afterLabel = (await roomRow(page, room.name).getAttribute('aria-label')) ?? ''
+    console.log(`[anker18] Label nach dem späten Klick: "${afterLabel}"`)
+    expect(afterLabel, 'der späte Klick hat den Lesestand doch zurückgeholt').not.toContain(UNREAD_PREFIX)
+    await expect(rail(roomRow(page, room.name)), 'auch optisch darf nichts zurückkommen').toBeHidden()
+})
