@@ -17,15 +17,15 @@ import { loginNsec } from './support/login'
  * Der Anlass: `text-brand-600` auf `bg-brand-500/10` stand an elf Stellen im Repo
  * und lag bei 2,73:1 — unter jeder WCAG-Schwelle, auch der für Grafik.
  *
- * ⚠️ OFFENER BEFUND (2026-07-23, NICHT vom Ungelesen-Punkt verursacht): der dunkle
- * Zweig ist ROT. Der Tab-Zähler (`⚡spaces.blade.php:185`/`:195`,
- * `text-brand-900 dark:text-brand-400`) liegt im Dark-Mode bei **3,68:1** statt der
- * verlangten 4,5:1. Er sitzt dort NICHT auf zinc-950, sondern auf dem aktiven
- * Segment von `flux:tabs`: weiß@10 % + weiß@20 % über zinc-950 ergibt ein neutrales
- * Grau `rgb(78,78,78)`, mit dem brand-Tint darüber `rgb(95,85,73)`. Sichtbar wurde
- * das erst mit dem korrigierten Farb-Parser oben — die früher notierten
- * „dark: 9,25–10,09:1" stammen aus der Fehlmessung. Die Farbe gehört dem
- * P1-/Design-Eigentümer; hier wird gemessen, nicht umgefärbt.
+ * Historie zu den Tab-Zählern: sie trugen `text-brand-900 dark:text-brand-300` auf
+ * `bg-brand-500/10` und lagen dark bei 3,68:1 (vor dem P3-Fix auf brand-300), weil
+ * sie NICHT auf zinc-950 sitzen, sondern auf dem aktiven Segment von `flux:tabs`
+ * (weiß@10 % + weiß@20 % über zinc-950 = `rgb(78,78,78)`, mit Tint `rgb(95,85,73)`).
+ * Seit P6 ist der Fall dort verschwunden: das Tab-Badge zeigt Ungelesenes als
+ * DECKENDE Pille (`bg-brand-500` + `text-zinc-950`) — eine deckende Fläche kann den
+ * Untergrund nicht mehr sehen, der Segment-Zustand fällt als Variable weg. Der
+ * getönte Fall lebt weiter im Avatar-Fallback (`nostr-avatar`) und wird hier
+ * weiterhin gemessen.
  *
  * Zwei Schwellen, weil WCAG zwei Kriterien kennt — die Farbwahl folgt genau dem:
  *   Text   → 1.4.3,  4,5:1 → brand-800, auf grauem Grund brand-900 (dark: brand-400)
@@ -40,6 +40,14 @@ import { loginNsec } from './support/login'
  * gegen den Untergrund des ELTERN-Elements; sie fallen unter 1.4.11 (≥ 3:1), weil
  * sie kein Text sind. Der Autor des Punktes hat für seine Werte ausdrücklich
  * „gerechnet, nicht gemessen" notiert — hier stehen die gemessenen.
+ *
+ * Seit P6 messen wir zusätzlich die ZÄHLER-PILLEN (`unread-badge`): Ziffer
+ * `text-zinc-950` auf deckendem `bg-brand-500`. Sie sind TEXT (1.4.3, 4,5:1) — die
+ * Pillenfläche selbst liegt gegen Weiß bei ~2,3:1 und wäre als Grafikobjekt
+ * unzulässig; deshalb trägt die Ziffer die Bedeutung und nicht die Form. Gemessen
+ * werden alle drei Auftritte getrennt (Zeile · Tab · Glocke), damit ein Ausbleiben
+ * an EINEM Ort nicht als „geprüft" durchgeht — an genau dieser Stelle scheitert der
+ * naive Anker: er misst, was gerendert ist, und ungerendert sieht aus wie grün.
  */
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = '/home/user/go/bin/nak'
@@ -117,10 +125,24 @@ const COLOR_SRC = `(() => {
 
 type Measured = { label: string; kind: 'text' | 'icon' | 'graphic'; fg: string; bg: string; ratio: number }
 
+/**
+ * Zusätzlich zu messende Einzelstellen: Farbträger, die sich NICHT über eine
+ * Brand-Klasse finden lassen (weil ihre Klasse gerade der Befund ist) oder die auf
+ * einer anderen Route leben. `selector` muss genau ein sichtbares Element treffen —
+ * trifft er keines, meldet die Messung das als eigenen Eintrag mit `ratio: 0`, statt
+ * still nichts zurückzugeben. Ungemessen sähe sonst aus wie grün.
+ */
+type Extra = { selector: string; label: string; kind: 'text' | 'icon' | 'graphic' }
+
 /** Misst alle sichtbaren Brand-Farbträger im aktuellen Theme. */
-const measure = (page: Page): Promise<Measured[]> =>
+const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
     page.evaluate(
-        ([colorSrc]) => {
+        ([colorSrc, extraJson]) => {
+            const extras = JSON.parse(extraJson as string) as {
+                selector: string
+                label: string
+                kind: 'text' | 'icon' | 'graphic'
+            }[]
             const { parse, lum } = eval(colorSrc) as {
                 parse: (css: string) => { r: number; g: number; b: number; a: number }
                 lum: (css: string) => number
@@ -192,9 +214,57 @@ const measure = (page: Page): Promise<Measured[]> =>
                     ratio: Math.round(ratio * 100) / 100,
                 })
             }
+            // P6 — die Zähler-Pillen (`unread-badge`). Anders als oben ist hier die
+            // ZIFFER der Vordergrund und die eigene deckende Fläche der Untergrund;
+            // `effectiveBg(el)` bricht am ersten opaken Layer ab, das ist die Pille
+            // selbst. Genau deshalb ist der Wert theme-unabhängig — und genau deshalb
+            // wird er trotzdem in BEIDEN Themes gemessen: „ist unabhängig" ist eine
+            // Behauptung über gerenderte Farben, keine über den Klassennamen.
+            for (const el of Array.from(document.querySelectorAll('span'))) {
+                if (!el.className || typeof el.className !== 'string') continue
+                if (!/(^|\s)bg-brand-500(\s|$)/.test(el.className)) continue
+                if (!/(^|\s)text-zinc-950(\s|$)/.test(el.className)) continue
+                if (!(el as HTMLElement).offsetParent) continue
+                const fg = getComputedStyle(el).color
+                const bg = effectiveBg(el)
+                const lf = lum(fg)
+                const lb = lum(bg)
+                const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
+                out.push({
+                    // Rolle aus der Geometrie-Klasse: die Glocke trägt die kleine
+                    // 9+-Variante (`h-4`), das Tab-Badge den Abstand zum Label
+                    // (`ms-1.5`), alles übrige ist die Zeilen-Pille.
+                    label: /(^|\s)h-4(\s|$)/.test(el.className)
+                        ? 'Zähler-Pille Glocke'
+                        : /(^|\s)ms-1\.5(\s|$)/.test(el.className)
+                          ? 'Zähler-Pille Tab'
+                          : 'Zähler-Pille Zeile',
+                    kind: 'text',
+                    fg,
+                    bg,
+                    ratio: Math.round(ratio * 100) / 100,
+                })
+            }
+            // Einzelstellen (siehe {@link Extra}) — bewusst über einen expliziten
+            // Selektor statt über die Farbklasse: der Ungelesen-Divider im Raum wird
+            // gerade WEGEN seiner Farbklasse geprüft, ein Fund über `text-brand-800`
+            // fände ihn erst nach dem Fix und der Ausgangswert bliebe ungemessen.
+            for (const spec of extras) {
+                const el = document.querySelector(spec.selector) as HTMLElement | null
+                if (!el || !el.offsetParent) {
+                    out.push({ label: `${spec.label} (NICHT GEFUNDEN)`, kind: spec.kind, fg: '-', bg: '-', ratio: 0 })
+                    continue
+                }
+                const fg = getComputedStyle(el).color
+                const bg = effectiveBg(el)
+                const lf = lum(fg)
+                const lb = lum(bg)
+                const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
+                out.push({ label: spec.label, kind: spec.kind, fg, bg, ratio: Math.round(ratio * 100) / 100 })
+            }
             return out
         },
-        [COLOR_SRC],
+        [COLOR_SRC, JSON.stringify(extra)],
     ) as Promise<Measured[]>
 
 /**
@@ -215,15 +285,21 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     const phase1 = await measure(page)
     await page.keyboard.press('Escape')
 
-    // Phase 1b — dieselbe Raum-Zeile MIT Hover. Der Punkt sitzt auf einer Kachel mit
-    // `hover:bg-zinc-100`/`dark:hover:bg-zinc-800`; das ist der ungünstigere von zwei
-    // realen Untergründen und genau der Fall, den die Komponente selbst als
-    // „gerechnet, nicht gemessen" offen gelassen hat. Ungemessen hieße ungeprüft.
+    // Phase 1b — dieselbe Raum-Zeile MIT Hover. Die Kachel wechselt auf
+    // `hover:bg-zinc-100`/`dark:hover:bg-zinc-800`. Für die deckende Zähler-Pille
+    // (seit P6, vorher stand hier der Punkt) darf das rechnerisch nichts ändern —
+    // gemessen wird es trotzdem: „die Fläche ist deckend" ist eine Behauptung über
+    // gerendertes CSS, und genau solche Behauptungen sind hier schon dreimal zu
+    // optimistisch gewesen. Ungemessen hieße ungeprüft.
     const tile = page.getByRole('button', { name: /Punktprobe/ })
     if (await tile.isVisible().catch(() => false)) {
         await tile.hover()
         await page.waitForTimeout(300)
-        phase1.push(...(await measure(page)).filter((m) => m.kind === 'graphic'))
+        phase1.push(
+            ...(await measure(page))
+                .filter((m) => m.kind === 'graphic' || m.label.startsWith('Zähler-Pille'))
+                .map((m) => ({ ...m, label: `${m.label} (hover)` })),
+        )
     }
 
     // Phase 2 — Meetup-Fokus + Land-Popover. Das check-Icon der Länder-Auswahl
@@ -241,6 +317,34 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     await country.click()
     await page.waitForTimeout(400)
     return [...phase1, ...(await measure(page))]
+}
+
+/**
+ * Phase 3 — der Ungelesen-Divider IM RAUM (§4.1 Nr. 7 / §4.5).
+ *
+ * Er lebt nicht auf `/spaces`, also misst ihn keine der beiden Phasen oben. Genau
+ * deshalb ist er in diesem Projekt jahrelang ungeprüft geblieben, obwohl er dieselbe
+ * 1.4.3-Schwelle trägt wie jeder andere Text.
+ *
+ * **Warum er sich hier zuverlässig herstellen lässt** (und deshalb ein Anker sein darf
+ * statt eines Tickets): der Test publiziert für den Ungelesen-Marker ohnehin schon eine
+ * Fremd-Nachricht nach `all = jetzt`. Genau die erzeugt im Raum die Grenze. Die drei
+ * Bedingungen aus `feeds.ts` sind damit erfüllt: `lastRead > 0` (Wasserzeichen aus dem
+ * Login), `created_at > lastRead` (nach dem Login publiziert), `idx > 0` (der Seed-Raum
+ * „Punktprobe" trägt 60 ältere Nachrichten — ohne sie wäre der ganze Verlauf ungelesen
+ * und die Linie hätte nichts zu trennen). `_lastRead` ist ein SNAPSHOT beim Öffnen
+ * (`bridge.ts`), das Quittieren am Boden löscht die Linie also nicht unter der Messung
+ * weg.
+ *
+ * Der Selektor greift die Klassen ohne die Farbe: die Farbe ist der Prüfgegenstand.
+ * `font-semibold` trennt ihn vom Tages-Divider derselben Zeile (`text-muted`).
+ */
+const DIVIDER_SELECTOR = 'span.font-mono.font-semibold.tracking-wide'
+
+async function measureRoomDivider(page: Page): Promise<Measured[]> {
+    await page.goto('/rooms/punkt')
+    await expect(page.getByText('Neue Nachrichten', { exact: true })).toBeVisible({ timeout: 30_000 })
+    return measure(page, [{ selector: DIVIDER_SELECTOR, label: 'Ungelesen-Divider (Raum)', kind: 'text' }])
 }
 
 for (const theme of ['light', 'dark'] as const) {
@@ -270,8 +374,16 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.getByRole('button', { name: /Punktprobe/ })).toBeVisible({ timeout: 20_000 })
         execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=punkt', '-c', `A11y-${Date.now()}`, ZOOID_WS])
         await expect(page.locator('span.size-2.rounded-full').first()).toBeVisible({ timeout: 20_000 })
+        // Zweiter, EIGENER Beleg: seit P6 trägt die Raum-Zeile eine Zähler-Pille statt
+        // des Punktes. Der Punkt oben lebt nur noch in der Bottom-Nav — er würde also
+        // auch dann erscheinen, wenn die Pille gar nicht rendert (falscher Store-Name,
+        // Zahl bleibt 0). Ohne diese Zeile schlüge das erst unten in den Guards zu, und
+        // zwar ohne Wartezeit: ein Rennen sähe aus wie ein Markup-Fehler.
+        await expect(page.locator('span.bg-brand-500.text-zinc-950').first()).toBeVisible({ timeout: 20_000 })
 
-        const measured = await measureAllSurfaces(page)
+        // Reihenfolge: erst alles auf `/spaces`, dann der Raum — der Raumbesuch ist ein
+        // echter Seitenwechsel und käme nicht ohne Reload zur Raumliste zurück.
+        const measured = [...(await measureAllSurfaces(page)), ...(await measureRoomDivider(page))]
         console.log(`KONTRAST[${theme}] ` + JSON.stringify(measured, null, 1))
 
         // Gegenprobe gegen einen leeren Lauf: misst der Test überhaupt etwas — und
@@ -283,6 +395,20 @@ for (const theme of ['light', 'dark'] as const) {
         expect(
             measured.some((m) => m.kind === 'graphic' && m.label === 'Ungelesen-Punkt'),
             'kein Ungelesen-Punkt gemessen — die 1.4.11-Schwelle des Punktes ist ungeprüft',
+        ).toBe(true)
+        // P6: jede der drei Zähler-Pillen EINZELN verlangen. Eine Sammelabfrage
+        // („irgendeine Pille gemessen") wäre wertlos — die drei Auftritte stehen an
+        // drei verschiedenen Untergründen (Kachel · Segmented-Control · Kopfzeile),
+        // und genau der ungemessene ist erfahrungsgemäß der rote.
+        for (const role of ['Zähler-Pille Zeile', 'Zähler-Pille Tab', 'Zähler-Pille Glocke']) {
+            expect(
+                measured.some((m) => m.label === role),
+                `${role} nicht gemessen — diese Pille ist ungeprüft (rendert sie überhaupt?)`,
+            ).toBe(true)
+        }
+        expect(
+            measured.some((m) => m.label === 'Ungelesen-Divider (Raum)'),
+            'Ungelesen-Divider nicht gemessen — der Selektor greift nicht mehr oder die Grenze entstand nicht',
         ).toBe(true)
 
         for (const m of measured) {

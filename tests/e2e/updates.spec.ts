@@ -706,115 +706,104 @@ test('Anker 7: aria-label beginnt mit dem Ungelesen-Zustand, kappt den Snippet u
 })
 
 /**
- * ANKER 8 — die Zahlen-Sperre (P6) hält, gemessen am gerenderten Text.
+ * ANKER 8 — die Zahlen-SPERRE aus P3/P4 ist mit P6 AUFGEHOBEN: Zahlen dürfen jetzt an den
+ * vorgesehenen Orten stehen (`design-konzept.md` §4.1). Der alte Anker verankerte das
+ * Verbot; dieser Anker verankert das Gegenteil — dass an genau diesen Orten wirklich eine
+ * Zahl im richtigen FORMAT rendert.
  *
- * **Abweichung von der Vorgabe, mit Begründung.** Verlangt war „kein sichtbarer Knoten
- * matcht `/\d+\s*(ungelesen|neu)/i`". Der `neu`-Teil ist am realen Baum unerfüllbar und
- * wäre kein Schutz, sondern ein Fehlalarm: die Zeilen-Titelzeile lautet nach
- * `design-konzept.md` §3.2/§3.3 ausdrücklich „Alice · 3 neue Nachrichten" (gebaut in
- * `updates.ts buildItem` über `plural(count, …)`). Diese Zahl ist keine Badge-
- * Behauptung, sondern die Beschriftung der Zeile, die man unmittelbar darunter
- * nachzählen kann.
+ * Was NICHT hier geprüft wird, weil es exakte Werte braucht, die gegen einen
+ * wiederverwendeten Test-Account unsicher wären (siehe Auftrags-Landmine 3):
+ *   - Die Tab-Pille „Räume" summiert `roomsTotal` über ALLE je von diesem Test-Account
+ *     beigetretenen Räume — auch aus früheren Läufen. Hier nur FORMAT.
+ *   - Die Glockenzahl (`$store.unread.updates`) summiert ebenso global. Hier nur FORMAT.
+ *   Beide exakten Zusicherungen — „Badge sagt N, im Raum stehen N" und „Glocke = Zeilen
+ *   in /updates" — sind Gate 3 und stehen in Anker 19/20 gegen einen h-eindeutigen Raum
+ *   bzw. als Selbstkonsistenzprüfung.
  *
- * Geprüft wird deshalb, was die Sperre wirklich meint, an fünf Stellen:
- *   1. Kein sichtbarer Knoten trägt eine Zahl mit dem Etikett „ungelesen".
- *   2. Der Ungelesen-MARKER selbst ist ein Punkt: das Marker-Element ist textlos. Genau
- *      hier bräche ein Zahlen-Badge zuerst durch — es wäre derselbe Knoten mit Inhalt.
- *   3. Auf `/updates` existiert überhaupt kein badge-förmiger Zahlenknoten (dort gibt es
- *      keine Bestandszahlen, die Aussage ist also scharf).
- *   4. Die Glocke trägt keinen sichtbaren Text — der Zustand steckt im `aria-label`.
- *   5. Der Untertitel zählt gerenderte Zeilen („N Hinweise"), nie Ungelesenes.
- *
- * **Nicht geprüft, und warum:** auf `/spaces` stehen badge-förmige Zahlen (gemessen:
- * „29"/„2" in den Tab-Pillen „Räume"/„Threads", „11"/„2" in der Meta-Zeile der
- * Thread-Liste). Das sind BESTANDSzahlen, vom Plan ausdrücklich als Absicht benannt;
- * sie sind am gerenderten Text nicht von einem Ungelesen-Badge zu unterscheiden. Eine
- * pauschale Badge-Sperre auf `/spaces` wäre deshalb ein Fehlalarm — die Zahlen werden
- * protokolliert, nicht verboten.
- *
- * Zu §9/13 („genau eine aria-live-Region auf /spaces"): am realen Baum sind es mehrere,
- * alle vorbestehend. Ein Test gegen die Anzahl wäre sofort rot und schützte nichts —
- * geprüft wird stattdessen, dass KEINE aria-live-Region einen Ungelesen-Zähler trägt.
+ * Was WEITER gilt und deshalb behalten wird (die beiden Ausnahmen, die P6 nicht anfasst):
+ *   - **Bottom-Nav bleibt der PUNKT** (§4.1 Nr. 5) — keine Zahl, textloser Marker.
+ *   - **Genau EINE `aria-live`-Region ist an `$store.unread.liveText` gebunden**
+ *     (§4.7/Abnahme-Kriterium 13, die Glocken-Begleitregion) — STRUKTURELL geprüft
+ *     (über das `x-text`-Attribut), nicht über den gerade sichtbaren Text: der erste
+ *     `liveText`-Wert je Space wird bewusst geschluckt (kein Vorlesen der Ankunft), die
+ *     Region kann im Messzeitpunkt also leer sein, ohne dass das ein Fehler wäre. Ein
+ *     Test gegen den sichtbaren Text wäre nur zufällig grün (Timing), nicht robust —
+ *     siehe Kommentar bei Teil 5. Zusätzlich: keine ANDERE Region zeigt je Zähler-Text.
  */
-test('Anker 8: keine Ungelesen-Zahl auf /updates und /spaces (P6-Sperre)', async ({ page }) => {
+test('Anker 8: Ungelesen-Zahlen erscheinen an den vorgesehenen Orten — Nav bleibt Punkt, keine Live-Region zählt', async ({ page }) => {
     test.setTimeout(120_000)
 
     const room = makeRoom()
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
     publishMessage(room.h, `Zahl-${rnd()}`)
-    publishMessage(room.h, `Zahl-${rnd()}`) // zwei ⇒ die Zeile aggregiert, ein Badge hätte hier „2" gezeigt
+    publishMessage(room.h, `Zahl-${rnd()}`) // zwei ⇒ die Raum-Pille muss "2" zeigen, nicht nur "> 0"
 
-    /** Sichtbare Blatt-Texte des Dokuments (kein `sr-only`, keine leeren Knoten). */
-    const visibleTexts = (p: Page): Promise<string[]> =>
-        p.evaluate(() =>
-            [...document.querySelectorAll('body *')]
-                .filter((el) => el.children.length === 0)
-                .filter((el) => {
-                    const st = getComputedStyle(el)
-                    const rect = el.getBoundingClientRect()
-                    return st.display !== 'none' && st.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
-                })
-                .map((el) => (el.textContent ?? '').trim())
-                .filter(Boolean),
-        )
+    const roomButton = page.getByRole('button', { name: new RegExp(room.name) })
+    const roomPill = roomButton.locator('span.bg-brand-500.rounded-pill')
 
-    const liveTexts = (p: Page): Promise<string[]> =>
-        p.evaluate(() => [...document.querySelectorAll('[aria-live], [role=status], [role=alert]')].map((el) => (el.textContent ?? '').trim()))
+    // ── 1. Raum-Zeile: exakte Zahl, nicht nur "irgendein Badge" (§4.1 Nr. 1) ──────────
+    await expect(roomPill, 'Raum-Zeile: die Ungelesen-Zahl muss rendern').toBeVisible({ timeout: 20_000 })
+    await expect(roomPill).toHaveText('2')
+    expect(await roomPill.getAttribute('aria-hidden'), 'die Ziffer ist dekorativ, der sr-only-Text daneben trägt').toBe('true')
+    const roomSrText = ((await roomButton.textContent()) ?? '').trim()
+    console.log(`[anker8] Raum-Button-Textinhalt (inkl. sr-only): "${roomSrText}"`)
+    expect(roomSrText, 'der sr-only-Begleittext muss die ECHTE Zahl nennen').toContain('2 ungelesene Nachrichten')
 
-    await openUpdates(page)
-    await expect(roomRow(page, room.name)).toBeVisible({ timeout: 30_000 })
+    // ── 2. Tab-Pille „Räume": nur FORMAT (Begründung im Docstring) ───────────────────
+    const roomsTabPill = page.getByRole('tab', { name: /^Räume/ }).locator('span.bg-brand-500.rounded-pill')
+    await expect(roomsTabPill, 'Tab „Räume": die Ungelesen-Zahl muss rendern').toBeVisible({ timeout: 20_000 })
+    const roomsTabText = ((await roomsTabPill.textContent()) ?? '').trim()
+    console.log(`[anker8] Tab-Pille „Räume": "${roomsTabText}"`)
+    expect(roomsTabText, 'Cap-Format: exakt bis 99, danach 99+').toMatch(/^(\d{1,2}|99\+)$/)
 
-    for (const path of ['/updates', '/spaces']) {
-        if (path === '/spaces') {
-            await updatesBack(page).click()
-            await expect(page).toHaveURL(/\/spaces/, { timeout: 25_000 })
-            await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 30_000 })
-        }
-        await page.waitForTimeout(1500) // Store-Emits/Throttle ausrechnen lassen
+    // ── 3. Glocke: nur FORMAT (Begründung im Docstring) ──────────────────────────────
+    // `\s*` statt eines festen Leerzeichens vor „ungelesene": defensiv gegen Whitespace-
+    // Varianten, prüft das FORMAT (Zahl + Wort), nicht die exakte Zeichenkette.
+    await expect
+        .poll(async () => (await bell(page).getAttribute('aria-label')) ?? '', { timeout: 20_000 })
+        .toMatch(/^Neu, \d+\s*ungelesene/)
+    const bellLabel = (await bell(page).getAttribute('aria-label')) as string
+    console.log(`[anker8] Glocken-Label: "${bellLabel}"`)
+    const bellPillText = ((await bell(page).locator('span.bg-brand-500.rounded-pill').textContent()) ?? '').trim()
+    expect(bellPillText, 'Cap-Format der Glocke: exakt bis 9, danach 9+').toMatch(/^([1-9]|9\+)$/)
 
-        const texts = await visibleTexts(page)
-        const counted = texts.filter((t) => /\d+\s*ungelesen/i.test(t))
-        expect(counted, `${path}: Ungelesen-ZAHL im sichtbaren Text — P6 ist gesperrt (${counted.join(' | ')})`).toEqual([])
-
-        const badges = texts.filter((t) => /^(\d{1,3}|9\+|99\+)$/.test(t))
-        console.log(`[anker8] ${path}: badge-förmige Knoten: ${badges.length ? badges.join(', ') : 'keine'}`)
-        if (path === '/updates') {
-            // Scharf, weil `/updates` keine Bestandszahlen kennt (siehe Docstring).
-            expect(badges, `/updates: badge-förmiger Zahlenknoten gefunden (${badges.join(', ')})`).toEqual([])
-        }
-
-        // Der Ungelesen-Marker ist ein PUNKT — textlos. Ein Zahlen-Badge wäre derselbe
-        // Knoten mit Inhalt; das ist die Stelle, an der P6 zuerst durchbräche.
-        const dots = await page.locator('span.size-2.rounded-full').all()
-        const dotTexts = await Promise.all(dots.map((d) => d.textContent()))
-        console.log(`[anker8] ${path}: ${dots.length} Ungelesen-Marker, Inhalte: ${JSON.stringify(dotTexts)}`)
-        for (const t of dotTexts) {
-            expect((t ?? '').trim(), `${path}: der Ungelesen-Marker trägt Text statt nur ein Punkt zu sein`).toBe('')
-        }
-        if (path === '/spaces') {
-            // Ohne einen einzigen Marker prüfte die Zeile darüber nichts.
-            expect(dots.length, 'kein Ungelesen-Marker sichtbar — die Punkt-Prüfung liefe leer').toBeGreaterThan(0)
-        }
-
-        const live = await liveTexts(page)
-        const liveCounters = live.filter((t) => /\d+\s*(ungelesen|neu)/i.test(t))
-        console.log(`[anker8] ${path}: ${live.length} aria-live/status-Regionen, davon mit Zähler: ${liveCounters.length}`)
-        expect(liveCounters, `${path}: aria-live-Region trägt einen Ungelesen-Zähler`).toEqual([])
+    // ── 4. Bottom-Nav bleibt der PUNKT — keine Zahl (§4.1 Nr. 5, unverändert seit P3) ─
+    const navDots = page.getByRole('navigation', { name: 'Hauptnavigation' }).locator('span.size-2.rounded-full')
+    await expect(navDots.first(), 'der Ungelesen-Marker der Nav muss sichtbar sein, sonst prüft die Zeile darunter nichts').toBeVisible({
+        timeout: 20_000,
+    })
+    const dotCount = await navDots.count()
+    for (let i = 0; i < dotCount; i++) {
+        const t = ((await navDots.nth(i).textContent()) ?? '').trim()
+        expect(t, 'die Bottom-Nav darf keine Zahl tragen, nur einen textlosen Punkt').toBe('')
     }
 
-    // Die Glocke selbst trägt keinen Zähler — der Zustand steckt im aria-label
-    // („Neu, ungelesene Nachrichten"), also im NAMEN, nicht in einer Ziffer.
-    const bellText = ((await bell(page).textContent()) ?? '').trim()
-    console.log(`[anker8] Glocken-Label: "${await bell(page).getAttribute('aria-label')}" · sichtbarer Text: "${bellText}"`)
-    expect(bellText, 'die Glocke darf keinen sichtbaren Zähler tragen').toBe('')
+    // ── 5. Genau EINE aria-live-Region trägt einen Zähler (§4.7/Abnahme 13) ──────────
+    // NICHT über den aktuell sichtbaren Text identifizieren: der Datenseiten-Autor
+    // schluckt bewusst den ERSTEN `liveText`-Wert je Space (sonst läse ein Screenreader
+    // bei jedem Seitenaufbau den Zählerstand vor) — die Region kann also im Moment der
+    // Messung leer sein, ohne dass das ein Fehler wäre. Ein Test, der „genau 1 Knoten mit
+    // Zähler-TEXT" verlangt, wäre GRÜN NUR AUS TIMING (bricht rot, sobald der Zähler sich
+    // ein zweites Mal bewegt und die Region gerade zwischen zwei Werten steht).
+    // Stattdessen strukturell verankert: GENAU EIN `aria-live`-Knoten ist an
+    // `$store.unread.liveText` GEBUNDEN (das `x-text`-Attribut bleibt im DOM stehen,
+    // Alpine entfernt es nicht) — das ist die vorgesehene Zählregion, unabhängig davon,
+    // ob sie gerade Text trägt. Und: KEINE andere Live-Region (weder diese noch eine
+    // fremde) zeigt jemals zähler-artigen Text, unabhängig von der Bindung.
+    const liveRegions = await page.evaluate(() =>
+        [...document.querySelectorAll('[aria-live], [role=status], [role=alert]')].map((el) => ({
+            text: (el.textContent ?? '').trim(),
+            boundToLiveText: (el.getAttribute('x-text') ?? '').includes('liveText'),
+        })),
+    )
+    const boundRegions = liveRegions.filter((r) => r.boundToLiveText)
+    console.log(`[anker8] ${liveRegions.length} aria-live/status-Regionen, an liveText gebunden: ${boundRegions.length}`)
+    expect(boundRegions, 'genau EIN aria-live-Knoten darf an $store.unread.liveText gebunden sein').toHaveLength(1)
 
-    // Der Untertitel zählt gerenderte Zeilen, nicht Ungelesenes.
-    await openUpdates(page)
-    await expect(roomRow(page, room.name)).toBeVisible({ timeout: 30_000 })
-    const subtitle = (await page.locator('header span.text-xs').first().textContent())?.trim() ?? ''
-    console.log(`[anker8] Untertitel: "${subtitle}"`)
-    expect(subtitle).toMatch(/^(Alles gelesen|1 Hinweis|\d+ Hinweise)$/)
+    const strayCounters = liveRegions.filter((r) => !r.boundToLiveText && /\d+\s*(ungelesen|neu)/i.test(r.text))
+    console.log(`[anker8] Live-Regionen mit Zähler außerhalb der Glocken-Bindung: ${JSON.stringify(strayCounters)}`)
+    expect(strayCounters, 'eine ANDERE Live-Region trägt fälschlich einen Ungelesen-Zähler').toEqual([])
 })
 
 /**
@@ -1691,4 +1680,252 @@ test('Anker 18: „Rückgängig" nach Ablauf der Frist stellt nichts wieder her'
     console.log(`[anker18] Label nach dem späten Klick: "${afterLabel}"`)
     expect(afterLabel, 'der späte Klick hat den Lesestand doch zurückgeholt').not.toContain(UNREAD_PREFIX)
     await expect(rail(roomRow(page, room.name)), 'auch optisch darf nichts zurückkommen').toBeHidden()
+})
+
+/**
+ * ANKER 19 — Gate 3, Teil 1: „Badge sagt N, im Raum stehen N" (Plan-Freigabekriterium).
+ *
+ * h-eindeutiger Testraum (siehe Kopf-Docstring dieser Datei): die Zahl ist damit gegen
+ * die Ansammlung aus früheren Läufen isoliert — anders als `roomsTotal`/die Glocke
+ * (Anker 8), die über ALLE je beigetretenen Räume dieses Test-Accounts summieren.
+ * `computeUnread` zählt EREIGNISSE (ein Kommentar zählt in seinen Thread, nie
+ * zusätzlich im Raum) — die publizierten Nachrichten sind deshalb die einzige Quelle,
+ * die in diesem frischen Raum überhaupt zählen kann.
+ */
+test('Anker 19: Raum-Badge zeigt exakt N — Badge und Rauminhalt stimmen überein (Gate 3)', async ({ page }) => {
+    test.setTimeout(120_000)
+
+    const room = makeRoom()
+    await login(page)
+    await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
+
+    const runId = rnd()
+    const COUNT = 5
+    const markers = Array.from({ length: COUNT }, (_, i) => `Gate3-${runId}-${i}`)
+    for (const m of markers) {
+        publishMessage(room.h, m)
+    }
+
+    const roomButton = page.getByRole('button', { name: new RegExp(room.name) })
+    const pill = roomButton.locator('span.bg-brand-500.rounded-pill')
+    await expect.poll(async () => ((await pill.textContent()) ?? '').trim(), { timeout: 30_000 }).toBe(String(COUNT))
+    console.log(`[anker19] Badge zeigt "${await pill.textContent()}" für ${COUNT} publizierte Nachrichten`)
+
+    // Gegenprobe: im Raum stehen wirklich COUNT Nachrichten mit dieser Markierung — jede
+    // einzeln über ihre EXAKTE, einmalige Kennung, nicht über eine Substring-Zählung
+    // (Landmine 4: eine ungeankerte Regex-Zählung träfe auch umschließende Container).
+    await roomButton.click()
+    await expect(page).toHaveURL(new RegExp(`/rooms/${room.h}`), { timeout: 25_000 })
+    for (const m of markers) {
+        await expect(page.getByText(m, { exact: true }), `Nachricht "${m}" muss im Raum stehen`).toBeVisible({ timeout: 25_000 })
+    }
+})
+
+/**
+ * ANKER 20 — Gate 3, Teil 2: die Glockenzahl entspricht exakt der Zahl ungelesener
+ * `/updates`-Zeilen (Plan-Freigabekriterium).
+ *
+ * Bewusst KEIN vorab geratener Erwartungswert: `$store.unread.updates` summiert über
+ * ALLE je von diesem Test-Account beigetretenen Räume (dieselbe globale Summe, die
+ * Anker 8 deshalb nur auf Format prüft). Statt eine Zahl zu raten, wird die Glocke
+ * gegen die tatsächlich in „Neu" sichtbaren ungelesenen Zeilen SELBST gegengeprüft —
+ * eine Selbstkonsistenzprüfung, kein Soll-Ist-Vergleich. Weicht sie ab, ist das ein
+ * Fehler im Produkt, nicht im Test.
+ *
+ * Zwei vom Datenseiten-Autor selbst gemeldete, bewusst NICHT als Bug zu behandelnde
+ * Fallen, gegen die dieser Anker sich absichert:
+ *
+ *   1. **Paginierung.** `/updates` rendert initial nur 30 Zeilen (`UPDATES_PAGE`). Bei
+ *      mehr als 30 angesammelten ungelesenen Zeilen zählte die Liste 30, während die
+ *      Glocke korrekt den Gesamtbestand meldet — „Ältere anzeigen" wird deshalb
+ *      geklickt, bis die Liste erschöpft ist, ERST DANN wird gezählt.
+ *   2. **Ladefenster.** Auf kaltem `/spaces` sind `loadRoomActivity`/`loadSpaceThreads`
+ *      noch unterwegs; die Glocke zählt vorübergehend zu NIEDRIG und wächst nach, die
+ *      Liste konvergiert gegen denselben (höheren) Stand — kein Widerspruch, aber ein
+ *      Zeitfenster. Eine feste Wartezeit vor dem Lesen risikiert genau diesen
+ *      Zwischenstand einzufrieren (gemessen: eine naive "zwei gleiche Reads
+ *      hintereinander"-Stabilitätsprüfung konvergierte auf den allerersten, noch
+ *      leeren Zwischenstand "0" — zwei Reads im Abstand weniger Millisekunden sind vor
+ *      dem ersten Emit trivial gleich). Gemessen wird deshalb gegen eine BEDINGUNG,
+ *      nicht gegen einen Zeitpunkt: `waitStable()` verlangt mehrere gleiche Lesungen im
+ *      Sekundenabstand, und die äußere Schleife misst Glocke UND Zeilen im Wechsel neu,
+ *      bis beide Seiten (unabhängig voneinander) zur Ruhe gekommen sind und
+ *      übereinstimmen — nicht nur einmal kurz zufällig gleich waren.
+ */
+test('Anker 20: Glockenzahl entspricht exakt den ungelesenen /updates-Zeilen (Gate 3)', async ({ page }) => {
+    test.setTimeout(180_000)
+
+    // Eigener Beitrag, damit die Probe auch bei einem ansonsten leeren Account etwas zu
+    // prüfen hat — sie bleibt trotzdem eine Selbstkonsistenzprüfung, kein geratener Wert.
+    const room = makeRoom()
+    await login(page)
+    await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
+    publishMessage(room.h, `Glocke-${rnd()}`)
+
+    await expect(bell(page)).toBeVisible({ timeout: 25_000 })
+    const readBellCount = async (): Promise<number> => {
+        const label = (await bell(page).getAttribute('aria-label')) ?? ''
+        const match = label.match(/^Neu, (\d+)\s*ungelesene/)
+        return match ? Number(match[1]) : 0
+    }
+
+    /**
+     * Wartet auf eine STABILE Zahl (mehrere gleiche Lesungen im Sekundenabstand) statt
+     * auf einen Zeitpunkt — genau das, was die Auftrags-Warnung zum Ladefenster verlangt.
+     */
+    async function waitStable(read: () => Promise<number>, opts: { stableFor?: number; stepMs?: number; maxWaitMs?: number } = {}): Promise<number> {
+        const { stableFor = 4, stepMs = 1000, maxWaitMs = 45_000 } = opts
+        const deadline = Date.now() + maxWaitMs
+        let last = -1
+        let streak = 0
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            const value = await read()
+            streak = value === last ? streak + 1 : 1
+            last = value
+            if (streak >= stableFor) {
+                return value
+            }
+            if (Date.now() > deadline) {
+                throw new Error(`Zahl wurde nach ${maxWaitMs} ms nicht stabil (zuletzt gesehen: ${last})`)
+            }
+            await page.waitForTimeout(stepMs)
+        }
+    }
+
+    let bellCount = await waitStable(readBellCount)
+    console.log(`[anker20] Glocke zunächst stabil bei ${bellCount} ungelesenen Hinweisen`)
+    expect(bellCount, 'die eigene Nachricht muss mindestens EINE Zeile beitragen').toBeGreaterThan(0)
+
+    await openUpdates(page)
+    await expect(roomRow(page, room.name)).toBeVisible({ timeout: 30_000 })
+
+    const olderButton = page.getByRole('button', { name: 'Ältere anzeigen' })
+    /** Paginiert erschöpfend (Falle 1) und zählt danach die sichtbaren ungelesenen Zeilen. */
+    async function countUnreadRowsExhaustively(): Promise<number> {
+        let guard = 0
+        while ((await olderButton.isVisible()) && guard < 60) {
+            await olderButton.click()
+            await page.waitForTimeout(150)
+            guard += 1
+        }
+        expect(
+            await olderButton.isVisible(),
+            'Paginierung nach 60 Seiten nicht erschöpft — die Zeilen-Zählung wäre unvollständig (angesammelte Test-Räume aufräumen, siehe Memory „zooid lokal SQLite-Bloat")',
+        ).toBe(false)
+        return page.getByRole('button', { name: new RegExp(`^${UNREAD_PREFIX}`) }).count()
+    }
+
+    // Beide Seiten können unabhängig voneinander noch nachladen (Falle 2) — im Wechsel
+    // neu messen, bis sie übereinstimmen, statt der ersten (evtl. noch wandernden)
+    // Übereinstimmung zu vertrauen.
+    let rowCount = await countUnreadRowsExhaustively()
+    let attempts = 0
+    while (rowCount !== bellCount && attempts < 8) {
+        bellCount = await waitStable(readBellCount, { stableFor: 3, stepMs: 800, maxWaitMs: 15_000 })
+        rowCount = await countUnreadRowsExhaustively()
+        attempts += 1
+    }
+
+    console.log(`[anker20] Glocke=${bellCount}, sichtbare ungelesene Zeilen=${rowCount} (${attempts} Nachmessungen)`)
+    expect(rowCount, 'Glockenzahl und tatsächlich sichtbare ungelesene Zeilen müssen exakt übereinstimmen').toBe(bellCount)
+})
+
+/**
+ * ANKER 21 — Cap-Grenzen an den realen Orten (§4.1/§4.2): `99+` an Raum- und Tab-Pille,
+ * `9+` an der Glocke, je an der Schwelle UND Schwelle+1.
+ *
+ * Bewusst KEINE echten 99/100 Ereignisse über den Relay: die Cap-ARITHMETIK selbst
+ * (`formatUnreadCount`) ist in `js/unread.test.ts` bereits erschöpfend Node-getestet
+ * (0, 1, 98, 99, 100, 4711 · dieselbe Grenze an `BELL_CAP`). Die Frage, die NUR ein
+ * Browser beantworten kann, ist eine andere: reicht das TEMPLATE den richtigen Cap an
+ * den richtigen Ort durch (99 an Raum/Tab, 9 an die Glocke)? Dafür genügt es, den
+ * Store auf den Grenzwert zu setzen — genau der Weg, den `bridge.ts` selbst beim
+ * Befüllen geht (`store.rooms = view.rooms`), keine Hintertür am Store vorbei.
+ *
+ * Der Store-Wert wird laufend neu gesetzt, nicht nur einmal: eine Hintergrund-Ableitung
+ * (`deriveUnread`, `deriveUpdates`) kann jederzeit neu emittieren und den Testwert
+ * überschreiben. **Gemessen** (voller Suite-Lauf, viele aus früheren Ankern angesammelte
+ * Räume, siehe Landmine 3): `deriveUpdates` hängt zusätzlich an `joinedRoomNames` und
+ * emittiert dadurch spürbar häufiger neu als `deriveUnread`, während Profil-Namen für
+ * all diese Räume nachladen — `expect.poll`s zurückweichendes Intervall (100 ms → 1 s)
+ * verlor das Wettrennen an der Glocke wiederholt, isoliert (1 Raum, kein Rückstand) lief
+ * derselbe Test sofort grün. Der Fix ist deshalb KEIN `expect.poll`, sondern eine enge
+ * Schreib-Lese-Schleife ohne Leerlauf: Schreiben und Lesen liegen so dicht beieinander,
+ * dass die Chance sinkt, dass ein Hintergrund-Emit genau in die Lücke fällt.
+ *
+ * **Zweiter, schärferer Fund (voller Sammellauf unter Last, dritte unabhängige
+ * Bestätigung): dieselbe enge Schleife blockierte trotzdem bis zum Testbudget.** Ein
+ * Hintergrund-Emit kann den Store kurz auf 0/`undefined` zurückwerfen — `x-if` entfernt
+ * die Pille dann VOLLSTÄNDIG aus dem DOM. `pill.textContent()` OHNE eigenes Timeout
+ * wartet in genau diesem Moment auf einen Knoten, der gerade nicht existiert, bis zum
+ * globalen Testtimeout — die äußere Schleife kommt gar nicht mehr dazu, `Date.now()`
+ * neu zu prüfen oder den Store erneut zu setzen. Der Fix: `count()` ist NICHT
+ * wartend (liefert den Snapshot des aktuellen DOM sofort) und geht dem Lesen voraus;
+ * `textContent({ timeout: 500 })` sichert zusätzlich den Fall ab, dass die Pille
+ * zwischen `count()` und dem Lesen verschwindet. Damit hängt die Laufzeit jeder
+ * Iteration nie länger als ~500 ms, unabhängig von Seed-Größe oder Systemlast.
+ */
+test('Anker 21: Cap-Grenzen — 99+ an Raum-/Tab-Pille, 9+ an der Glocke, je an der Schwelle', async ({ page }) => {
+    test.setTimeout(120_000)
+
+    const room = makeRoom()
+    await login(page)
+    await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
+
+    const setStore = (rooms: number, bellUpdates: number) =>
+        page.evaluate(
+            ({ h, rooms, bellUpdates }) => {
+                const alpine = (window as unknown as { Alpine: { store: (n: string) => Record<string, unknown> } }).Alpine
+                const store = alpine.store('unread') as { rooms: Record<string, number>; roomsTotal: number; updates: number }
+                store.rooms = { ...store.rooms, [h]: rooms }
+                store.roomsTotal = rooms
+                store.updates = bellUpdates
+            },
+            { h: room.h, rooms, bellUpdates },
+        )
+
+    const roomPill = page.getByRole('button', { name: new RegExp(room.name) }).locator('span.bg-brand-500.rounded-pill')
+    const roomsTabPill = page.getByRole('tab', { name: /^Räume/ }).locator('span.bg-brand-500.rounded-pill')
+    const bellPill = bell(page).locator('span.bg-brand-500.rounded-pill')
+
+    /**
+     * Erzwingt den Store-Wert in einer ENGEN Schleife (kein Leerlauf zwischen Schreiben
+     * und Lesen) und gibt auf, sobald `expected` erscheint ODER das Zeitbudget endet —
+     * dann schlägt die normale `expect`-Assertion mit dem zuletzt gesehenen Wert fehl.
+     *
+     * `count()` VOR dem Lesen: er wartet nie, sondern liefert den DOM-Snapshot in genau
+     * diesem Moment — ist die Pille gerade per `x-if` weg (Hintergrund-Emit hat den Wert
+     * kurz auf 0/`undefined` zurückgeworfen), wird das als leerer String gewertet und die
+     * Schleife macht sofort weiter, statt auf einen Knoten zu warten, der nicht da ist.
+     * `textContent({ timeout: 500 })` sichert zusätzlich das Rennfenster zwischen
+     * `count()` und dem eigentlichen Lesen ab — beide Male mit BEGRENZTER Wartezeit,
+     * nie mit dem impliziten globalen Timeout eines ungebremsten `textContent()`.
+     */
+    async function pinnedText(pill: ReturnType<typeof bell>, rooms: number, bellUpdates: number, expected: string, msg: string): Promise<void> {
+        const deadline = Date.now() + 20_000
+        let last = ''
+        while (Date.now() < deadline) {
+            await setStore(rooms, bellUpdates)
+            try {
+                last = (await pill.count()) > 0 ? ((await pill.textContent({ timeout: 500 })) ?? '').trim() : ''
+            } catch {
+                last = '' // zwischen count() und textContent() verschwunden — nächster Versuch
+            }
+            if (last === expected) {
+                return
+            }
+        }
+        expect(last, msg).toBe(expected)
+    }
+
+    // ── an der Schwelle: die Zahl ist bekannt, kein „+" ──────────────────────────────
+    await pinnedText(roomPill, 99, 9, '99', 'Raum-Pille an der Schwelle (99)')
+    await pinnedText(roomsTabPill, 99, 9, '99', 'Tab-Pille an der Schwelle (99)')
+    await pinnedText(bellPill, 99, 9, '9', 'Glocke an der Schwelle (9)')
+
+    // ── einen über der Schwelle: gekappt ─────────────────────────────────────────────
+    await pinnedText(roomPill, 100, 10, '99+', 'Raum-Pille über der Schwelle')
+    await pinnedText(roomsTabPill, 100, 10, '99+', 'Tab-Pille über der Schwelle')
+    await pinnedText(bellPill, 100, 10, '9+', 'Glocke über der Schwelle')
 })

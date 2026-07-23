@@ -4,7 +4,8 @@ import { useZooid, ZOOID_PORT, ZOOID_URL, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 
 /**
- * P3 — der Ungelesen-PUNKT im echten Browser.
+ * P3 — der Ungelesen-MARKER im echten Browser (seit P6 in der Raum-Zeile eine
+ * Zähler-Pille, in der Bottom-Nav weiterhin ein Punkt — siehe {@link roomDot}).
  *
  * Abgegrenzt gegen die beiden Nachbarn, damit hier nichts doppelt geprüft wird:
  *   - `js/readState.test.ts` / `js/unread.test.ts` (node) decken Merge, Prune,
@@ -78,17 +79,23 @@ function createdAt(content: string): number {
 }
 
 /**
- * Der Punkt in der Raum-Zeile von „Punktprobe".
+ * Der Ungelesen-Marker in der Raum-Zeile von „Punktprobe".
  *
- * Adressiert über die gerenderte Form (`size-2 rounded-full bg-brand-700`) statt über
- * einen Test-Haken: die Komponente rendert per `x-if`, der Punkt ist also entweder im
- * DOM oder gar nicht — `toHaveCount(0)` ist damit eine echte Abwesenheits-Aussage.
- * Der Klassen-Token `dark:bg-brand-400` bleibt bewusst außen vor (Doppelpunkt im
- * CSS-Selektor müsste escaped werden); `size-2` + `bg-brand-700` identifizieren
- * eindeutig, im Dark-Mode steht dieselbe Klasse im Attribut.
+ * **Seit P6 ist das eine ZÄHLER-PILLE, kein Punkt mehr** (§4.1 Nr. 1): die Raum-Zeile
+ * trägt `x-group::unread-badge` (`bg-brand-500` + `text-zinc-950`), der Punkt lebt nur
+ * noch dort weiter, wo eine Ziffer nicht lesbar wäre — an der Bottom-Nav (11-px-Ebene,
+ * siehe {@link navDot}). Was die vier Anker prüfen, ändert sich dadurch NICHT: sie
+ * fragen „erscheint und verschwindet der Marker, wenn er soll", und das ist unabhängig
+ * von seiner Form. Nur der Selektor zieht mit.
+ *
+ * Adressiert über die gerenderte Form statt über einen Test-Haken: die Komponente
+ * rendert per `x-if`, der Marker ist also entweder im DOM oder gar nicht —
+ * `toHaveCount(0)` ist damit eine echte Abwesenheits-Aussage. Die beiden Klassen sind
+ * theme-unabhängig (die Pille ist DECKEND, sie hat keine `dark:`-Variante) — anders als
+ * beim Punkt, wo `dark:bg-brand-400` bewusst außen vor blieb.
  */
 const roomDot = (page: Page) =>
-    page.getByRole('button', { name: new RegExp(ROOM_NAME) }).locator('span.size-2.rounded-full')
+    page.getByRole('button', { name: new RegExp(ROOM_NAME) }).locator('span.bg-brand-500.text-zinc-950')
 
 /** Der Punkt an der Ecke des Chat-Icons der Bottom-Nav (speist sich aus `any`). */
 const navDot = (page: Page) => page.getByRole('link', { name: /Chat/ }).locator('span.size-2.rounded-full')
@@ -255,9 +262,16 @@ test('Anker 1: Punkt steht beim Kaltstart aus dem Cache — Relay blockiert', as
 
     // Erst den Store, dann den Punkt — so trennt ein Fehlschlag die zwei möglichen
     // Ursachen (Ableitung kam nicht zustande vs. Ableitung stimmt, Blade rendert nicht).
+    // Seit P6 trägt der Store eine ZAHL, nicht mehr `true` (`rooms: Record<h, number>`).
+    // Geprüft wird deshalb „> 0" statt Gleichheit mit einem Literal: der Anker fragt
+    // „meldet die Ableitung Ungelesenes", nicht „genau wie viele" — die exakte Zahl
+    // hängt daran, wie viele Nachrichten der Lauf publiziert hat, und wäre gegen einen
+    // wiederverwendeten Seed eine Zeitbombe (P5-Lehre).
     await expect
-        .poll(async () => (await unreadStore(page)) as { rooms?: Record<string, boolean> } | null, { timeout: 45_000 })
-        .toMatchObject({ rooms: { [ROOM_H]: true } })
+        .poll(async () => ((await unreadStore(page)) as { rooms?: Record<string, number> } | null)?.rooms?.[ROOM_H] ?? 0, {
+            timeout: 45_000,
+        })
+        .toBeGreaterThan(0)
     console.log(`[anker1] Store nach Kaltstart: ${JSON.stringify(await unreadStore(page))}`)
 
     await expect(roomDot(page)).toBeVisible({ timeout: 45_000 })
@@ -445,8 +459,12 @@ test('Anker 4: fehlender unread-Store rendert nichts und wirft nichts', async ({
     await page.goto('/nostr-login')
     await expect(page.getByRole('button', { name: 'Andere Optionen' })).toBeVisible({ timeout: 20_000 })
     await page.waitForTimeout(2000) // Alpine-Boot + erste Store-Emits abwarten
-    // Kein Punkt IRGENDWO im Dokument (nicht nur in der Nav — die gibt es hier nicht).
+    // Kein Marker IRGENDWO im Dokument (nicht nur in der Nav — die gibt es hier nicht).
+    // Seit P6 sind das zwei Formen: der Punkt (Nav) und die Zähler-Pille (Zeile/Tab/
+    // Glocke). Beide einzeln abfragen — eine Oder-Abfrage über einen kombinierten
+    // Selektor bestünde auch dann, wenn eine der beiden Formen gar nicht mehr existiert.
     await expect(page.locator('span.size-2.rounded-full')).toHaveCount(0)
+    await expect(page.locator('span.bg-brand-500.text-zinc-950')).toHaveCount(0)
     console.log(`[anker4/Gast] Fehler bisher: ${errors.length ? errors.join(' | ') : 'keine'}`)
     expect(errors, `Gast-Ansicht warf: ${errors.join(' | ')}`).toEqual([])
 
