@@ -88,7 +88,14 @@ export const test = base.extend<object, { workerBackend: void }>({
 
             serve.kill()
         },
-        { scope: 'worker', auto: true },
+        // `timeout` statt der 30-s-Vorgabe: das ERSTE Aufsetzen einer zooid-Instanz
+        // (Räume anlegen, 2×60 Nachrichten seeden, NIP-86) dauert seriell gemessen
+        // 17-18 s je Relay — sechs Worker parallel reißen die Frist. Der Fehlschlag
+        // sieht dann aus wie ein Testfehler, ist aber keiner: Playwright meldet
+        // `Fixture "workerBackend" timeout … during setup` und lässt die Tests des
+        // Workers mit **0 ms** fallen. Genau das Rauschen, das einen Anker irgendwann
+        // weggeklickt statt gelesen bekommt (gemessen 2026-07-23: 10 Tests à 0 ms).
+        { scope: 'worker', auto: true, timeout: 120_000 },
     ],
 
     // baseURL je Worker auf dessen serve-Port (überschreibt use.baseURL aus der Config).

@@ -215,7 +215,7 @@ test('P4c: Antragsraum fällt aus „Andere Räume", bleibt aber als Mitglied er
     await page.goto('/spaces')
 
     // … und er taucht in der eigenen Sektion auf: kategorisiert, nicht versteckt.
-    await expect(page.getByText('Projektunterstützung')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Projektunterstützung', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
 
@@ -243,7 +243,7 @@ test('P4c: fremder Antragsraum erscheint beim Admin (Vorstand) unter „Projektu
     // Admin (Relay-Owner = Vorstandsrolle): fremder Antragsraum, kategorisiert sichtbar.
     await loginAdmin(page)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Projektunterstützung')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Projektunterstützung', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
 
@@ -274,7 +274,7 @@ test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals ·
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
 
     // Der Einstieg: ein Link IM Sektionskopf — die Sektion selbst bleibt stehen.
-    await expect(page.getByText('Projektunterstützung')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Projektunterstützung', { exact: true })).toBeVisible({ timeout: 15_000 })
     const allShow = page.getByRole('button', { name: 'Alle anzeigen' })
     await expect(allShow).toBeVisible()
     await expect(page.getByText(propA, { exact: true })).toBeVisible()
@@ -317,7 +317,7 @@ test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals ·
     await page.getByRole('button', { name: 'Räume anzeigen' }).first().click()
     await expect(page).not.toHaveURL(/rt=/)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Projektunterstützung')).toBeVisible()
+    await expect(page.getByText('Projektunterstützung', { exact: true })).toBeVisible()
 })
 
 /** Deep-Link: `?rt=proposals` stellt den Fokus beim Laden her (Kaltstart). */
