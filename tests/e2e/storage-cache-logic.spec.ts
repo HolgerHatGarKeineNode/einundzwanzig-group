@@ -18,18 +18,28 @@ const NOW = 1_700_000_000
 const DAY = 86_400
 
 test.describe('shouldPersistEvent', () => {
-    test('cacht Chat + Control-Plane + Deletes', () => {
+    test('cacht Chat + Control-Plane + Deletes + Thread-Kommentare', () => {
         // Chat (der 13-s-Treiber) + kind 5 (sonst reappearen gelöschte Nachrichten).
-        // Vollständige PERSIST_KINDS-Whitelist (14, inkl. 9005 ROOM_DELETE_EVENT) —
+        // Vollständige PERSIST_KINDS-Whitelist (15, inkl. 9005 ROOM_DELETE_EVENT) —
         // dieser Test ist bis P1 der EINZIGE Wächter.
-        for (const kind of [9, 5, 9005, 0, 3, 10000, 10002, 30078, 39000, 39001, 39002, 13534, 1068, 9041]) {
+        //
+        // kind 1111 (NIP-22-Thread-Kommentar) ist mit P3 von der Verwerf- auf die
+        // Cache-Liste GEWECHSELT und stand deshalb bis eben in beiden Tests: ohne ihn
+        // überlebt kein Thread-Ungelesen-Marker den Kaltstart, weil die Ableitung
+        // dieselbe (dann leere) `repository` liest. Bedingung dafür war eine Kappung —
+        // Persistenz ohne Deckel wäre der unbegrenzt wachsende Store, vor dem §4.2
+        // gewarnt hat; sie steht in `messagesToPrune` (`COMMENT_CAP_TOTAL`) und ist in
+        // `js/storagePersistKinds.test.ts` node-getestet.
+        for (const kind of [9, 1111, 5, 9005, 0, 3, 10000, 10002, 30078, 39000, 39001, 39002, 13534, 1068, 9041]) {
             expect(shouldPersistEvent(ev(kind)), `kind ${kind} sollte gecacht werden`).toBe(true)
         }
     })
 
-    test('verwirft Ephemeral/AUTH/Reaktionen/Zaps/Kommentare', () => {
-        // §4.2: kein `#h` / sekundär / laden lazy nach dem Paint.
-        for (const kind of [7, 9735, 1111, 22242, 20000, 24133]) {
+    test('verwirft Ephemeral/AUTH/Reaktionen/Zaps', () => {
+        // §4.2: kein `#h` / sekundär / laden lazy nach dem Paint. kind 1111 steht hier
+        // seit P3 NICHT mehr (siehe oben) — Lotus' kind-10 (In-Chat-Thread) dagegen
+        // schon: den lesen wir nur für die Interop und schreiben ihn nie.
+        for (const kind of [7, 9735, 10, 22242, 20000, 24133]) {
             expect(shouldPersistEvent(ev(kind)), `kind ${kind} sollte NICHT gecacht werden`).toBe(false)
         }
     })

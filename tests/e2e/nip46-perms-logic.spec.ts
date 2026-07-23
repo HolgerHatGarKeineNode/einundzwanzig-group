@@ -23,6 +23,10 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
             0, 5, 7, 9, 1018, 1068, 1111, 1984,
             9000, 9001, 9002, 9005, 9007, 9008, 9021, 9022, 9041, 9734,
             10009, 22242, 27235, 28934, 28936,
+            // 30078 (NIP-78 App-Data) = Lesestand. Publiziert wird er erst in P6 —
+            // die Berechtigung muss trotzdem heute schon drinstehen, weil welshman die
+            // Rechte einer bestehenden Amber-Verbindung nie nachverhandelt.
+            30078,
         ]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)

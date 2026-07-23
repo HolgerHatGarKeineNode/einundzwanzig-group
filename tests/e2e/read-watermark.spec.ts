@@ -9,9 +9,9 @@ const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
 /**
  * Regressionsanker für den `atBottom`-Gate in `RoomChat.destroy()` (`js/bridge.ts`):
- * `markRead()` schreibt das Lese-Wasserzeichen (`room:lastread:<url>:<h>`, localStorage,
- * siehe `js/feeds.ts`) und darf beim Verlassen des Raums NUR quittieren, wenn der Nutzer
- * am Boden stand. Vorher war `destroy()` der einzige UNBEDINGTE Aufrufer von `markRead()`
+ * `markRead()` schreibt das Lese-Wasserzeichen und darf beim Verlassen des Raums NUR
+ * quittieren, wenn der Nutzer am Boden stand. Vorher war `destroy()` der einzige
+ * UNBEDINGTE Aufrufer von `markRead()`
  * (`onScroll`/`scrollToBottom` waren schon geguardet) — wer im Verlauf hochgescrollt liest,
  * während neue Nachrichten einlaufen, und dann wegnavigiert, hätte sie stillschweigend als
  * gelesen markiert. Das Wasserzeichen ist der einzige Zustand, der die Navigation überlebt
@@ -40,6 +40,21 @@ function publishToScroll(content: string): void {
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=scroll', '-c', content, ZOOID_WS])
 }
 
+/**
+ * P3 hat den Speicher UND die Bedeutung des Wasserzeichens gewechselt — dieser Anker
+ * musste mitwandern, das geprüfte Verhalten ist unverändert:
+ *
+ *   vorher: `room:lastread:<url>:<h>` in localStorage, Wert = `created_at` der jüngsten
+ *           gelesenen Nachricht (AUTORGESETZT, NIP-01 → manipulierbar);
+ *   jetzt:  Zeile `r:<url>|<h>` im Objectstore `readstate` der IndexedDB
+ *           `einundzwanzig-readstate-<pubkey>`, Wert = WALL-CLOCK dieses Geräts
+ *           (`js/readState.ts`).
+ *
+ * Deshalb prüft der Kontrollfall unten nicht mehr auf Gleichheit mit `created_at`,
+ * sondern auf „nicht älter als die Nachricht, die gerade gelesen wurde".
+ */
+const FLUSH_DELAY_MS = 2000 // readState.ts schreibt gebündelt, höchstens alle 2 s
+
 /** Liest `created_at` einer per Content-Marker eindeutigen Nachricht direkt vom Relay. */
 function findCreatedAt(marker: string): number {
     const out = execFileSync(NAK, ['req', '-k', '9', '-t', 'h=scroll', '--auth', '--sec', ADMIN, ZOOID_WS]).toString().trim()
@@ -54,9 +69,40 @@ function findCreatedAt(marker: string): number {
     return found.created_at
 }
 
-/** Liest das Lese-Wasserzeichen des „scroll"-Raums direkt aus localStorage (kein Alpine-Zugriff). */
+/**
+ * Liest das EFFEKTIVE Wasserzeichen des „scroll"-Raums direkt aus der Lesestand-DB
+ * (kein Alpine-Zugriff, kein App-Code). Effektiv heißt `max(all, r:<url>|scroll)` — wie
+ * `roomWatermark()`: ein globales „alles gelesen" dominiert den Einzelraum.
+ *
+ * Fehlt DB oder Objectstore (Gast, noch nichts geschrieben), ist die Antwort 0 statt
+ * eines Fehlers — `indexedDB.open` ohne Version LEGT eine leere DB an, wenn keine da
+ * ist, und deren fehlender Store würde die Transaktion sonst werfen.
+ */
 async function readWatermark(page: Page): Promise<number> {
-    return page.evaluate((key) => Number(localStorage.getItem(key) ?? '0'), `room:lastread:${ZOOID_URL}:scroll`)
+    return page.evaluate(async (url) => {
+        const raw = localStorage.getItem('pubkey')
+        if (!raw || raw === 'undefined' || raw === 'null') {
+            return 0
+        }
+        const pk = JSON.parse(raw) as string
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const req = indexedDB.open('einundzwanzig-readstate-' + pk)
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+        })
+        if (!db.objectStoreNames.contains('readstate')) {
+            db.close()
+            return 0
+        }
+        const rows = await new Promise<{ key: string; ts: number }[]>((resolve, reject) => {
+            const req = db.transaction('readstate', 'readonly').objectStore('readstate').getAll()
+            req.onsuccess = () => resolve(req.result as { key: string; ts: number }[])
+            req.onerror = () => reject(req.error)
+        })
+        db.close()
+        const byKey = new Map(rows.map((row) => [row.key, row.ts]))
+        return Math.max(byKey.get('all') ?? 0, byKey.get(`r:${url}|scroll`) ?? 0)
+    }, ZOOID_URL)
 }
 
 /**
@@ -81,10 +127,16 @@ test('Wasserzeichen: am Boden bleiben + wegnavigieren quittiert bis zur jüngste
     await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(page).toHaveURL(/\/spaces$/, { timeout: 15_000 })
 
+    // Der Schreibpfad bündelt (höchstens ein IDB-Write alle 2 s) → pollen statt raten.
+    await expect
+        .poll(() => readWatermark(page), { timeout: 15_000 })
+        .toBeGreaterThan(before)
+
     const after = await readWatermark(page)
     console.log(`[read-watermark/Kontrollfall] before=${before} after=${after} createdAt(${marker})=${createdAt}`)
-    expect(after).toBeGreaterThan(before)
-    expect(after).toBe(createdAt)
+    // Wall-Clock, nicht `created_at`: das Quittieren liegt zeitlich NACH der Nachricht,
+    // die dabei gelesen wurde — gleich sein können die beiden nur zufällig.
+    expect(after).toBeGreaterThanOrEqual(createdAt)
 })
 
 /**
@@ -129,6 +181,11 @@ test('Wasserzeichen: hochgescrollt + wegnavigieren lässt es unverändert', asyn
 
     await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(page).toHaveURL(/\/spaces$/, { timeout: 15_000 })
+
+    // „Es passiert nichts" lässt sich nicht erpollen — hier muss gewartet werden, und
+    // zwar länger als das Schreib-Fenster des Lesestands. Sonst prüfte der Test bloß,
+    // dass der Write noch nicht durch ist, und wäre auch bei kaputtem Gate grün.
+    await page.waitForTimeout(FLUSH_DELAY_MS * 2)
 
     const after = await readWatermark(page)
     console.log(`[read-watermark/Fall2] before=${before} after=${after} (muss gleich sein)`)

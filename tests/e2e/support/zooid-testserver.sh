@@ -59,6 +59,8 @@ seeded_and_clean() {
     timeout 8 nak req -k 39002 -d thread --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
     # Meetup-Testräume: fehlt einer (Relay von einem Seed-Skript ohne Meetup-Räume), frisch aufsetzen.
     timeout 8 nak req -k 39000 -d meethamburg --auth --sec "$USER" "$R" 2>/dev/null | grep -q 'meetup-hamburg-e2e' || return 1
+    # P3-punkt-Raum: fehlt seine Mitgliedschaft (Relay von einem Seed-Skript ohne punkt-Raum), frisch aufsetzen.
+    timeout 8 nak req -k 39002 -d punkt --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
     local n
     n=$(timeout 8 nak req -k 9 -t h=welcome --auth --sec "$USER" "$R" 2>/dev/null | grep -c '"kind":9')
     [ "${n:-999}" -le "$WELCOME_SEED" ]
@@ -123,6 +125,13 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=poll -t name=Umfragen -t about=C5-P
 # Dedizierter Schreib-Raum für die C6b-Tests (Thread-Ansicht/NIP-22-Kommentare):
 # schreiben Quote-Only-Nachrichten + kind-1111-Kommentare und dürfen „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=thread -t name=Threads -t about=C6b-Thread-Tests "$R" >/dev/null 2>&1 || true
+# Dedizierter Raum für die P3-Tests des Ungelesen-PUNKTES (unread-dot.spec.ts): die
+# publizieren fremde Nachrichten, um den Punkt anzuschalten, und dürfen weder „welcome"
+# (Seed-Guard, s.o.) noch „scroll" (read-watermark.spec.ts) aufblähen. Der Name ist
+# bewusst „Punktprobe" und nicht „Ungelesen": ein Raumname, der „ungelesen" enthält,
+# kollidierte mit dem sr-only-Text des Punktes („, ungelesene Nachrichten") in jedem
+# substring-basierten Text-Locator.
+nak event --auth --sec "$ADMIN" -k 9007 -t h=punkt -t name=Punktprobe -t about=P3-Ungelesen-Punkt "$R" >/dev/null 2>&1 || true
 # Meetup-Testräume (E1/E2-Länderfilter): 3 Räume in 2 Ländern, undiskutiert/nicht
 # beigetreten (bleiben in „otherRooms" → entdeckbar über die „Meetup-Räume
 # entdecken"-Karte, wie die echten Prod-Meetups). Der `t`-Marker + `i`-Bindung +
@@ -184,6 +193,7 @@ nak event --auth --sec "$USER" -k 9021 -t h=mod "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=mention "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=poll "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=thread "$R" >/dev/null 2>&1 || true
+nak event --auth --sec "$USER" -k 9021 -t h=punkt "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=edit "$R" >/dev/null 2>&1 || true
 
 # Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
@@ -201,6 +211,20 @@ if [ "$(nak req -k 9 -t h=scroll --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -
     NOW=$(date +%s)
     for i in $(seq 1 60); do
         nak event --auth --sec "$ADMIN" -k 9 -t h=scroll --ts $((NOW - 60 + i)) -c "Zeile $i" "$R" >/dev/null 2>&1 || true
+    done
+fi
+
+# „punkt": 60 Fremd-Nachrichten mit VERGANGENEN, gestaffelten Zeitstempeln. Zwei Zwecke:
+#   1) Überlauf — die Gegenprobe „hochgescrollt verlassen ⇒ Punkt bleibt" braucht einen
+#      Container, der wirklich scrollt (gleiche Technik wie „scroll").
+#   2) Sie dürfen den Punkt NICHT selbst anschalten: `initReadState()` setzt für einen
+#      frischen Account `all = jetzt`, alles Ältere gilt damit als gelesen. Der Punkt
+#      entsteht im Test ausschließlich durch eine NACH dem Login publizierte Nachricht —
+#      sonst prüfte der Test einen Zustand, den der Seed erzeugt hat, nicht die App.
+if [ "$(nak req -k 9 -t h=punkt --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -c '"kind":9')" -eq 0 ]; then
+    NOW=$(date +%s)
+    for i in $(seq 1 60); do
+        nak event --auth --sec "$ADMIN" -k 9 -t h=punkt --ts $((NOW - 3600 - 60 + i)) -c "Punkt Zeile $i" "$R" >/dev/null 2>&1 || true
     done
 fi
 
