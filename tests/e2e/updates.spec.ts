@@ -61,6 +61,33 @@ type RelayEvent = { id: string; pubkey: string; kind: number; content: string; t
 const rnd = (): number => Math.floor(Math.random() * 1e9)
 
 /**
+ * `nak` mit Wiederholung — gegen ein Umgebungsverhalten, nicht gegen einen Produktfehler.
+ *
+ * Die worker-eigene zooid-Instanz wird vom `workerBackend`-Fixture verwaltet und bei
+ * Bedarf neu aufgesetzt (`fuser -k` + Neustart). Zwischen Kill und Bind liegt ein
+ * Fenster von Sekundenbruchteilen; fällt ein Testkörper hinein, endet ein einzelner
+ * nak-Aufruf in `connection refused` und reißt den ganzen Test — gemessen 2026-07-23:
+ * Anker 12 scheiterte nach 170 ms an `ws://localhost:3340`, der Relay war 30 s später
+ * wieder da (Start laut Log 17:06:54).
+ *
+ * Der Retry verdeckt nichts: schlägt es dreimal fehl, fliegt der ursprüngliche Fehler
+ * mit voller Meldung. Er fängt nur die Transienz, die weder Test noch Produkt zu
+ * verantworten haben.
+ */
+function nak(args: readonly string[], attempts = 3): string {
+    let last: unknown
+    for (let i = 0; i < attempts; i++) {
+        try {
+            return execFileSync(NAK, [...args]).toString()
+        } catch (error) {
+            last = error
+            execFileSync('sleep', ['1'])
+        }
+    }
+    throw last
+}
+
+/**
  * Frischer Test-Raum, dem der Test-User beitritt — pro Test neu (siehe Kopf).
  * `9007` legt den Raum an, `9002` benennt ihn, `9021` ist der Beitritt des Users
  * (Relay antwortet mit der signierten 39002 = das, was die App als „beigetreten" liest).
@@ -69,15 +96,15 @@ function makeRoom(): { h: string; name: string } {
     const id = rnd()
     const h = `upd${id}`
     const name = `Meldeprobe-${id}`
-    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9007', '-t', `h=${h}`, ZOOID_WS])
-    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, ZOOID_WS])
-    execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
+    nak(['event', '--auth', '--sec', ADMIN, '-k', '9007', '-t', `h=${h}`, ZOOID_WS])
+    nak(['event', '--auth', '--sec', ADMIN, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, ZOOID_WS])
+    nak(['event', '--auth', '--sec', NSEC, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
     return { h, name }
 }
 
 /** Fremde kind-9-Nachricht in `h`. Gibt die Event-id zurück (Thread-Wurzel). */
 function publishMessage(h: string, content: string): string {
-    const out = execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, '-c', content, ZOOID_WS]).toString()
+    const out = nak(['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, '-c', content, ZOOID_WS])
     return findEvent(h, 9, (e) => e.content === content)?.id ?? out.trim()
 }
 
@@ -88,7 +115,7 @@ function publishMessage(h: string, content: string): string {
  * Wurzel noch nicht im Repository liegt.
  */
 function publishComment(h: string, rootId: string, content: string): void {
-    execFileSync(NAK, [
+    nak([
         'event', '--auth', '--sec', ADMIN, '-k', '1111',
         '-t', `E=${rootId}`, '-t', `e=${rootId}`, '-t', 'k=9', '-t', `h=${h}`,
         '-c', content, ZOOID_WS,
@@ -97,8 +124,7 @@ function publishComment(h: string, rootId: string, content: string): void {
 
 /** Erstes Event am Relay, das `pred` erfüllt. */
 function findEvent(h: string, kind: number, pred: (e: RelayEvent) => boolean): RelayEvent | undefined {
-    return execFileSync(NAK, ['req', '-k', String(kind), '-t', `h=${h}`, '--auth', '--sec', ADMIN, ZOOID_WS])
-        .toString()
+    return nak(['req', '-k', String(kind), '-t', `h=${h}`, '--auth', '--sec', ADMIN, ZOOID_WS])
         .trim()
         .split('\n')
         .filter(Boolean)
@@ -1438,7 +1464,7 @@ test('Anker 16: Admin-Löschung (9005) räumt die Zeile im offenen /updates ab',
     ).toBeVisible({ timeout: 45_000 })
 
     // Admin löscht live: kind 9005 mit `h` (Raum) + `e` (Ziel-Event).
-    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9005', '-t', `h=${room.h}`, '-t', `e=${messageId}`, ZOOID_WS])
+    nak(['event', '--auth', '--sec', ADMIN, '-k', '9005', '-t', `h=${room.h}`, '-t', `e=${messageId}`, ZOOID_WS])
 
     // Der volle Text muss verschwinden — ohne die Live-Behandlung bliebe er stehen.
     await expect(page.getByText(marker, { exact: false }), 'gelöschter Inhalt steht weiter auf dem offenen Screen').toHaveCount(0, {
@@ -1593,22 +1619,27 @@ test('Anker 17: Fokus wandert nach „Alles", „Rückgängig" und „Alle anzei
  * selbst erfunden hat.
  */
 test('Anker 18: „Rückgängig" nach Ablauf der Frist stellt nichts wieder her', async ({ page }) => {
-    test.setTimeout(150_000)
+    // 240 s statt 150: dieser Anker trägt als EINZIGER eine echte, verstreichende Frist
+    // (11,5 s) UND davor den vollen Listenaufbau. Unter Volllast summieren sich beide.
+    test.setTimeout(240_000)
 
     const room = makeRoom()
     await login(page)
-    await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
+    await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 45_000 })
     const marker = `Frist-${rnd()}`
     publishMessage(room.h, marker)
 
     await openUpdates(page)
     const row = roomRow(page, room.name)
-    await expect(row).toBeVisible({ timeout: 30_000 })
+    // 45 s wie in Anker 3 und 14: 30 s sind in diesem Harness unter Volllast messbar zu
+    // knapp für den ersten Listenaufbau — Anker 3 ist genau an dieser Grenze gerissen.
+    // Die geprüfte Zusage ändert sich dadurch nicht, nur die Geduld beim Vorbereiten.
+    await expect(row).toBeVisible({ timeout: 45_000 })
     expect((await row.getAttribute('aria-label')) ?? '', 'Ausgangslage: ungelesen').toContain(UNREAD_PREFIX)
 
     await page.getByRole('button', { name: 'Alles als gelesen markieren' }).click()
     await expect
-        .poll(async () => (await roomRow(page, room.name).getAttribute('aria-label')) ?? '', { timeout: 25_000 })
+        .poll(async () => (await roomRow(page, room.name).getAttribute('aria-label')) ?? '', { timeout: 45_000 })
         .not.toContain(UNREAD_PREFIX)
 
     // **Das Zielszenario herstellen, nicht auf den Normalfall hoffen.** Im Normalfall
