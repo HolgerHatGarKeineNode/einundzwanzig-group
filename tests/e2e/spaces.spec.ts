@@ -246,3 +246,94 @@ test('P4c: fremder Antragsraum erscheint beim Admin (Vorstand) unter „Projektu
     await expect(page.getByText('Projektunterstützung')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
+
+/**
+ * P5 — Projektunterstützung ist filterbar wie die Meetups: aus der Sektion führt
+ * ein schlichter Textlink in einen eigenen Fokus-Modus (`?rt=proposals`), der
+ * Suche kennt, aber KEINEN Land-Filter (Antragsräume tragen kein Land).
+ *
+ * Bewusst KEINE Entdecken-Karte: auf Prod existieren zwei Antragsräume (Messung
+ * M2), eine Karte versteckte zwei Zeilen hinter einem Klick.
+ *
+ * Der Test läuft als Admin (Vorstand), weil der nach `_proposalPool()` auch
+ * FREMDE Antragsräume sieht — so genügt der 39000-Seed ohne Mitgliedschaft.
+ */
+test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals · kein Land-Filter)', async ({ page }) => {
+    const rnd = Math.floor(Math.random() * 1e9)
+    const stdName = `Std-${rnd}`
+    const propA = `PropA-${rnd}`
+    const propB = `PropB-${rnd}`
+    const meetupName = `Meet-${rnd}`
+
+    createRoomNak(`std${rnd}`, stdName)
+    createRoomNak(`p${rnd.toString(16).padStart(12, '0')}`, propA, ['-t', 't=project-support', '-t', `i=proposal:${rnd}`])
+    createRoomNak(`q${rnd.toString(16).padStart(12, '0')}`, propB, ['-t', 't=project-support', '-t', `i=proposal:${rnd + 1}`])
+    createRoomNak(`m${rnd}`, meetupName, ['-t', 't=meetup', '-t', `i=meetup:${rnd}`, '-t', `meetup_slug=meet-${rnd}`])
+
+    await loginAdmin(page)
+    await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Der Einstieg: ein Link IM Sektionskopf — die Sektion selbst bleibt stehen.
+    await expect(page.getByText('Projektunterstützung')).toBeVisible({ timeout: 15_000 })
+    const allShow = page.getByRole('button', { name: 'Alle anzeigen' })
+    await expect(allShow).toBeVisible()
+    await expect(page.getByText(propA, { exact: true })).toBeVisible()
+
+    // Filterwechsel darf KEINEN History-Eintrag erzeugen (nur replaceState) —
+    // sonst bräuchte Zurück je Filterklick einen Schritt (back-navigation.spec.ts).
+    const historyBefore = await page.evaluate(() => history.length)
+    await allShow.click()
+    await expect(page).toHaveURL(/[?&]rt=proposals\b/, { timeout: 15_000 })
+    expect(await page.evaluate(() => history.length)).toBe(historyBefore)
+
+    // Im Fokus: nur noch Antragsräume, alles andere ist weg.
+    await expect(page.getByText(propA, { exact: true })).toBeVisible()
+    await expect(page.getByText(propB, { exact: true })).toBeVisible()
+    await expect(page.getByText(stdName, { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Andere Räume')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /Meetup-Räume entdecken/ })).toHaveCount(0)
+
+    // Kein Land-Filter (Antragsräume tragen kein Land) — die Suche dagegen schon,
+    // mit eigenem Platzhalter (Alpine-Bind, nicht der Meetup-Text).
+    await expect(page.getByRole('button', { name: 'Land' })).toBeHidden()
+    const search = page.getByPlaceholder('Antragsraum suchen…')
+    await expect(search).toBeVisible()
+
+    // Suche filtert die Fokus-Liste; der Ergebnis-Zähler folgt. Die Query trägt das
+    // `rnd` des Laufs: der zooid-Seed wird zwischen Läufen wiederverwendet, eine
+    // Teil-Query wie „PropA" träfe auch die Antragsräume FRÜHERER Läufe (gemessen:
+    // Zähler stand dann auf 3 bzw. 4). Sie ist zugleich KÜRZER als der Raumname,
+    // damit der Filter-Chip nicht denselben Text trägt wie die Raumzeile.
+    await search.fill(`A-${rnd}`)
+    await expect(page.getByText(propB, { exact: true })).toHaveCount(0)
+    await expect(page.getByText(propA, { exact: true })).toBeVisible()
+    await expect(page.getByText('1 Räume', { exact: true })).toBeVisible()
+
+    // Leerer Treffer → eigener Leerzustand, nicht die Meetup-Formulierung.
+    await search.fill(`kein-treffer-${rnd}`)
+    await expect(page.getByText('Keine Antragsräume passen zu deiner Suche.')).toBeVisible()
+
+    // Rückweg wie bei den Meetups → Standardliste, Filter leer, `rt` aus der URL.
+    await page.getByRole('button', { name: 'Räume anzeigen' }).first().click()
+    await expect(page).not.toHaveURL(/rt=/)
+    await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Projektunterstützung')).toBeVisible()
+})
+
+/** Deep-Link: `?rt=proposals` stellt den Fokus beim Laden her (Kaltstart). */
+test('P5: ?rt=proposals öffnet den Antrags-Fokus direkt', async ({ page }) => {
+    const rnd = Math.floor(Math.random() * 1e9)
+    const stdName = `Std-${rnd}`
+    const propName = `Prop-${rnd}`
+
+    createRoomNak(`std${rnd}`, stdName)
+    createRoomNak(`p${rnd.toString(16).padStart(12, '0')}`, propName, ['-t', 't=project-support'])
+
+    await loginAdmin(page)
+    await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    await page.goto('/spaces?rt=proposals')
+    await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(stdName, { exact: true })).toHaveCount(0)
+    await expect(page.getByPlaceholder('Antragsraum suchen…')).toBeVisible()
+})
