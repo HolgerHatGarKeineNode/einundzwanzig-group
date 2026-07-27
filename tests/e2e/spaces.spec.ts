@@ -35,6 +35,19 @@ async function loginAdmin(page: Page): Promise<void> {
 }
 
 /**
+ * Die Anlegen-Zeile („Neuen Raum anlegen", `x-if="isAdmin"`, seit Package-Commit
+ * 0c31910 ersetzt sie den freistehenden „+ Raum"-Knopf). EIN Locator für BEIDE
+ * Seiten des Gates (P4 admin-positiv, P4-Gating non-admin-negativ) — bewusst, nicht
+ * aus Bequemlichkeit: würde die Zeile umbenannt, matcht der Locator nirgends mehr,
+ * und die NEGATIV-Probe (`toHaveCount(0)`) wäre dann für den falschen Grund grün.
+ * Weil dieselbe Konstante auch in der POSITIV-Probe steht (`toHaveCount(1)` unter
+ * Adminrechten), reißt eine solche Umbenennung dort zuerst sichtbar — die
+ * Gating-Aussage ist also nur soweit vertrauenswürdig, wie ihr Gegenstück im selben
+ * Lauf beweist, dass der Locator überhaupt noch etwas trifft.
+ */
+const createRoomRow = (page: Page) => page.getByRole('button', { name: 'Neuen Raum anlegen', exact: true })
+
+/**
  * Wartet, bis die Wanduhr eine ganze Sekunde weitergerückt ist.
  *
  * Das Lesestand-Wasserzeichen und `created_at` rechnen beide in Unix-SEKUNDEN,
@@ -105,9 +118,12 @@ test('P4: Admin legt einen Raum an, bearbeitet und löscht ihn', async ({ page }
     const renamed = `Edit-${Math.floor(Math.random() * 1e9)}`
     await loginAdmin(page)
 
-    // „+ Raum" erscheint für den Admin (isAdmin via NIP-86 SupportedMethods).
-    const addBtn = page.getByRole('button', { name: 'Raum', exact: true })
-    await expect(addBtn).toBeVisible({ timeout: 15_000 })
+    // „Neuen Raum anlegen" erscheint für den Admin (isAdmin via NIP-86 SupportedMethods).
+    // `toHaveCount(1)` ZUSÄTZLICH zu `toBeVisible`: das ist die Positiv-Gegenprobe, an
+    // der die Gating-Negativprobe unten (P4: normaler User) hängt — siehe createRoomRow.
+    const addBtn = createRoomRow(page)
+    await expect(addBtn).toHaveCount(1, { timeout: 15_000 })
+    await expect(addBtn).toBeVisible()
     await addBtn.click()
 
     // Anlegen: Name → Speichern (9007 → 9002 → 9021). Raum erscheint via Live-Sub.
@@ -134,12 +150,22 @@ test('P4: Admin legt einen Raum an, bearbeitet und löscht ihn', async ({ page }
     await expect(page.getByText(renamed, { exact: true })).toHaveCount(0, { timeout: 15_000 })
 })
 
-/** P4 — ein normaler User sieht KEINE Raum-Verwaltung (Gating). */
+/**
+ * P4 — ein normaler User sieht KEINE Raum-Verwaltung (Gating).
+ *
+ * `toHaveCount(0)`, nicht `toBeHidden()`: `toBeHidden()` ist für einen Locator, der
+ * NICHTS trifft, trivial erfüllt — verschwindet die Anlegen-Zeile aus der Seite
+ * (Umbenennung, Umbau), würde die Assertion weiterhin anstandslos grün bleiben und
+ * exakt NICHTS mehr über das Admin-Gate aussagen. `toHaveCount(0)` behauptet dasselbe
+ * inhaltlich, ist aber an `createRoomRow` gekoppelt — deren POSITIV-Probe (P4 admin,
+ * `toHaveCount(1)`) reißt zuerst, sobald der Locator nichts mehr trifft, und macht
+ * eine solche stille Grün-Falle im selben Lauf sichtbar.
+ */
 test('P4: normaler User sieht keine Raum-Verwaltung', async ({ page }) => {
     await login(page)
     // Räume geladen (ein bekannter Seed-Raum ist da).
     await expect(page.getByText('Willkommen')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByRole('button', { name: 'Raum', exact: true })).toBeHidden()
+    await expect(createRoomRow(page)).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Raum verwalten' })).toHaveCount(0)
 })
 
@@ -147,6 +173,29 @@ test('P4: normaler User sieht keine Raum-Verwaltung', async ({ page }) => {
  * P4b (Raum-Mitglieder, NIP-29 9000/9001) — der Admin öffnet die Mitgliederliste
  * eines Raums, fügt einen Pubkey per npub hinzu (allowpubkey + kind 9000 → 39002)
  * und entfernt ihn wieder (kind 9001). Self-contained (Wegwerf-Raum + -Pubkey).
+ */
+/**
+ * Bekannter Relay-Bug, hier NUR umschifft (nicht gepatcht — zooid ist ein fremdes
+ * Repo, `/home/user/Code/zooid`, außerhalb jeder Zuständigkeit dieser Suite):
+ *
+ * `zooid/events.go:165` sortiert Events ausschließlich mit `OrderBy("created_at
+ * DESC")` — OHNE Tie-Breaker. Landen Hinzufügen (9000) und Entfernen (9001)
+ * innerhalb DERSELBEN Unix-SEKUNDE (NIP-01-Auflösung), ist die Reihenfolge zweier
+ * Zeilen mit gleichem `created_at` laut SQL-Semantik UNDEFINIERT. `GetMembers()`
+ * (`zooid/groups.go:242`) baut die Mitgliedschaft aber genau aus dieser Reihenfolge
+ * per Replay auf (`Reversed(QueryEvents(...))`, add setzt, remove löscht) — landet
+ * das 9001 bei einem Sekunden-Gleichstand VOR dem 9000 in der (Tie-bedingt
+ * beliebigen) Sortierung, gewinnt scheinbar der Add, und die 39002 bleibt für immer
+ * beim entfernten Pubkey stehen. Kein Nachziehen, kein Timeout hilft dagegen — der
+ * Zustand ist nicht „noch nicht da", sondern dauerhaft falsch.
+ *
+ * Belegt (fünf Vollläufe, `execFileSync`-Instrumentierung, seither entfernt):
+ * IMMER wenn 9000 und 9001 dasselbe `created_at` trugen, blieb die 39002 falsch —
+ * IMMER wenn sie eine Sekunde auseinanderlagen (No-Op-Wartezeit durch die
+ * UI-Interaktion selbst), stimmte sie. Deshalb hier `awaitNextSecond()` zwischen
+ * Hinzufügen und Entfernen — derselbe Mechanismus wie in `unread-dot.spec.ts` für
+ * das Wasserzeichen, hier gegen denselben Sekunden-Gleichstand in einer anderen
+ * Ableitung. Gemeldet an den zooid-Maintainer statt gepatcht (Boundary).
  */
 test('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ page }) => {
     const h = `mem${Math.floor(Math.random() * 1e9)}`
@@ -172,6 +221,11 @@ test('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ pa
     await modal.getByRole('button', { name: 'Hinzufügen' }).click()
     await expect(modal.getByRole('button', { name: 'Entfernen' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(inRoom, { timeout: 15_000 }).toBe(true)
+
+    // Sekundengrenze abwarten, BEVOR entfernt wird — siehe Kommentar oben. Ohne das
+    // landen Add und Remove manchmal (gemessen: ca. jeder zweite Lauf unter Last)
+    // im selben `created_at`, und der zooid-Sortier-Bug lässt die 39002 falsch stehen.
+    await awaitNextSecond(page)
 
     // Entfernen (kind 9001) → relay-seitig aus der 39002 raus.
     await modal.getByRole('button', { name: 'Entfernen' }).click()
@@ -344,7 +398,16 @@ test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals ·
     await search.fill(`A-${rnd}`)
     await expect(page.getByText(propB, { exact: true })).toHaveCount(0)
     await expect(page.getByText(propA, { exact: true })).toBeVisible()
-    await expect(page.getByText('1 Räume', { exact: true })).toBeVisible()
+    // Grammatikalisch ist „1 Räume" falsch (die Zeile hat — anders als die
+    // Antragsraum-Zeile — noch keine Singular/Plural-Verzweigung); der Anker
+    // toleriert schon jetzt beide Formen, damit eine spätere Korrektur der
+    // Beschriftung ihn nicht bricht (an den Design-Lead gemeldet, nicht selbst
+    // gepatcht — Produktionsdatei). Wortgrenzen statt `^…$`: die Zahl UND „Räume"
+    // stehen in getrennten Textknoten (Zahl in einem `x-text`-Kind-Span, Wort
+    // daneben als Blade-Literal) — Playwrights Whitespace-Normalisierung lässt an
+    // genau dieser Knotengrenze ein Leerzeichen stehen, ein Anker-Regex `^1` bricht
+    // daran (gemessen, nicht vermutet).
+    await expect(page.getByText(/\b1 (Raum|Räume)\b/)).toBeVisible()
 
     // Leerer Treffer → eigener Leerzustand, nicht die Meetup-Formulierung.
     await search.fill(`kein-treffer-${rnd}`)
