@@ -35,6 +35,22 @@ async function loginAdmin(page: Page): Promise<void> {
 }
 
 /**
+ * Wartet, bis die Wanduhr eine ganze Sekunde weitergerückt ist.
+ *
+ * Das Lesestand-Wasserzeichen und `created_at` rechnen beide in Unix-SEKUNDEN,
+ * die Ungelesen-Regel ist strikt `created_at > watermark`. Publiziert man in
+ * derselben Sekunde, in der das Wasserzeichen gesetzt wurde, gilt die Nachricht
+ * mal als gelesen, mal nicht — genau die Falle, die unread-dot.spec.ts bereits
+ * unter Last gemessen hat. Siehe dort für die ausführliche Begründung.
+ */
+async function awaitNextSecond(page: Page): Promise<void> {
+    const start = Math.floor(Date.now() / 1000)
+    while (Math.floor(Date.now() / 1000) <= start) {
+        await page.waitForTimeout(100)
+    }
+}
+
+/**
  * M2 (Single-Space §12) — nach Login zeigt die App genau EINEN aktiven Space mit
  * seinen Räumen (39000). Mitgliedschaft ist relay-seitig (39002): der Seed lässt
  * den Test-User `welcome`+`general` beitreten → „Meine Räume", `dev` bleibt unter
@@ -169,8 +185,9 @@ test('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ pa
  *
  * - Standard-Raum   → unter „Andere Räume".
  * - `t=project-support` (Vereins-Antragsraum) → NICHT unter „Andere Räume",
- *   aber betretbar, sobald man Mitglied ist — dann in der EIGENEN Sektion
- *   „Projektunterstützung", nicht zwischen den Standard-Räumen.
+ *   und (seit 2026-07-27) auch dann NICHT unter „Meine Räume", wenn man
+ *   Mitglied wird — die ganze Kategorie liegt hinter der Entdecken-Zeile
+ *   „Projektunterstützung entdecken", betretbar erst nach einem Klick darauf.
  * - `t=meetup`      → REGRESSION: unverändert raus aus „Andere Räume" und rein
  *   in den Meetup-Pool (die Entdecken-Karte zählt ihn).
  *
@@ -209,13 +226,27 @@ test('P4c: Antragsraum fällt aus „Andere Räume", bleibt aber als Mitglied er
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9000', '-t', `h=${propH}`, '-t', `p=${pubOf(NSEC)}`, ZOOID_WS])
     // `goto('/spaces')` statt `reload()`: der Entdecken-Klick oben schaltet in den
     // Meetup-Fokus, und der lebt seit dem Filter-URL-Sync in der URL (`?rt=meetups`).
-    // Ein reload() käme also im Meetup-Fokus zurück, wo die Projektunterstützungs-
-    // Sektion bewusst nicht gerendert wird — der Test prüfte dann den falschen Modus.
-    // Die parameterlose URL ist die frische Standard-Übersicht, die hier gemeint ist.
+    // Ein reload() käme also im Meetup-Fokus zurück, wo die Entdecken-Zeile der
+    // Projektunterstützung bewusst nicht gerendert wird — der Test prüfte dann den
+    // falschen Modus. Die parameterlose URL ist die frische Standard-Übersicht.
     await page.goto('/spaces')
 
-    // … und er taucht in der eigenen Sektion auf: kategorisiert, nicht versteckt.
-    await expect(page.getByText('Projektunterstützung', { exact: true })).toBeVisible({ timeout: 15_000 })
+    // … und taucht trotzdem NICHT direkt in der Liste auf — auch nicht unter
+    // „Meine Räume": die Entdecken-Zeile vertritt die Kategorie GANZ, auch für
+    // Mitglieder (Nutzerentscheidung 2026-07-27, zweite Runde).
+    await expect(page.getByText(propName, { exact: true })).toHaveCount(0)
+
+    // … sondern hinter der Entdecken-Zeile, die die alte eigene Sektion ersetzt.
+    // Keine exakte Zahl in der Umfangszeile: der zooid-Seed wird zwischen
+    // Testläufen wiederverwendet, `proposalCount()` zählt bei einem Nicht-Admin
+    // ALLE Antragsräume, denen dieser Test-User je beigetreten ist (P5-Lehre,
+    // siehe Suchtest unten) — hier zählt nur, dass die Zeile ihren Umfang zeigt.
+    const discoverProposals = page.getByRole('button', { name: /Projektunterstützung entdecken/ })
+    await expect(discoverProposals).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/^\d+ (Antragsraum|Antragsräume)$/)).toBeVisible()
+
+    // Erreichbar: Klick öffnet den Antrags-Fokus, der Raum steht in der Liste.
+    await discoverProposals.click()
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
 
@@ -224,14 +255,15 @@ test('P4c: Antragsraum fällt aus „Andere Räume", bleibt aber als Mitglied er
  * (Space-Admin), nicht jedem Mitglied. Derselbe Raum, zwei Blicke:
  *
  * - Nicht-Admin, nicht Mitglied → sieht ihn nirgends (Test oben, ohne 9000-Schritt).
- * - Admin, nicht Mitglied       → sieht ihn hier unter „Projektunterstützung".
+ * - Admin, nicht Mitglied       → zählt hier in die Entdecken-Zeile mit und ist
+ *   dahinter erreichbar (seit 2026-07-27 keine eigene Sektion mehr).
  *
  * Kein Session-Wechsel in EINER Page (der zweite Login liefe gegen die bestehende
  * Anmeldung) — die Nicht-Admin-Hälfte deckt der Test oben ab. Gegenprobe im
  * selben Lauf: der Standard-Raum muss sichtbar sein, sonst misst der Test einen
  * kaputten Seed statt des Gates.
  */
-test('P4c: fremder Antragsraum erscheint beim Admin (Vorstand) unter „Projektunterstützung"', async ({ page }) => {
+test('P4c: fremder Antragsraum zählt beim Admin (Vorstand) in die Entdecken-Zeile und ist dahinter erreichbar', async ({ page }) => {
     const rnd = Math.floor(Math.random() * 1e9)
     const stdName = `Std-${rnd}`
     const propName = `Prop-${rnd}`
@@ -240,20 +272,25 @@ test('P4c: fremder Antragsraum erscheint beim Admin (Vorstand) unter „Projektu
     createRoomNak(`std${rnd}`, stdName)
     createRoomNak(propH, propName, ['-t', `t=project-support`, '-t', `i=proposal:${rnd}`])
 
-    // Admin (Relay-Owner = Vorstandsrolle): fremder Antragsraum, kategorisiert sichtbar.
+    // Admin (Relay-Owner = Vorstandsrolle): fremder Antragsraum zählt, ist aber
+    // nicht direkt gelistet — erst der Klick auf die Entdecken-Zeile zeigt ihn.
     await loginAdmin(page)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Projektunterstützung', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const discover = page.getByRole('button', { name: /Projektunterstützung entdecken/ })
+    await expect(discover).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(propName, { exact: true })).toHaveCount(0)
+
+    await discover.click()
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
 
 /**
- * P5 — Projektunterstützung ist filterbar wie die Meetups: aus der Sektion führt
- * ein schlichter Textlink in einen eigenen Fokus-Modus (`?rt=proposals`), der
+ * P5 — Projektunterstützung ist filterbar wie die Meetups: die Entdecken-Zeile
+ * „Projektunterstützung entdecken" (seit 2026-07-27 dasselbe Zeilen-Muster wie
+ * die Meetup-Zeile; vorher ein Textlink „Alle anzeigen" im Sektionskopf einer
+ * vollen Zeilenliste) führt in einen eigenen Fokus-Modus (`?rt=proposals`), der
  * Suche kennt, aber KEINEN Land-Filter (Antragsräume tragen kein Land).
- *
- * Bewusst KEINE Entdecken-Karte: auf Prod existieren zwei Antragsräume (Messung
- * M2), eine Karte versteckte zwei Zeilen hinter einem Klick.
  *
  * Der Test läuft als Admin (Vorstand), weil der nach `_proposalPool()` auch
  * FREMDE Antragsräume sieht — so genügt der 39000-Seed ohne Mitgliedschaft.
@@ -273,16 +310,16 @@ test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals ·
     await loginAdmin(page)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    // Der Einstieg: ein Link IM Sektionskopf — die Sektion selbst bleibt stehen.
-    await expect(page.getByText('Projektunterstützung', { exact: true })).toBeVisible({ timeout: 15_000 })
-    const allShow = page.getByRole('button', { name: 'Alle anzeigen' })
-    await expect(allShow).toBeVisible()
-    await expect(page.getByText(propA, { exact: true })).toBeVisible()
+    // Der Einstieg: die Entdecken-Zeile — beide Antragsräume liegen dahinter,
+    // nicht mehr einzeln in der Hauptliste (Wunsch 2026-07-27).
+    const discover = page.getByRole('button', { name: /Projektunterstützung entdecken/ })
+    await expect(discover).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(propA, { exact: true })).toHaveCount(0)
 
     // Filterwechsel darf KEINEN History-Eintrag erzeugen (nur replaceState) —
     // sonst bräuchte Zurück je Filterklick einen Schritt (back-navigation.spec.ts).
     const historyBefore = await page.evaluate(() => history.length)
-    await allShow.click()
+    await discover.click()
     await expect(page).toHaveURL(/[?&]rt=proposals\b/, { timeout: 15_000 })
     expect(await page.evaluate(() => history.length)).toBe(historyBefore)
 
@@ -317,7 +354,7 @@ test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals ·
     await page.getByRole('button', { name: 'Räume anzeigen' }).first().click()
     await expect(page).not.toHaveURL(/rt=/)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Projektunterstützung', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Projektunterstützung entdecken/ })).toBeVisible()
 })
 
 /** Deep-Link: `?rt=proposals` stellt den Fokus beim Laden her (Kaltstart). */
@@ -336,4 +373,45 @@ test('P5: ?rt=proposals öffnet den Antrags-Fokus direkt', async ({ page }) => {
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(stdName, { exact: true })).toHaveCount(0)
     await expect(page.getByPlaceholder('Antragsraum suchen…')).toBeVisible()
+})
+
+/**
+ * P6 — Ungelesenes hinter der Entdecken-Zeile verschwindet nicht: die
+ * Summenpille (`proposalUnread()`, eine Teilsumme derselben `rooms`-Karte wie
+ * jede einzelne Raum-Zeile, `sumUnreadRooms`) trägt es weiter, obwohl die
+ * beigetretenen Antragsraum-Zeilen selbst nicht mehr sichtbar sind. Genau das
+ * ist der Grund, warum es die Pille überhaupt gibt — ohne sie schluckte das
+ * Herausfiltern der Kategorie eine ungelesene Nachricht kommentarlos.
+ *
+ * Mitgliedschaft VOR dem Login: der Raum muss schon beim ersten Render in
+ * `userRooms` stehen, sonst vergibt `computeUnread` (Regel 1, nur beigetretene
+ * Räume) ihm nie einen Schlüssel — die Pille bliebe dann grundlos leer, ohne
+ * dass am Zähl-Pfad selbst etwas falsch wäre.
+ */
+test('P6: ungelesene Nachricht in beigetretenem Antragsraum zeigt die Summenpille an der Entdecken-Zeile', async ({ page }) => {
+    const rnd = Math.floor(Math.random() * 1e9)
+    const stdName = `Std-${rnd}`
+    const propName = `Prop-${rnd}`
+    const propH = `p${rnd.toString(16).padStart(12, '0')}`
+
+    createRoomNak(`std${rnd}`, stdName)
+    createRoomNak(propH, propName, ['-t', 't=project-support', '-t', `i=proposal:${rnd}`])
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9000', '-t', `h=${propH}`, '-t', `p=${pubOf(NSEC)}`, ZOOID_WS])
+
+    await login(page)
+    await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const discover = page.getByRole('button', { name: /Projektunterstützung entdecken/ })
+    await expect(discover).toBeVisible({ timeout: 15_000 })
+    // Dieselbe Pillen-Signatur wie in `unread-dot.spec.ts` (`roomDot`): eine
+    // deckende Fläche ohne Theme-Variante, `x-if` rendert bei 0 gar keinen Knoten.
+    const pill = discover.locator('span.bg-brand-500.text-zinc-950')
+    await expect(pill).toHaveCount(0) // Ausgangslage: nichts ungelesen, keine Pille.
+
+    // Fremde Nachricht NACH dem Login → ungelesen.
+    await awaitNextSecond(page)
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9', '-t', `h=${propH}`, '-c', `Hallo-${rnd}`, ZOOID_WS])
+
+    await expect(pill).toBeVisible({ timeout: 20_000 })
+    await expect(pill).toHaveText('1')
 })
