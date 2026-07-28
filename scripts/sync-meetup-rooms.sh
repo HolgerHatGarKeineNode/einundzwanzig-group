@@ -209,6 +209,55 @@ done <<< "$TSV"
 
 echo "created=$created skipped=$skipped failed=$failed gated=$GATED"
 
+# ── Kategorie-Index (nur Buzz): kind 30078 ────────────────────────────────────
+#
+# Wozu: Der `about`-Praefix macht jeden Raum selbstbeschreibend, ist aber
+# MEHRBUCHSTABIG und damit per Nostr-Filter nicht adressierbar — nur
+# einbuchstabige Tags (`#d`, `#t`, `#p`, `#e`) sind filterbar. Bei Buzz sind die
+# alle belegt: `d` = Channel-UUID, `t` = channel_type, `p` nur bei DMs.
+#
+# Dieses Index-Event schliesst die Luecke, OHNE Buzz zu aendern: `#d` wird von
+# Buzz in SQL gepusht, sofern der Filter nur NIP-33-Kinds nennt
+# (`crates/buzz-relay/src/handlers/req.rs:797-803`) — kind 30078 erfuellt das.
+# Ein Dritt-Client holt damit alle Meetup-Raeume in EINEM serverseitig
+# gefilterten Request:
+#
+#   nak req -k 30078 -d einundzwanzig:rooms:meetup <relay>
+#
+# Ein Fork mit eigenem `t`-Tag waere der naheliegende, aber schlechtere Weg:
+# `#t` wird von Buzz NICHT in SQL gepusht (`req.rs:806-812`), liefe also im
+# langsamen Pfad — bezahlt mit einer eigenen Build-Pipeline.
+#
+# 30078 ist parameterized replaceable: derselbe `d`-Wert ersetzt den alten Stand,
+# der Index bleibt also von selbst aktuell und waechst nicht an.
+if [ "$RELAY_MODE" = "buzz" ]; then
+    INDEX_ARGS=(-t "d=einundzwanzig:rooms:meetup")
+    INDEX_UUIDS=()
+    while IFS=$'\t' read -r H _ID _NAME _SLUG _LOGO; do
+        [ -z "$H" ] && continue
+        INDEX_ARGS+=(-t "a=39000:$H")
+        INDEX_UUIDS+=("$H")
+    done <<< "$TSV"
+
+    if [ "${#INDEX_UUIDS[@]}" -gt 0 ]; then
+        # Die UUID-Liste zusaetzlich im content: `a`-Tags sind der Nostr-Weg, der
+        # content spart einem Client das Tag-Parsen.
+        INDEX_JSON=$(printf '%s\n' "${INDEX_UUIDS[@]}" | python3 -c "
+import json, sys
+print(json.dumps({'type': 'meetup', 'rooms': [l.strip() for l in sys.stdin if l.strip()]}))
+")
+        if timeout 30 "$NAK" event --auth --sec "$BOT" -k 30078 "${INDEX_ARGS[@]}" \
+            -c "$INDEX_JSON" "$WS" </dev/null 2>&1 | grep -qi success; then
+            echo "index=ok rooms=${#INDEX_UUIDS[@]} (kind 30078, d=einundzwanzig:rooms:meetup)"
+        else
+            # Fail-soft: Der Index ist eine Zusatzleistung fuer Dritt-Clients. Die
+            # Raeume selbst stehen; ein fehlender Index macht sie nicht unbrauchbar,
+            # nur schlechter auffindbar. Deshalb kein exit!=0.
+            echo "index=FEHLGESCHLAGEN — Raeume stehen, nur der Kategorie-Index fehlt" >&2
+        fi
+    fi
+fi
+
 # Nur der Anlage-Loop ist fail-soft; ein Fehlschlag beim Anlegen macht den
 # Gesamtlauf trotzdem sichtbar fehlgeschlagen (Scheduler-Log/Alert).
 [ "$failed" -gt 0 ] && exit 1
