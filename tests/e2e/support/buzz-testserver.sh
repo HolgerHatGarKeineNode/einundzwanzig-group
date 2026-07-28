@@ -107,25 +107,48 @@ for _ in $(seq 1 60); do
     sleep 0.5
 done
 
+# Publiziert ein Seed-Event mit Zeitlimit UND Wiederholung.
+#
+# Warum beides: `nak event` kennt kein eigenes Zeitlimit und blockiert unbegrenzt, wenn es
+# direkt nach `docker compose down -v` in das WebSocket-Bind-Fenster des Relays läuft
+# (gemessen 2026-07-28: ein Lauf hing ~9 min; derselbe Publish danach <1 s). Der NIP-11-Poll
+# oben deckt das nicht ab — er spricht HTTP, der Seed spricht WebSocket, und die beiden
+# binden nicht zwingend gleichzeitig.
+#
+# Ein blosses `timeout` wäre die schlechtere Hälfte des Fixes: der Publish fiele still aus
+# (`|| true`), der Seed bliebe leer und die Specs schlügen mit einem irreführenden
+# „Raum nicht sichtbar" fehl. Deshalb wird NUR ein Zeitlimit-Treffer (Exit 124) wiederholt —
+# ein fachlicher Fehlschlag wie "duplicate: channel already exists" ist beim zweiten Lauf
+# der Normalfall und darf nicht in fünf Wiederholungen laufen.
+seed_event() {
+    for _ in $(seq 1 5); do
+        timeout 10 nak event "$@" >/dev/null 2>&1
+        [ $? -ne 124 ] && return 0
+        sleep 1
+    done
+    echo "buzz-test: Seed-Event nach 5 Zeitlimit-Treffern aufgegeben — Relay bindet nicht." >&2
+    return 0
+}
+
 # Räume (kind 9007). h = UUIDv5, name Pflicht-Tag. Owner = RELAY_OWNER_PUBKEY (bootstrap_owner
 # hebt ihn beim Boot automatisch in relay_members, kein Extra-Event nötig). Zweiter Lauf mit
 # derselben UUID → "duplicate: channel already exists" (Idempotenz gratis, wie bei zooid 9007).
-nak event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$WELCOME_H" -t name=E2E-Welcome -t about=E2E-Startkanal "$R" >/dev/null 2>&1 || true
-nak event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$GENERAL_H" -t name=E2E-General -t about=E2E-Zweitraum "$R" >/dev/null 2>&1 || true
+seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$WELCOME_H" -t name=E2E-Welcome -t about=E2E-Startkanal "$R"
+seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$GENERAL_H" -t name=E2E-General -t about=E2E-Zweitraum "$R"
 
 # Mitglied (Ersatz für NIP-86 allowpubkey, das es bei Buzz nicht gibt): kind 9030,
 # ["p",<hex>] + ["role","member"], vom Owner gesendet. created_at muss frisch sein
 # (±120s) — nak signiert mit `now()`, kein --ts, also automatisch erfüllt. Idempotent:
 # existiert der Member schon, ist es laut Handler ein stiller No-op.
-nak event --auth --sec "$OWNER_SEC" -k 9030 -t "p=$USER_PUB" -t role=member "$R" >/dev/null 2>&1 || true
+seed_event --auth --sec "$OWNER_SEC" -k 9030 -t "p=$USER_PUB" -t role=member "$R"
 
 # Chat (kind 9) — content-guarded wie bei zooid (nak-Events sind nicht replaceable).
-if ! nak req -k 9 -t "h=$WELCOME_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-welcome'; then
-    nak event --auth --sec "$USER_SEC"  -k 9 -t "h=$WELCOME_H" -c 'E2E-Buzz-welcome: Hallo aus dem Testraum! 👋' "$R" >/dev/null 2>&1 || true
-    nak event --auth --sec "$OWNER_SEC" -k 9 -t "h=$WELCOME_H" -c 'E2E-Buzz-welcome: Antwort vom Owner' "$R" >/dev/null 2>&1 || true
+if ! timeout 8 nak req -k 9 -t "h=$WELCOME_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-welcome'; then
+    seed_event --auth --sec "$USER_SEC"  -k 9 -t "h=$WELCOME_H" -c 'E2E-Buzz-welcome: Hallo aus dem Testraum! 👋' "$R"
+    seed_event --auth --sec "$OWNER_SEC" -k 9 -t "h=$WELCOME_H" -c 'E2E-Buzz-welcome: Antwort vom Owner' "$R"
 fi
-if ! nak req -k 9 -t "h=$GENERAL_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-general'; then
-    nak event --auth --sec "$USER_SEC" -k 9 -t "h=$GENERAL_H" -c 'E2E-Buzz-general: Zweiter Raum' "$R" >/dev/null 2>&1 || true
+if ! timeout 8 nak req -k 9 -t "h=$GENERAL_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-general'; then
+    seed_event --auth --sec "$USER_SEC" -k 9 -t "h=$GENERAL_H" -c 'E2E-Buzz-general: Zweiter Raum' "$R"
 fi
 
 # Verifikation: erst zurückkehren, wenn Raum + Mitgliedschaft + Nachricht wirklich als
