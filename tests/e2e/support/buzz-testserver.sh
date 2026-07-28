@@ -41,7 +41,13 @@ GENERAL_H=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.UUID('$NS'), 'mee
 WELCOME_SEED_CAP=10
 
 compose() {
-    docker compose -p "$PROJECT" -f "$BUZZ_REPO_COMPOSE" --project-directory "$COMPOSE_DIR" --env-file "$COMPOSE_DIR/.env" "$@"
+    # BUZZ_GIT_CONFORMANCE_PROBE=false gehoert hierher und nicht in die (gitignorierte)
+    # .env: Die A3-Probe schlaegt auf einem frisch per `down -v` geleerten git-Volume
+    # fehl und beendet den Relay mit Exit 0 — der Stack liesse sich danach nie wieder
+    # aufsetzen, und der Grund stuende in einer Datei, die niemand sonst hat.
+    # Git-Hosting wird in diesen Tests nicht benutzt.
+    BUZZ_GIT_CONFORMANCE_PROBE=false \
+        docker compose -p "$PROJECT" -f "$BUZZ_REPO_COMPOSE" --project-directory "$COMPOSE_DIR" --env-file "$COMPOSE_DIR/.env" "$@"
 }
 
 # Läuft schon ein sauberer, geseedeter, nicht aufgeblähter buzz-test-Stack? → wiederverwenden.
