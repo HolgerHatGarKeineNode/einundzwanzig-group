@@ -9,8 +9,20 @@
 # NICHTS angelegt oder verändert; das Skript bricht mit exit!=0 ab, damit der
 # Scheduler den Ausfall sichtbar macht.
 #
+# RELAY_MODE=zooid|buzz (Default zooid) schaltet zwischen den beiden Relay-Modellen:
+#
+#   zooid: h = "m"+sha256(id)[:12]; Bestand per `req -k 39000 -t t=meetup`; ein 9002
+#          traegt alle Marker-Tags (t/i/meetup_slug/picture/private) ins 39000.
+#   buzz:  h = uuid5(NOSTR_ROOM_NAMESPACE, "meetup:<id>") — Buzz erzwingt UUIDs.
+#          KEINE Bestandsabfrage: Buzz antwortet auf ein doppeltes 9007 mit
+#          "duplicate: channel already exists" (ON CONFLICT DO NOTHING in der DB),
+#          Idempotenz kommt also aus dem Relay statt aus einer Skript-Heuristik.
+#          Marker-Tags entfallen ersatzlos — Buzz erzeugt das 39000 selbst mit festem
+#          Tag-Satz und belegt `t` mit dem channel_type. Die Meetup-Bindung steckt
+#          stattdessen in der UUID, die Kategorie als Praefix im `about`.
+#
 # Nutzung:  scripts/sync-meetup-rooms.sh
-# Env-Overrides: NAK, WS, ROOT, ENV_FILE, GATE_API
+# Env-Overrides: NAK, WS, ROOT, ENV_FILE, GATE_API, RELAY_MODE
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,6 +53,26 @@ GATE_TOKEN=$(grep '^VEREIN_GATE_TOKEN=' "$ENV_FILE" | head -1 | cut -d= -f2- | t
 [ -z "$BOT" ] && { echo "FEHLER: NOSTR_BOT_NSEC leer/fehlt in $ENV_FILE" >&2; exit 1; }
 [ -z "$GATE_TOKEN" ] && { echo "FEHLER: VEREIN_GATE_TOKEN leer/fehlt in $ENV_FILE" >&2; exit 1; }
 
+RELAY_MODE="${RELAY_MODE:-zooid}"
+case "$RELAY_MODE" in
+    zooid|buzz) ;;
+    *) echo "FEHLER: RELAY_MODE muss 'zooid' oder 'buzz' sein (ist: '$RELAY_MODE')." >&2; exit 1 ;;
+esac
+
+# Der Namespace ist die gemeinsame Wahrheit von diesem Skript UND dem Vereins-Portal
+# (einundzwanzig-nostr, ProjectProposal::nostrGroupId). Weichen die beiden ab, zeigen
+# Portal und Client auf verschiedene Raeume — und der Fehler ist still, weil beide
+# Seiten fuer sich funktionieren. Deshalb hier hart abbrechen statt auf einen Default
+# auszuweichen.
+ROOM_NAMESPACE=""
+if [ "$RELAY_MODE" = "buzz" ]; then
+    ROOM_NAMESPACE=$(grep '^NOSTR_ROOM_NAMESPACE=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'"'')
+    if [ -z "$ROOM_NAMESPACE" ]; then
+        echo "FEHLER: RELAY_MODE=buzz braucht NOSTR_ROOM_NAMESPACE in $ENV_FILE." >&2
+        exit 1
+    fi
+fi
+
 # 1) Gegateten Satz LIVE ziehen. --fail: HTTP-Fehler -> non-zero. Kaputte/keine
 #    Antwort => sofort abbrechen, NICHTS anlegen/löschen.
 GATE_JSON=$(curl -sS --fail --max-time 20 \
@@ -58,11 +90,22 @@ fi
 GATE_TMP=$(mktemp)
 trap 'rm -f "$GATE_TMP"' EXIT
 printf '%s' "$GATE_JSON" > "$GATE_TMP"
-TSV=$(python3 - "$GATE_TMP" <<'PY'
-import json, hashlib, sys
-for m in json.load(open(sys.argv[1])):
-    h = "m" + hashlib.sha256(str(m["id"]).encode()).hexdigest()[:12]
-    print("\t".join([h, str(m["id"]), m["name"], m["slug"], m.get("logo_url") or ""]))
+TSV=$(python3 - "$GATE_TMP" "$RELAY_MODE" "$ROOM_NAMESPACE" <<'PY'
+import json, hashlib, sys, uuid
+
+path, mode, namespace = sys.argv[1], sys.argv[2], sys.argv[3]
+ns = uuid.UUID(namespace) if mode == "buzz" else None
+
+for m in json.load(open(path)):
+    mid = str(m["id"])
+    if mode == "buzz":
+        # Buzz erzwingt eine UUID als Gruppen-ID (ingest.rs: val.parse::<Uuid>()).
+        # uuid5 haelt die Ableitung deterministisch — dieselbe Meetup-ID ergibt
+        # immer denselben Raum, genau wie vorher sha256(id)[:12].
+        h = str(uuid.uuid5(ns, f"meetup:{mid}"))
+    else:
+        h = "m" + hashlib.sha256(mid.encode()).hexdigest()[:12]
+    print("\t".join([h, mid, m["name"], m["slug"], m.get("logo_url") or ""]))
 PY
 )
 GATED=$(printf '%s\n' "$TSV" | grep -c . || true)
@@ -72,6 +115,16 @@ GATED=$(printf '%s\n' "$TSV" | grep -c . || true)
 #    leere Ausgabe -> ohne Guard hielte das Skript alle Räume für "fehlend" und würde
 #    jeden gegateten Raum re-editieren (Churn + falsche created=-Zahl). Erfolgreicher
 #    req mit 0 Treffern (echter Erstlauf) ist rc=0 und erlaubt -> sauber unterscheidbar.
+EXISTING=""
+if [ "$RELAY_MODE" = "buzz" ]; then
+    # Bei Buzz gibt es diesen Schritt NICHT — und er waere auch nicht baubar:
+    # `-t t=meetup` greift ins Leere, weil Buzz `t` mit dem channel_type belegt und
+    # das 39000 ohnehin selbst erzeugt statt die 9002-Tags zu uebernehmen. Gebraucht
+    # wird er auch nicht: ein zweites 9007 mit derselben UUID beantwortet Buzz mit
+    # "duplicate: channel already exists". Damit faellt der gesamte Guard oben weg —
+    # die Idempotenz liegt jetzt im Relay, nicht in dieser Heuristik.
+    :
+else
 EXISTING_RAW=$(timeout 40 "$NAK" req -k 39000 -t t=meetup --auth --sec "$BOT" "$WS" 2>/dev/null)
 REQ_RC=$?
 if [ "$REQ_RC" -ne 0 ]; then
@@ -94,6 +147,7 @@ for line in sys.stdin:
         if len(t) >= 2 and t[0] == "d":
             print(t[1])
 ')
+fi
 
 created=0
 skipped=0
@@ -101,6 +155,35 @@ failed=0
 
 while IFS=$'\t' read -r H ID NAME SLUG LOGO; do
     [ -z "$H" ] && continue
+
+    if [ "$RELAY_MODE" = "buzz" ]; then
+        # Ein einziges 9007 traegt bei Buzz schon alles: `name` ist Pflicht-Tag
+        # (ingest.rs:2076-2097), visibility/channel_type werden dort mitgelesen.
+        # Die Kategorie kommt als Praefix ins `about` — `t` ist bei Buzz mit dem
+        # channel_type belegt, und eigene Marker-Tags landen ohnehin nicht im 39000.
+        # visibility=open + BUZZ_REQUIRE_RELAY_MEMBERSHIP=true ergibt zusammen unser
+        # Meetup-Modell: nur Vereinsmitglieder sehen den Raum, aber sie kommen ohne
+        # Einladung hinein. Das Logo geht ersatzlos verloren (kein picture-Feld).
+        CREATE_OUT=$(timeout 30 "$NAK" event --auth --sec "$BOT" -k 9007 \
+            -t "h=$H" -t "name=$NAME" -t "visibility=open" -t "channel_type=stream" \
+            -t "about=einundzwanzig:meetup:$ID — $NAME" "$WS" </dev/null 2>&1)
+
+        if printf '%s' "$CREATE_OUT" | grep -qi 'duplicate'; then
+            skipped=$((skipped + 1))
+            printf '  skip %s (%s) — Raum existiert bereits\n' "$SLUG" "$H"
+            continue
+        fi
+        if printf '%s' "$CREATE_OUT" | grep -qi success; then
+            created=$((created + 1))
+            printf '  ok   %s (%s) — Raum neu angelegt\n' "$SLUG" "$H"
+        else
+            failed=$((failed + 1))
+            printf '  FEHL %s (%s) — 9007 abgelehnt: %s\n' "$SLUG" "$H" \
+                "$(printf '%s' "$CREATE_OUT" | tail -1)" >&2
+        fi
+        continue
+    fi
+
     if printf '%s\n' "$EXISTING" | grep -qxF "$H"; then
         skipped=$((skipped + 1))
         printf '  skip %s (%s) — Raum existiert bereits\n' "$SLUG" "$H"
