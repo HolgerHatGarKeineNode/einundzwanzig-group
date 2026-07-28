@@ -1701,11 +1701,10 @@ test('P3(4.2): Reaktion auf einen Thread-Kommentar erscheint als Chip (geerbte R
 /**
  * Interop, LESEN — eine Antwort eines FREMDEN Clients wird gelesen und richtig eingeordnet.
  *
- * Vorgeschichte: dieser Fall prüfte bis P4 Lotus' `kind 10`. Den liest der Client nicht mehr
- * (mit dem Buzz-Umbau ersatzlos raus — Buzz nimmt kind 10 gar nicht erst an,
- * `restricted: unknown event kind`). Der Fall ist deshalb **umgebaut, nicht entsorgt**: seine
- * Substanz war nie das Kind, sondern die Frage „verstehen wir Marker-Threading, das NICHT von
- * uns stammt?" — und die stellt sich mit Buzz genauso, nur in kind 9.
+ * Die Frage dahinter ist unabhängig vom Kind: **verstehen wir Marker-Threading, das NICHT von
+ * uns stammt?** Alle übrigen Threading-Tests schließen den Kreis „wir senden, wir lesen" — hier
+ * seedet ein Fremd-Client per nak, mitsamt eines `p`-Tags, das Buzz fürs Threading ignoriert,
+ * unser Parser aber nicht stolpern lassen darf.
  *
  * Geprüft: ein Fremd-Client (ADMIN) seedet per nak eine Antwort in Buzz-Form → Antworten-
  * Indikator + Kommentar-Row im Thread; eine verschachtelte Antwort (`root`+`reply`) zeigt den
@@ -1719,7 +1718,7 @@ test('Interop: fremde Antwort (kind 9, Marker) wird gelesen — Indikator, Elter
     await expect(composer).toBeVisible({ timeout: 15_000 })
 
     // 1) Eigene kind-9-Wurzel senden (Autor = VIEWER), Root-ID am Relay holen.
-    const marker = `LOTUSROOT-${Math.floor(Math.random() * 1e9)}`
+    const marker = `THREADROOT-${Math.floor(Math.random() * 1e9)}`
     await composer.fill(marker)
     await page.getByRole('button', { name: 'Senden' }).click()
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })

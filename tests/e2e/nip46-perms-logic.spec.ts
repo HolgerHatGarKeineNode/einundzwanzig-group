@@ -37,7 +37,7 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
     })
 
     test('abgelöste Thread-Kinds sind RAUS — jeder Eintrag kostet einen Amber-Prompt', () => {
-        // Gegenprobe zur Liste oben: 1111 (NIP-22) und 10 (Lotus In-Chat-Thread) werden
+        // Gegenprobe zur Liste oben: 1111 (NIP-22) und 10 (fremdes Thread-Kind) werden
         // vom Client nicht mehr signiert. Sie stehenzulassen wäre nicht bloß tote Zeile —
         // Amber zeigt dem Nutzer beim Koppeln jeden Kind einzeln an.
         expect(perms).not.toContain('sign_event:1111')

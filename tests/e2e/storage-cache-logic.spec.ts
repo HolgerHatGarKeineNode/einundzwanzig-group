@@ -35,8 +35,9 @@ test.describe('shouldPersistEvent', () => {
 
     test('verwirft Ephemeral/AUTH/Reaktionen/Zaps', () => {
         // §4.2: kein `#h` / sekundär / laden lazy nach dem Paint. Die abgelösten
-        // Thread-Kinds stehen wieder hier: 1111 (NIP-22) und 10 (Lotus In-Chat-Thread)
-        // werden weder geschrieben noch gelesen und von Buzz gar nicht erst angenommen.
+        // Thread-Kinds stehen wieder hier: 1111 (NIP-22) und 10 (ein fremdes In-Chat-
+        // Thread-Kind) werden weder geschrieben noch gelesen und von Buzz gar nicht
+        // erst angenommen.
         // 1068/1018/9041 (Umfragen, Zap-Ziele) sind mit der Buzz-Migration ersatzlos
         // gestrichen — ein Fremd-Client könnte sie noch senden, gecacht werden sie nicht.
         for (const kind of [7, 9735, 10, 1111, 22242, 20000, 24133, 1068, 1018, 9041]) {
