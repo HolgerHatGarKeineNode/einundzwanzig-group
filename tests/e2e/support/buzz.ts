@@ -15,6 +15,12 @@ export const BUZZ_URL = `${BUZZ_WS}/`
 // Kein Bezug zu echten Vereinsschlüsseln oder zum zooid-NOSTR_TEST_NSEC.
 export const BUZZ_USER_NSEC = 'nsec1txknjn6f6q88c27dpjc8xl6esyjdlu3m824emkez77yyw80ucezsd2tqys'
 export const BUZZ_OWNER_SEC_HEX = 'a9f241be4d7001054bf7d825135b95d13b287cb0f4d2865a103073ee38f7cfb8'
+// Derselbe Owner-Key als nsec (fuer den nsec-Login im Browser). Er ist der
+// RELAY_OWNER_PUBKEY des buzz-test-Stacks und traegt damit in der 13534 die Rolle
+// `owner` — die Grundlage der Admin-Erkennung nach P3.
+export const BUZZ_OWNER_NSEC = 'nsec148eyr0jdwqqs2jlhmqj3xku46yajsl9s7nfgvkssxpe7uw8he7uq69wldr'
+/** Pubkey des geseedeten Nicht-Admin-Mitglieds (test-keys.env, USER_PUB). */
+export const BUZZ_USER_PUB = '9db3b9da10ee79e56871f101051d2df7693b07927733dd12d0f73ee72e707192'
 
 // UUIDv5 der beiden Seed-Räume (uuid5(d3a2a246-e0b6-45be-a1c4-367c2bd857ad, "meetup:<slug>"),
 // siehe buzz-testserver.sh) — fest, weil deterministisch aus dem Slug abgeleitet.
