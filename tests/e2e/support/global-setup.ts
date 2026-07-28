@@ -34,12 +34,23 @@ function needsBuild(): boolean {
     return changed.length > 0
 }
 
+/** `E2E_RELAY=buzz|zooid` (Default zooid) — siehe playwright.config.ts + fixtures.ts. */
+const relayMode = (): 'zooid' | 'buzz' => (process.env.E2E_RELAY === 'buzz' ? 'buzz' : 'zooid')
+
 export default function globalSetup(): void {
-    execFileSync(
-        'bash',
-        ['-c', '[ -f /home/user/Code/zooid/bin/zooid ] || (cd /home/user/Code/zooid && CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go)'],
-        { stdio: 'inherit' },
-    )
+    if (relayMode() === 'buzz') {
+        // Der Buzz-Stack ist EIN geteilter Docker-Compose-Stack (Postgres/Redis/MinIO),
+        // kein Pro-Worker-Prozess wie zooid — deshalb hier EINMAL aufsetzen/seeden/
+        // verifizieren (blockierend, wie zooid-testserver.sh), NICHT im workerBackend-
+        // Fixture. E2E_RELAY=buzz erzwingt außerdem workers:1 (playwright.config.ts).
+        execFileSync('bash', ['tests/e2e/support/buzz-testserver.sh'], { stdio: 'inherit' })
+    } else {
+        execFileSync(
+            'bash',
+            ['-c', '[ -f /home/user/Code/zooid/bin/zooid ] || (cd /home/user/Code/zooid && CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go)'],
+            { stdio: 'inherit' },
+        )
+    }
     if (needsBuild()) {
         execFileSync('npm', ['run', 'build'], { stdio: 'inherit' })
     } else {

@@ -49,3 +49,9 @@ yarn-error.log
 *.bak
 
 plans/
+
+# Buzz-Test-Stack (E2E_RELAY=buzz): Compose-.env + Wegwerf-Testschlüssel, lokal generiert
+# (siehe tests/e2e/support/buzz-testserver.sh) — kein Bezug zu echten Vereinsschlüsseln,
+# aber Secrets gehören trotzdem nicht ins Repo.
+/tests/e2e/support/buzz-compose/.env
+/tests/e2e/support/buzz-compose/test-keys.env
