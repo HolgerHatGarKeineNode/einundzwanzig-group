@@ -53,8 +53,6 @@ seeded_and_clean() {
     timeout 5 curl -sf -H 'Accept: application/nostr+json' "$HTTP" >/dev/null 2>&1 || return 1
     # edit-Mitgliedschaft ist das LETZTE Seed-Artefakt → ihr Vorhandensein ⇒ Seed fertig.
     timeout 8 nak req -k 39002 -d edit --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
-    # C5-Seed-Poll: fehlt sie (Relay von einem älteren Seed-Skript ohne poll-Raum), frisch aufsetzen.
-    timeout 8 nak req -k 1068 -t h=poll --auth --sec "$USER" "$R" 2>/dev/null | grep -q 'Lieblingsfarbe' || return 1
     # C6b-thread-Raum: fehlt seine Mitgliedschaft (Relay von einem Seed-Skript ohne thread-Raum), frisch aufsetzen.
     timeout 8 nak req -k 39002 -d thread --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
     # Meetup-Testräume: fehlt einer (Relay von einem Seed-Skript ohne Meetup-Räume), frisch aufsetzen.
@@ -119,9 +117,6 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=edit -t name=Bearbeiten -t about=C3
 # Dedizierter Schreib-Raum für die C4-Tests (Mentions/Copy/Info): schreiben eigene
 # Nachrichten mit @-Mentions und dürfen „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=mention -t name=Mentions -t about=C4-Mention-Tests "$R" >/dev/null 2>&1 || true
-# Dedizierter Schreib-Raum für die C5-Tests (Poll-Erstellen/Abstimmen): schreiben
-# eigene Polls (kind 1068) + Responses (kind 1018) und dürfen „welcome" nicht aufblähen.
-nak event --auth --sec "$ADMIN" -k 9007 -t h=poll -t name=Umfragen -t about=C5-Poll-Tests "$R" >/dev/null 2>&1 || true
 # Dedizierter Schreib-Raum für die C6b-Tests (Thread-Ansicht/NIP-22-Kommentare):
 # schreiben Quote-Only-Nachrichten + kind-1111-Kommentare und dürfen „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=thread -t name=Threads -t about=C6b-Thread-Tests "$R" >/dev/null 2>&1 || true
@@ -191,7 +186,6 @@ nak event --auth --sec "$USER" -k 9021 -t h=scroll "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=react "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=mod "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=mention "$R" >/dev/null 2>&1 || true
-nak event --auth --sec "$USER" -k 9021 -t h=poll "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=thread "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=punkt "$R" >/dev/null 2>&1 || true
 nak event --auth --sec "$USER" -k 9021 -t h=edit "$R" >/dev/null 2>&1 || true
@@ -226,15 +220,6 @@ if [ "$(nak req -k 9 -t h=punkt --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -c
     for i in $(seq 1 60); do
         nak event --auth --sec "$ADMIN" -k 9 -t h=punkt --ts $((NOW - 3600 - 60 + i)) -c "Punkt Zeile $i" "$R" >/dev/null 2>&1 || true
     done
-fi
-
-# Seed-Poll (kind 1068) im „poll"-Raum für den C5-Einfachwahl-Vote-Test (id == label).
-# Content-guarded (nak-Events sind nicht replaceable → Duplikate vermeiden). Einfachwahl
-# ist zustandsunabhängig testbar (Wahl ersetzt); der Mehrfachwahl-Test erstellt sich seine
-# eigene frische Poll (Toggle ist zustandsabhängig → deterministischer Nullzustand nötig).
-if ! nak req -k 1068 -t h=poll --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -q 'Lieblingsfarbe'; then
-    nak event --auth --sec "$ADMIN" -k 1068 -t h=poll -t option=Rot -t option=Blau \
-        -t polltype=singlechoice -t relay="$R" -c 'Lieblingsfarbe?' "$R" >/dev/null 2>&1 || true
 fi
 
 # Verifikation: erst zurückkehren, wenn das letzte Seed-Artefakt (edit-Mitgliedschaft)

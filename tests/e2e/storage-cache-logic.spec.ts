@@ -30,7 +30,7 @@ test.describe('shouldPersistEvent', () => {
         // Persistenz ohne Deckel wäre der unbegrenzt wachsende Store, vor dem §4.2
         // gewarnt hat; sie steht in `messagesToPrune` (`COMMENT_CAP_TOTAL`) und ist in
         // `js/storagePersistKinds.test.ts` node-getestet.
-        for (const kind of [9, 1111, 5, 9005, 0, 3, 10000, 10002, 30078, 39000, 39001, 39002, 13534, 1068, 9041]) {
+        for (const kind of [9, 1111, 5, 9005, 0, 3, 10000, 10002, 30078, 39000, 39001, 39002, 13534]) {
             expect(shouldPersistEvent(ev(kind)), `kind ${kind} sollte gecacht werden`).toBe(true)
         }
     })
@@ -39,7 +39,9 @@ test.describe('shouldPersistEvent', () => {
         // §4.2: kein `#h` / sekundär / laden lazy nach dem Paint. kind 1111 steht hier
         // seit P3 NICHT mehr (siehe oben) — Lotus' kind-10 (In-Chat-Thread) dagegen
         // schon: den lesen wir nur für die Interop und schreiben ihn nie.
-        for (const kind of [7, 9735, 10, 22242, 20000, 24133]) {
+        // 1068/1018/9041 (Umfragen, Zap-Ziele) sind mit der Buzz-Migration ersatzlos
+        // gestrichen — ein Fremd-Client könnte sie noch senden, gecacht werden sie nicht.
+        for (const kind of [7, 9735, 10, 22242, 20000, 24133, 1068, 1018, 9041]) {
             expect(shouldPersistEvent(ev(kind)), `kind ${kind} sollte NICHT gecacht werden`).toBe(false)
         }
     })

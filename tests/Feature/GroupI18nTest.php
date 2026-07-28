@@ -19,7 +19,10 @@ test('alle 7 Sprachdateien existieren, sind valides JSON und substantiell gefül
         $path = $langDir.'/'.$loc.'.json';
         expect(file_exists($path))->toBeTrue("lang/{$loc}.json fehlt");
         $data = json_decode((string) file_get_contents($path), true);
-        expect($data)->toBeArray()->and(count($data))->toBeGreaterThanOrEqual(250);
+        // Untergrenze gegen abgeschnittene/geleerte Dateien, KEIN Ziel-Wert. Von 250 auf
+        // 220 gesenkt, als mit den Umfragen (1068) und Zap-Zielen (9041) 32 verwaiste
+        // Keys je Sprache entfielen (Buzz-Migration, P4) — der Bestand liegt seither bei 229.
+        expect($data)->toBeArray()->and(count($data))->toBeGreaterThanOrEqual(220);
     }
 });
 

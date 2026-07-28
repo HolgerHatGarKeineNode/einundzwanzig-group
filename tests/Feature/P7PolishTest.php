@@ -21,12 +21,6 @@ test('Login-Sheet: Slide/Scale sind reduced-motion-gegated (Fade bleibt)', funct
     $res->assertSee('motion-reduce:!scale-100', false);
 });
 
-test('Raum: Poll-Balken-Breite ist reduced-motion-gegated (Zwilling zu :235)', function () {
-    $res = authed()->get(route('group.room', ['h' => 'welcome']))->assertOk();
-
-    $res->assertSee('transition-[width] duration-300 motion-reduce:transition-none', false);
-});
-
 test('Wallet-Hero: Count-Up + grüner Farb-Flash bei Zuwachs', function () {
     $res = authed()->get(route('group.wallet'))->assertOk();
 

@@ -53,7 +53,6 @@ const makeCtx = (zappers: Map<string, Zapper>): ChatBuildCtx => ({
     byId: new Map([[EVENT.id, EVENT]]),
     commentsByRoot: new Map(),
     reactionsByTarget: new Map(),
-    pollResponsesByTarget: new Map(),
     zapsByTarget: new Map([[EVENT.id, [receipt]]]),
 })
 
