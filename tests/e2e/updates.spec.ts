@@ -109,15 +109,17 @@ function publishMessage(h: string, content: string): string {
 }
 
 /**
- * Fremder NIP-22-Kommentar auf `rootId` — Tag-Form wie die App sie schreibt
- * (`E`=Root, `e`=Parent, `k`=Parent-Kind, `h`=Root-Raum, siehe room.spec.ts C6b).
- * Das `h` ist additiv (Thread-Interop) und trägt hier die Raum-Zuordnung, falls die
- * Wurzel noch nicht im Repository liegt.
+ * Fremde Thread-Antwort auf `rootId` in **Buzz-Form** — exakt die Tag-Form, die auch die
+ * App schreibt (`js/threading.ts`): kind 9, `h` der Wurzel, EIN `["e", root, "", "reply"]`.
+ *
+ * Der leere Relay-Hint an Position 2 ist kein Schönheitsfehler, sondern lasttragend: ohne
+ * ihn stünde der Marker auf Index 2 und würde weder von Buzz noch von `threadRootId`
+ * gelesen — die Zeile fiele in dieser Suite stumm aus, statt rot zu werden.
  */
 function publishComment(h: string, rootId: string, content: string): void {
     nak([
-        'event', '--auth', '--sec', ADMIN, '-k', '1111',
-        '-t', `E=${rootId}`, '-t', `e=${rootId}`, '-t', 'k=9', '-t', `h=${h}`,
+        'event', '--auth', '--sec', ADMIN, '-k', '9',
+        '-t', `h=${h}`, '-t', `e=${rootId};;reply`,
         '-c', content, ZOOID_WS,
     ])
 }
@@ -562,8 +564,9 @@ test('Anker 5: kaputtes ?from= landet auf /spaces und taucht in keiner Thread-UR
         await page.evaluate(() => sessionStorage.removeItem('appNav'))
         expect(await page.evaluate(() => sessionStorage.getItem('appNav')), 'Vorbedingung: Tab ohne App-Vorgänger').toBeNull()
         await expect(page.getByRole('heading', { name: `# ${room.name}` })).toBeVisible({ timeout: 25_000 })
-        // Zwei Stufen, weil zwei Ladepfade: erst der Verlauf (kind 9), dann die
-        // Kommentare (kind 1111) — die Pille hängt an letzteren. Ohne die erste Stufe
+        // Zwei Stufen, weil zwei Ladepfade: erst der Verlauf (Wurzeln), dann die
+        // Antworten — die Pille hängt an letzteren. Beide sind kind 9, kommen aber über
+        // verschiedene Filter herein (`#h` vs. `#e`). Ohne die erste Stufe
         // liefe der Pillen-Timeout gegen einen Raum, der noch gar nichts gerendert hat;
         // genau daran ist der Anker unter voller Parallellast einmal gescheitert.
         await expect(page.getByText(rootMarker, { exact: true })).toBeVisible({ timeout: 30_000 })

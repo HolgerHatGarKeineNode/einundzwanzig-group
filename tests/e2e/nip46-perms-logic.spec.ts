@@ -15,12 +15,15 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
         // Jeder Kind, den der Client signiert (Kind-Audit). 27235 ist am kritischsten:
         // ohne ihn kein Server-Login-Handoff und kein NIP-86-Relay-Admin.
         //
-        // Die Liste war unvollständig und hat damit genau den Bug durchgelassen, den sie
-        // fangen soll: 1111 (Thread-Kommentar) fehlte in NIP46_PERMS, der Test fragte ihn
-        // nicht ab. Ergänzt wurden 1111 und die Admin-Kinds 9000/9001/9002/9007/9008 —
-        // wer hier einen Kind hinzufügt, muss ihn auch in NIP46_PERMS führen.
+        // Die Liste war einmal unvollständig und hat damit genau den Bug durchgelassen,
+        // den sie fangen soll — wer hier einen Kind hinzufügt, muss ihn auch in
+        // NIP46_PERMS führen.
+        //
+        // 1111 ist mit P4 RAUS: Thread-Antworten sind bei Buzz kind 9 mit markierten
+        // `e`-Tags, es gibt kein zweites Thread-Kind mehr (Buzz lehnt 1111 mit
+        // `restricted: unknown event kind` ab). Die Gegenprobe darunter nagelt das fest.
         const required = [
-            0, 5, 7, 9, 1111, 1984,
+            0, 5, 7, 9, 1984,
             9000, 9001, 9002, 9005, 9007, 9008, 9021, 9022, 9734,
             10009, 22242, 27235, 28934, 28936,
             // 30078 (NIP-78 App-Data) = Lesestand. Publiziert wird er erst in P6 —
@@ -31,6 +34,14 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
         }
+    })
+
+    test('abgelöste Thread-Kinds sind RAUS — jeder Eintrag kostet einen Amber-Prompt', () => {
+        // Gegenprobe zur Liste oben: 1111 (NIP-22) und 10 (Lotus In-Chat-Thread) werden
+        // vom Client nicht mehr signiert. Sie stehenzulassen wäre nicht bloß tote Zeile —
+        // Amber zeigt dem Nutzer beim Koppeln jeden Kind einzeln an.
+        expect(perms).not.toContain('sign_event:1111')
+        expect(perms).not.toContain('sign_event:10')
     })
 
     test('enthält nip44 encrypt/decrypt, aber kein nip04 (Client nutzt nur nip44)', () => {

@@ -117,8 +117,9 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=edit -t name=Bearbeiten -t about=C3
 # Dedizierter Schreib-Raum für die C4-Tests (Mentions/Copy/Info): schreiben eigene
 # Nachrichten mit @-Mentions und dürfen „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=mention -t name=Mentions -t about=C4-Mention-Tests "$R" >/dev/null 2>&1 || true
-# Dedizierter Schreib-Raum für die C6b-Tests (Thread-Ansicht/NIP-22-Kommentare):
-# schreiben Quote-Only-Nachrichten + kind-1111-Kommentare und dürfen „welcome" nicht aufblähen.
+# Dedizierter Schreib-Raum für die Threading-Tests (Thread-Ansicht): schreiben
+# Quote-Only-Nachrichten + Thread-Antworten (kind 9 mit reply-Marker) und dürfen
+# „welcome" nicht aufblähen.
 nak event --auth --sec "$ADMIN" -k 9007 -t h=thread -t name=Threads -t about=C6b-Thread-Tests "$R" >/dev/null 2>&1 || true
 # Dedizierter Raum für die P3-Tests des Ungelesen-PUNKTES (unread-dot.spec.ts): die
 # publizieren fremde Nachrichten, um den Punkt anzuschalten, und dürfen weder „welcome"

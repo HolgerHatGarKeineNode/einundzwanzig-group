@@ -1554,13 +1554,24 @@ test('C4: natives Modal zeigt Kopieren + Info', async ({ page }) => {
 })
 
 /**
- * C6b (Threading, NIP-22 kind 1111, Slack-Modell) — JEDE Nachricht ist thread-fähig
- * (kein Quote-Only nötig): der Hover-Button „Im Thread antworten" öffnet das Overlay,
- * eine Antwort landet als kind-1111 mit `E`(Root=Nachricht selbst)/`e`(Parent)/`k`/`h`/
- * PROTECTED und hebt den Zähler. Eine verschachtelte Antwort trägt `e`=Antwort-id, `E`=Root.
- * Zurück im Feed erscheint der Antworten-Indikator an der Nachricht.
+ * Threading in **Buzz-Form** (Slack-Modell) — JEDE Nachricht ist thread-fähig (kein
+ * Quote-Only nötig): der Hover-Button „Im Thread antworten" öffnet das Overlay, eine
+ * Antwort landet als **kind 9** mit `h` + markiertem `e`-Tag und hebt den Zähler.
+ *
+ * **Was dieser Test beweist und was nicht.** Er läuft gegen zooid und prüft deshalb, was
+ * der CLIENT erzeugt — die Tag-FORM, durch den echten Browser-Pfad. Dass Buzz diese Form
+ * auch verknüpft (und die falsche still verschluckt), prüft `buzz-room.spec.ts` gegen den
+ * echten Buzz-Stack; beides zusammen deckt die Kette ab.
+ *
+ * Die geprüften Regeln (siehe `js/threading.ts`):
+ *  - Tiefe 1: EIN `["e", root, "", "reply"]` — **kein** `root`-Marker. Genau hier liegt
+ *    die teuerste Falle: die NIP-10-konforme `root`-only-Form nimmt Buzz an, verknüpft
+ *    sie aber nicht und meldet nichts. Der Test nagelt fest, dass der Client sie nicht
+ *    mehr erzeugen KANN.
+ *  - Tiefe 2: `["e", root, "", "root"]` UND `["e", parent, "", "reply"]`.
+ *  - Marker steht auf Index 3, Relay-Hint (Index 2) ist leer, aber vorhanden.
  */
-test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikator + verschachtelt', async ({ page }) => {
+test('Threading: Buzz-Form (kind 9, reply/root-Marker) + Indikator + verschachtelt', async ({ page }) => {
     // Dedizierter „thread"-Raum (bläht „welcome" nicht auf). Self-contained.
     await openRoom(page, 'thread')
     const composer = page.getByPlaceholder('Nachricht schreiben…')
@@ -1583,7 +1594,7 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     await expect(dialog).toBeVisible()
     await expect(dialog.getByText(marker).first()).toBeVisible() // Wurzel gerendert
 
-    // 3) Antwort schreiben → kind-1111 am Relay.
+    // 3) Antwort schreiben → kind 9 mit `reply`-Marker am Relay.
     const sendReply = page.getByRole('button', { name: 'Antwort senden' })
     const c1 = `REPLY-${Math.floor(Math.random() * 1e9)}`
     await page.getByPlaceholder('Im Thread antworten…').fill(c1)
@@ -1596,16 +1607,26 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     await expect(page.getByRole('banner').getByText('1 Antwort', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     let comment: RelayEvent | undefined
-    await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
     const cm = comment as RelayEvent
-    const tag = (name: string) => cm.tags.find((t) => t[0] === name)
-    expect(tag('E')?.[1]).toBe(rootId) // Thread-Root = die Nachricht selbst
-    expect(tag('e')?.[1]).toBe(rootId) // direktes Parent = Root (Top-Level-Antwort)
-    expect(tag('k')?.[1]).toBe('9') // Parent-Kind der Wurzel
-    expect(tag('h')?.[1]).toBe('thread') // `h` des Thread-ROOTS (kind 9) — additiv für NIP-29/Lotus-Interop (P1)
-    expect(tag('-')).toBeTruthy() // PROTECTED (zooid meldet NIP-70)
+    const eTags = (ev: RelayEvent) => ev.tags.filter((t) => t[0] === 'e')
+    const marked = (ev: RelayEvent, m: string) => eTags(ev).find((t) => t[3] === m)
+    expect(cm.kind).toBe(9) // Antwort = normale Raum-Nachricht, kein eigenes Kind
+    expect(cm.tags.find((t) => t[0] === 'h')?.[1]).toBe('thread') // `h` aus der WURZEL
+    expect(cm.tags.find((t) => t[0] === '-')).toBeTruthy() // PROTECTED (zooid meldet NIP-70)
+    // Tiefe 1: GENAU ein `reply`-Marker auf die Wurzel …
+    expect(eTags(cm)).toHaveLength(1)
+    expect(marked(cm, 'reply')?.[1]).toBe(rootId)
+    // … und KEIN `root`-Marker. Das ist die aktive Fallenprobe: die NIP-10-Form
+    // `["e", root, "", "root"]` allein würde Buzz still verschlucken.
+    expect(marked(cm, 'root')).toBeUndefined()
+    // Marker auf Index 3, leerer Relay-Hint auf Index 2 (fiele er weg, rutschte der
+    // Marker auf Index 2 und Buzz läse ihn gar nicht).
+    expect(eTags(cm)[0]).toEqual(['e', rootId, '', 'reply'])
+    // Keine p-Tags fürs Threading — Buzz wertet sie nie aus.
+    expect(cm.tags.some((t) => t[0] === 'p')).toBe(false)
 
-    // 4) Auf die Antwort antworten (verschachtelt): e = Antwort-id, E = Root. Der Reply-Button
+    // 4) Auf die Antwort antworten (verschachtelt): `root`=Wurzel + `reply`=Antwort. Der Reply-Button
     // liegt jetzt (P3 4.2) in der Hover-Toolbar der geteilten Row → Kommentar hovern, dann klicken.
     const c1Row = dialog.locator('div.group', { hasText: c1 })
     await c1Row.hover()
@@ -1622,11 +1643,16 @@ test('C6b: Thread an jeder Nachricht — kind-1111 (E/e/k/h/PROTECTED) + Indikat
     await expect(dialog.getByText(/Antwort auf/).first()).toBeVisible({ timeout: 15_000 })
 
     let nested: RelayEvent | undefined
-    await expect.poll(() => (nested = queryRelayEvent((e) => e.content === c2, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => (nested = queryRelayEvent((e) => e.content === c2, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
     const nt = nested as RelayEvent
-    expect(nt.tags.find((t) => t[0] === 'e')?.[1]).toBe(cm.id) // Parent = die erste Antwort
-    expect(nt.tags.find((t) => t[0] === 'E')?.[1]).toBe(rootId) // Root bleibt die Wurzel
-    expect(nt.tags.find((t) => t[0] === 'h')?.[1]).toBe('thread') // auch nested trägt das Root-`h` (P1, aus dem Root, nicht dem Parent)
+    expect(nt.kind).toBe(9)
+    // Tiefe 2: BEIDE Marker sind Pflicht — nur `reply` lehnt Buzz mit
+    // `root tag does not match thread ancestry` hart ab.
+    expect(marked(nt, 'root')?.[1]).toBe(rootId) // Wurzel bleibt die Wurzel
+    expect(marked(nt, 'reply')?.[1]).toBe(cm.id) // Parent = die erste Antwort
+    expect(eTags(nt)).toHaveLength(2)
+    expect(eTags(nt)).toEqual([['e', rootId, '', 'root'], ['e', cm.id, '', 'reply']])
+    expect(nt.tags.find((t) => t[0] === 'h')?.[1]).toBe('thread') // `h` aus dem ROOT, nicht dem Parent
 
     // 5) Zurück im Feed: der Antworten-Indikator erscheint an der Nachricht.
     await page.getByRole('button', { name: 'Zurück' }).click()
@@ -1658,13 +1684,14 @@ test('P3(4.2): Reaktion auf einen Thread-Kommentar erscheint als Chip (geerbte R
     await send.click()
     await expect(dialog.getByText(c1, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    // Kommentar-Event (kind 1111) am Relay holen, dann eine kind-7-Reaktion darauf publizieren
-    // (h=thread = Root-h, e=commentId, k=1111) — genau wie makeReaction sie baut.
+    // Antwort-Event am Relay holen, dann eine kind-7-Reaktion darauf publizieren
+    // (h=thread = Root-h, e=replyId, k=9) — genau wie makeReaction sie baut. `k` ist
+    // seit dem Buzz-Umbau 9, nicht mehr 1111: eine Antwort IST eine Raum-Nachricht.
     let comment: RelayEvent | undefined
-    await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => (comment = queryRelayEvent((e) => e.content === c1, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
     execFileSync(NAK, [
         'event', '--auth', '--sec', ADMIN, '-k', '7', '-t', 'h=thread',
-        '-t', `e=${(comment as RelayEvent).id}`, '-t', 'k=1111', '-c', '🔥', ZOOID_WS,
+        '-t', `e=${(comment as RelayEvent).id}`, '-t', 'k=9', '-c', '🔥', ZOOID_WS,
     ])
 
     // Der Chip erscheint an der Kommentar-Row im Thread (geerbte Reaktions-Lane, Schritt 5).
@@ -1672,15 +1699,21 @@ test('P3(4.2): Reaktion auf einen Thread-Kommentar erscheint als Chip (geerbte R
 })
 
 /**
- * P4 (Interop, bidirektional lesen) — Lotus' In-Chat-Thread ist ein `kind 10` (NIP-29 Group
- * Chat Threading): Root via `["e", rootId, relay, "root"]`, Parent via `["e", parentId, …, "reply"]`,
- * plus `["h", groupId, …]`. Unser Read war doppelt auf NIP-22 (`kind 1111` + `#E`) verriegelt.
- * Test: wir posten eine kind-9-Wurzel, ein FREMDER Client (ADMIN) seedet eine kind-10-Antwort
- * exakt nach Lotus-Spec → sie erscheint als Antworten-Indikator UND als Kommentar-Row im Thread
- * (geteilte Row), eine verschachtelte kind-10 (`reply`-Marker) zeigt den Eltern-Bezug. Kein
- * Geister-Thread (Zähler = genau die kind-10-Events).
+ * Interop, LESEN — eine Antwort eines FREMDEN Clients wird gelesen und richtig eingeordnet.
+ *
+ * Vorgeschichte: dieser Fall prüfte bis P4 Lotus' `kind 10`. Den liest der Client nicht mehr
+ * (mit dem Buzz-Umbau ersatzlos raus — Buzz nimmt kind 10 gar nicht erst an,
+ * `restricted: unknown event kind`). Der Fall ist deshalb **umgebaut, nicht entsorgt**: seine
+ * Substanz war nie das Kind, sondern die Frage „verstehen wir Marker-Threading, das NICHT von
+ * uns stammt?" — und die stellt sich mit Buzz genauso, nur in kind 9.
+ *
+ * Geprüft: ein Fremd-Client (ADMIN) seedet per nak eine Antwort in Buzz-Form → Antworten-
+ * Indikator + Kommentar-Row im Thread; eine verschachtelte Antwort (`root`+`reply`) zeigt den
+ * Eltern-Bezug; der Zähler ist GENAU diese Events (kein Geister-Thread). Schritt 7 ist der
+ * eigentliche Regression-Guard: antworten wir auf eine fremde Antwort, muss unser Event an der
+ * echten kind-9-WURZEL rooten — nicht am fremden Event.
  */
-test('P4: Lotus kind-10 In-Chat-Thread wird gelesen (Root/Reply-Marker, Indikator, geteilte Row)', async ({ page }) => {
+test('Interop: fremde Antwort (kind 9, Marker) wird gelesen — Indikator, Eltern-Bezug, Root-Guard', async ({ page }) => {
     await openRoom(page, 'thread')
     const composer = page.getByPlaceholder('Nachricht schreiben…')
     await expect(composer).toBeVisible({ timeout: 15_000 })
@@ -1694,50 +1727,53 @@ test('P4: Lotus kind-10 In-Chat-Thread wird gelesen (Root/Reply-Marker, Indikato
     await expect.poll(() => (root = queryRelayEvent((e) => e.content === marker, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
     const rootId = (root as RelayEvent).id
 
-    // 2) Lotus-kind-10-Antwort als FREMDER Client seeden — exakt nach Spec: e=root(marker "root"),
-    //    p=Root-Autor, h=Group. (nak: `key=v1;v2;v3` → mehrwertiges Tag mit Marker in Position 3.)
-    const l1 = `LOTUSREPLY-${Math.floor(Math.random() * 1e9)}`
+    // 2) Fremde Antwort auf die Wurzel seeden — Buzz-Form: EIN `reply`-Marker, leerer
+    //    Relay-Hint auf Index 2. (nak: `key=v1;v2;v3` → mehrwertiges Tag, Marker in Position 3.)
+    //    Das `p` bleibt drin, obwohl es fürs Threading bedeutungslos ist: ein fremder Client
+    //    darf es setzen, und unser Read muss davon unbeeindruckt bleiben.
+    const l1 = `FOREIGNREPLY-${Math.floor(Math.random() * 1e9)}`
     execFileSync(NAK, [
-        'event', '--auth', '--sec', ADMIN, '-k', '10',
-        '-t', `h=thread;${ZOOID_WS}`,
-        '-t', `e=${rootId};${ZOOID_WS};root`,
+        'event', '--auth', '--sec', ADMIN, '-k', '9',
+        '-t', 'h=thread',
+        '-t', `e=${rootId};;reply`,
         '-t', `p=${VIEWER}`,
         '-c', l1, ZOOID_WS,
     ])
 
-    // 3) Der Antworten-Indikator erscheint an der Nachricht (kind-10 in commentsByRoot gebündelt).
+    // 3) Der Antworten-Indikator erscheint an der Nachricht (die Antwort wird über den
+    //    `reply`-Marker ihrer Wurzel zugeordnet — und NICHT im Raum-Feed gezeigt).
     const row = page.locator('div.group', { hasText: marker })
     await expect(row.getByText('1 Antwort', { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    // 4) Thread öffnen → das kind-10 rendert als vollwertige Kommentar-Row (geteilte Raum-Row).
+    // 4) Thread öffnen → die fremde Antwort rendert als vollwertige Row (geteilte Raum-Row).
     await row.hover()
     await row.getByRole('button', { name: 'Im Thread antworten' }).click()
     const dialog = page.getByRole('dialog', { name: 'Thread' })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByText(l1, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    // 5) Verschachtelte kind-10 (reply-Marker auf die erste Antwort) → Eltern-Bezug als
-    //    „Antwort auf <Autor>"-Zeile (commentParentId liest den `reply`-Marker, nicht den ersten `e`).
+    // 5) Verschachtelte fremde Antwort (Tiefe 2: `root`+`reply`) → Eltern-Bezug als
+    //    „Antwort auf <Autor>"-Zeile. `threadParentId` liest den `reply`-Marker, NICHT
+    //    einfach das erste `e` — sonst stünde hier der Root-Autor.
     let l1Event: RelayEvent | undefined
-    await expect.poll(() => (l1Event = queryRelayEvent((e) => e.content === l1, 'thread', 10)) !== undefined, { timeout: 15_000 }).toBe(true)
-    const l2 = `LOTUSNESTED-${Math.floor(Math.random() * 1e9)}`
+    await expect.poll(() => (l1Event = queryRelayEvent((e) => e.content === l1, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const l2 = `FOREIGNNESTED-${Math.floor(Math.random() * 1e9)}`
     execFileSync(NAK, [
-        'event', '--auth', '--sec', ADMIN, '-k', '10',
-        '-t', `h=thread;${ZOOID_WS}`,
-        '-t', `e=${rootId};${ZOOID_WS};root`,
-        '-t', `p=${VIEWER}`,
-        '-t', `e=${(l1Event as RelayEvent).id};${ZOOID_WS};reply`,
+        'event', '--auth', '--sec', ADMIN, '-k', '9',
+        '-t', 'h=thread',
+        '-t', `e=${rootId};;root`,
+        '-t', `e=${(l1Event as RelayEvent).id};;reply`,
         '-c', l2, ZOOID_WS,
     ])
     await expect(dialog.getByText(l2, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(dialog.getByText(/Antwort auf/).first()).toBeVisible({ timeout: 15_000 })
 
-    // 6) Kein Geister-Thread: der Zähler ist GENAU die zwei kind-10 (keine Fremd-Buckets).
+    // 6) Kein Geister-Thread: der Zähler ist GENAU diese zwei Antworten (keine Fremd-Buckets).
     await expect(page.getByRole('banner').getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    // 7) Regression-Guard: Wir antworten auf das FREMDE kind-10. Unser Write bleibt kind-1111,
-    //    MUSS aber an der echten kind-9-Wurzel rooten (E=rootId) — sonst re-rootet welshman den
-    //    Reply aufs kind-10 (E=kind10, nur lowercase-Marker) und er verschwände aus dem Thread.
+    // 7) Regression-Guard: Wir antworten auf die FREMDE Antwort. Unser Event muss an der
+    //    echten kind-9-WURZEL rooten (`root`=rootId) und das fremde Event als `reply` führen —
+    //    würde stattdessen das fremde Event zur Wurzel, fiele die Antwort aus dem Thread.
     const l1Row = dialog.locator('div.group', { hasText: l1 })
     await l1Row.hover()
     await l1Row.getByRole('button', { name: 'Antworten', exact: true }).click()
@@ -1749,10 +1785,13 @@ test('P4: Lotus kind-10 In-Chat-Thread wird gelesen (Root/Reply-Marker, Indikato
     // Unsere Antwort bleibt im Thread sichtbar (nicht spurlos verschwunden).
     await expect(dialog.getByText(r1, { exact: true })).toBeVisible({ timeout: 15_000 })
     let ourReply: RelayEvent | undefined
-    await expect.poll(() => (ourReply = queryRelayEvent((e) => e.content === r1, null, 1111)) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => (ourReply = queryRelayEvent((e) => e.content === r1, 'thread')) !== undefined, { timeout: 15_000 }).toBe(true)
     const or = ourReply as RelayEvent
-    expect(or.tags.find((t) => t[0] === 'E')?.[1]).toBe(rootId) // an der kind-9-Wurzel gerootet, NICHT am kind-10
-    expect(or.tags.find((t) => t[0] === 'K')?.[1]).toBe('9') // Root-Kind = 9 (nicht 10)
+    const ourE = or.tags.filter((t) => t[0] === 'e')
+    expect(or.kind).toBe(9)
+    expect(ourE.find((t) => t[3] === 'root')?.[1]).toBe(rootId) // an der WURZEL gerootet …
+    expect(ourE.find((t) => t[3] === 'reply')?.[1]).toBe((l1Event as RelayEvent).id) // … Parent = die fremde Antwort
+    expect(ourE).toHaveLength(2) // Tiefe 2 ⇒ genau zwei Marker-Tags, nicht mehr
     await expect(page.getByRole('banner').getByText('3 Antworten', { exact: true })).toBeVisible({ timeout: 15_000 })
 })
 
@@ -1825,7 +1864,7 @@ test('C6b: Threads-Übersicht auf der Startseite + Deep-Link in den Raum', async
     // Vor dem HARTEN Reload (page.goto) sicherstellen, dass der Kommentar wirklich am Relay
     // liegt — sonst bricht die Navigation den optimistischen In-Flight-Publish ab (bei echten
     // Nutzern via wire:navigate bleibt der Socket erhalten; hier ist es ein voller Reload).
-    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, 'thread') !== undefined, { timeout: 15_000 }).toBe(true)
     await page.getByRole('button', { name: 'Zurück' }).click()
 
     // Startseite → „Threads"-Tab öffnen → Karte zeigt den Thread (Root-Snippet).
@@ -1868,7 +1907,7 @@ test('P2: Antworten-Pille navigiert auf die teilbare Thread-Route (kein Modal)',
     await expect(send).toBeEnabled({ timeout: 15_000 })
     await send.click()
     await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, 'thread') !== undefined, { timeout: 15_000 }).toBe(true)
     await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(dialog).toBeHidden()
 
@@ -1912,7 +1951,7 @@ test('Thread-Umbau (a): Antworten-Pille öffnet den Thread WARM (kein Insel-Rebo
     await expect(send).toBeEnabled({ timeout: 15_000 })
     await send.click()
     await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, 'thread') !== undefined, { timeout: 15_000 }).toBe(true)
     await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(dialog).toBeHidden()
 
@@ -1964,7 +2003,7 @@ test('Thread-Umbau (b): Kopf-Zurück-Pfeil schließt den warm geöffneten Thread
     await expect(send).toBeEnabled({ timeout: 15_000 })
     await send.click()
     await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, 'thread') !== undefined, { timeout: 15_000 }).toBe(true)
     await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(dialog).toBeHidden()
 
@@ -2014,7 +2053,7 @@ test('Thread-Umbau (c): kalter Deep-Link-Aufruf öffnet den Thread, Kopf-Zurück
     await expect(send).toBeEnabled({ timeout: 15_000 })
     await send.click()
     await expect(dialog.getByText(reply, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect.poll(() => queryRelayEvent((e) => e.content === reply, null, 1111) !== undefined, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => queryRelayEvent((e) => e.content === reply, 'thread') !== undefined, { timeout: 15_000 }).toBe(true)
     await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(dialog).toBeHidden()
 
