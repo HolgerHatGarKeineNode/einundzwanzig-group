@@ -48,7 +48,7 @@ test('M3: Directory zeigt Members + Rollen, ohne Flackern', async ({ page }) => 
     // Beide geseedeten Mitglieder (mit kind-0-Namen) — auf das Member-Grid gescopt:
     // „Alice Test" kann auch in der Beitritts-Queue (P4b) auftauchen (offene 9021 für
     // einen closed-Raum), dann wäre ein seitenweites getByText mehrdeutig.
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.list-stagger').getByText('Alice Test')).toBeVisible()
 
     // Rollen-Badges aus 33534 (exakt — „Mitglied" ≠ Überschrift „Mitglieder").
@@ -65,7 +65,7 @@ test('M3: Directory zeigt Members + Rollen, ohne Flackern', async ({ page }) => 
 
 test('M3: Client-Suche filtert die Mitglieder', async ({ page }) => {
     await openDirectory(page)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     const search = page.getByPlaceholder('Mitglied suchen…')
     const grid = page.locator('.list-stagger')
@@ -87,11 +87,11 @@ test('M3: Client-Suche filtert die Mitglieder', async ({ page }) => {
 
 test('M3: Directory überlebt Reload ohne Flackern', async ({ page }) => {
     await openDirectory(page)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await page.reload()
 
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.list-stagger').getByText('Moderator', { exact: true })).toBeVisible()
     await expect(page.getByText('Noch keine Mitglieder')).toBeHidden()
 })
@@ -103,7 +103,7 @@ test('M3: Directory überlebt Reload ohne Flackern', async ({ page }) => {
  */
 test('M6: Relay-Owner sieht die NIP-86-Verwaltungstools', async ({ page }) => {
     await openDirectoryAs(page, ADMIN_HEX)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await expect(page.getByRole('button', { name: 'Rollen verwalten' })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('button', { name: 'Gebannt' })).toBeVisible()
@@ -117,7 +117,7 @@ test('M6: Relay-Owner sieht die NIP-86-Verwaltungstools', async ({ page }) => {
 /** M6 — ein normaler User sieht KEINE Verwaltungstools (Gating). */
 test('M6: normaler User sieht keine Verwaltungstools', async ({ page }) => {
     await openDirectory(page)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('button', { name: 'Rollen verwalten' })).toBeHidden()
 })
 
@@ -127,7 +127,7 @@ test('M6: normaler User sieht keine Verwaltungstools', async ({ page }) => {
  */
 test('P2: Admin sieht den Space-Editor mit vorbelegtem Namen', async ({ page }) => {
     await openDirectoryAs(page, ADMIN_HEX)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: 'Space', exact: true }).click()
     const modal = page.locator('dialog[data-modal="space-edit"]')
@@ -139,7 +139,7 @@ test('P2: Admin sieht den Space-Editor mit vorbelegtem Namen', async ({ page }) 
 /** P2 — ein normaler User sieht den Space-Editor NICHT (Gating). */
 test('P2: normaler User sieht keinen Space-Editor', async ({ page }) => {
     await openDirectory(page)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('button', { name: 'Space', exact: true })).toBeHidden()
 })
 
@@ -153,7 +153,7 @@ test('P2: Admin ändert den Space-Namen (changerelayname)', async ({ page }) => 
     const marker = `Space-${Math.floor(Math.random() * 1e9)}`
     try {
         await openDirectoryAs(page, ADMIN_HEX)
-        await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+        await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
         await page.getByRole('button', { name: 'Space', exact: true }).click()
         const modal = page.locator('dialog[data-modal="space-edit"]')
@@ -181,7 +181,7 @@ test('P2: No-op-Save lässt den Space-Namen unverändert', async ({ page }) => {
     const ORIG = 'Zooid Test Space'
     try {
         await openDirectoryAs(page, ADMIN_HEX)
-        await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+        await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
         await page.getByRole('button', { name: 'Space', exact: true }).click()
         const modal = page.locator('dialog[data-modal="space-edit"]')
@@ -222,7 +222,7 @@ test('P3: Admin sieht die Melde-Queue mit der Meldung', async ({ page }) => {
     seedReport(ADMIN_HEX, pubOf(REPORT_TARGET), DUMMY_EVENT_ID, 'spam', marker)
 
     await openDirectoryAs(page, ADMIN_HEX)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: /Meldungen/ }).click()
     const modal = page.locator('dialog[data-modal="action-items"]')
@@ -236,7 +236,7 @@ test('P3: Admin sieht die Melde-Queue mit der Meldung', async ({ page }) => {
 test('P3: normaler User sieht keine Melde-Queue', async ({ page }) => {
     seedReport(ADMIN_HEX, pubOf(REPORT_TARGET), DUMMY_EVENT_ID, 'spam', `NoAdmin-${Math.floor(Math.random() * 1e9)}`)
     await openDirectory(page)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('button', { name: /Meldungen/ })).toBeHidden()
 })
 
@@ -245,7 +245,7 @@ test('P3: Admin verwirft eine Meldung (banevent Report)', async ({ page }) => {
     seedReport(ADMIN_HEX, pubOf(REPORT_TARGET), DUMMY_EVENT_ID, 'other', marker)
 
     await openDirectoryAs(page, ADMIN_HEX)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: /Meldungen/ }).click()
     const modal = page.locator('dialog[data-modal="action-items"]')
@@ -265,7 +265,7 @@ test.skip('P3: Admin bannt den gemeldeten Autor (banpubkey)', async ({ page }) =
     seedReport(ADMIN_HEX, pubOf(REPORT_BAN_TARGET), DUMMY_EVENT_ID, 'spam', marker)
 
     await openDirectoryAs(page, ADMIN_HEX)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: /Meldungen/ }).click()
     const modal = page.locator('dialog[data-modal="action-items"]')
@@ -288,7 +288,7 @@ test('P3: kaputter Report-Pubkey legt die Queue nicht lahm', async ({ page }) =>
     seedReport(ADMIN_HEX, pubOf(REPORT_TARGET), DUMMY_EVENT_ID, 'other', good)
 
     await openDirectoryAs(page, ADMIN_HEX)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: /Meldungen/ }).click()
     const modal = page.locator('dialog[data-modal="action-items"]')
@@ -320,7 +320,7 @@ test('P4b: Admin nimmt eine Beitritts-Anfrage an (closed-Raum)', async ({ page }
     seedJoinRequest(JOIN_APPLICANT, h)
 
     await openDirectoryAs(page, ADMIN_HEX)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: /Meldungen/ }).click()
     const modal = page.locator('dialog[data-modal="action-items"]')
@@ -339,7 +339,7 @@ test('P4b: Admin lehnt eine Beitritts-Anfrage ab (banevent)', async ({ page }) =
     seedJoinRequest(REJECT_APPLICANT, h)
 
     await openDirectoryAs(page, ADMIN_HEX)
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: /Meldungen/ }).click()
     const modal = page.locator('dialog[data-modal="action-items"]')

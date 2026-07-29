@@ -65,7 +65,7 @@ test('Mitglied sieht das Vereins-Gate nicht', async ({ page }) => {
     await expect(page.getByText('Noch kein Vereinsmitglied')).toBeHidden()
 
     await page.goto('/directory')
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Noch kein Vereinsmitglied')).toBeHidden()
 })
 
