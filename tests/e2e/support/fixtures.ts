@@ -1,4 +1,4 @@
-import { test as base, expect, type Page } from '@playwright/test'
+import { test as base, expect, type Page, type Locator } from '@playwright/test'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 
 /**
@@ -104,4 +104,4 @@ export const test = base.extend<object, { workerBackend: void }>({
     },
 })
 
-export { expect, type Page }
+export { expect, type Page, type Locator }

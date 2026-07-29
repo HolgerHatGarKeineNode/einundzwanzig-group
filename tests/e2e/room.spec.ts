@@ -1,4 +1,4 @@
-import { test, expect, type Page } from './support/fixtures'
+import { test, expect, type Page, type Locator } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { useZooid, ZOOID_WS, ZOOID_PORT } from './support/zooid'
@@ -30,6 +30,33 @@ function queryRelayEvent(pred: (e: RelayEvent) => boolean, h: string | null = 'w
 }
 
 /** Loggt via nsec ein und öffnet den Chat eines Raums (default „welcome"). */
+/**
+ * Öffnet das „…"-Menü einer Zeile und liefert den Eintrag `name` — WIEDERHOLBAR.
+ *
+ * Das Menü steht in `<template x-if="!isMobile">` (`chat-row.blade.php:318`) und enthält
+ * ein `flux:dropdown`. Alpine zerstört und erstellt `x-if`-Inhalt bei jeder Neubewertung
+ * neu: streamt eine Nachricht ein oder lädt ein Profil nach, wird die Zeile neu gerendert
+ * — und ein bereits GEÖFFNETES Dropdown verschwindet mit ihr. Der folgende Klick aufs
+ * Item lief dann in den 30-s-Test-Timeout, obwohl Playwright das Element auflösen konnte
+ * („element is not visible", dann Retry bis zum Ende).
+ *
+ * Belegt am 2026-07-29: im Gesamtlauf fielen so `C2: Löschen` und `C4: Info-Modal`, die
+ * einzeln in 3,3 s bzw. 2,2 s durchlaufen. Es ist also KEINE zu knappe Frist — eine
+ * Timeout-Erhöhung hätte nichts geholfen, weil das Menü gar nicht mehr da war.
+ *
+ * `toPass` wiederholt Öffnen UND Sichtbarkeitsprüfung als EINE Einheit; ein einzelner
+ * `.click()` kann das nicht, weil er das verlorene Popover nicht neu öffnet.
+ */
+async function rowMenuItem(page: Page, row: Locator, name: string | RegExp): Promise<Locator> {
+    const item = page.getByRole('menuitem', { name })
+    await expect(async () => {
+        await row.hover()
+        await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
+        await expect(item).toBeVisible({ timeout: 2_000 })
+    }).toPass({ timeout: 20_000 })
+    return item
+}
+
 async function openRoom(page: Page, h = 'welcome'): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
@@ -840,9 +867,7 @@ test('C2: Löschen über das „…"-Menü entfernt die Nachricht (kind-5)', asy
 
     // „…"-Menü → Löschen (nur bei eigener Nachricht) → Bestätigungs-Modal.
     const row = page.locator('div.group', { hasText: marker })
-    await row.hover()
-    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await page.getByRole('menuitem', { name: 'Löschen' }).click()
+    await (await rowMenuItem(page, row, 'Löschen')).click()
     await page.getByRole('button', { name: 'Löschen', exact: true }).click()
 
     await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
@@ -872,9 +897,7 @@ test('C2: Fork off! erzeugt kind-1984 (p + e,reason)', async ({ page }) => {
     const t = target as RelayEvent
 
     const row = page.locator('div.group', { hasText: marker })
-    await row.hover()
-    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await page.getByRole('menuitem', { name: 'Fork off!' }).click()
+    await (await rowMenuItem(page, row, 'Fork off!')).click()
     // Modal offen (Default-Grund „spam") → Fork off!.
     await page.getByRole('button', { name: 'Fork off!', exact: true }).click()
 
@@ -953,9 +976,7 @@ test('C3: Bearbeiten republisht mit gleicher created_at (Delete + kind-9)', asyn
 
     // „…"-Menü → Bearbeiten → Composer trägt den alten Text, Kontext „Nachricht bearbeiten".
     const row = page.locator('div.group', { hasText: a })
-    await row.hover()
-    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await page.getByRole('menuitem', { name: 'Bearbeiten' }).click()
+    await (await rowMenuItem(page, row, 'Bearbeiten')).click()
     await expect(page.getByText('Nachricht bearbeiten')).toBeVisible()
     await expect(composer).toHaveValue(a)
 
@@ -1021,9 +1042,7 @@ test('C3: Zitieren erzeugt Quote-Only (q/p, leerer Body)', async ({ page }) => {
 
     // „…"-Menü → Zitieren → Kontext „Zitieren", Composer leer, Senden trotzdem aktiv.
     const row = page.locator('div.group', { hasText: marker })
-    await row.hover()
-    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await page.getByRole('menuitem', { name: 'Zitieren' }).click()
+    await (await rowMenuItem(page, row, 'Zitieren')).click()
     // Share-Modus aktiv: Composer bleibt leer, Senden ist trotzdem freigeschaltet.
     await expect(composer).toHaveValue('')
     const send = page.getByRole('button', { name: 'Senden' })
@@ -1106,9 +1125,7 @@ test('C3: Bearbeiten einer Antwort erhält q/p + nevent-Präfix', async ({ page 
 
     // B bearbeiten: Composer zeigt nur B's Klartext (ohne Präfix) → auf B2 ändern.
     const rowB = page.locator('div.group', { hasText: b })
-    await rowB.hover()
-    await rowB.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await page.getByRole('menuitem', { name: 'Bearbeiten' }).click()
+    await (await rowMenuItem(page, rowB, 'Bearbeiten')).click()
     await expect(composer).toHaveValue(b)
     await composer.fill(b2)
     await page.getByRole('button', { name: 'Senden' }).click()
@@ -1520,9 +1537,7 @@ test('C4: Info-Modal zeigt nevent/npub/Roh-Event', async ({ page }) => {
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
 
     const row = page.locator('div.group', { hasText: marker })
-    await row.hover()
-    await row.getByRole('button', { name: 'Weitere Aktionen' }).click()
-    await page.getByRole('menuitem', { name: 'Info' }).click()
+    await (await rowMenuItem(page, row, 'Info')).click()
 
     const modal = page.locator('dialog[data-modal="message-info"]')
     await expect(modal.getByText('Nachricht-Details')).toBeVisible()
