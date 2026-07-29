@@ -65,7 +65,17 @@ test('Mitglied sieht das Vereins-Gate nicht', async ({ page }) => {
     await expect(page.getByText('Noch kein Vereinsmitglied')).toBeHidden()
 
     await page.goto('/directory')
-    await expect(page.getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    // `.first()`, weil „Relay Admin" im Verzeichnis ZWEIMAL stehen kann: einmal als
+    // Mitglied der Liste und einmal als gemeldeter Autor in der Melde-Queue. Die
+    // Meldungen stammen aus den C2-Moderationstests — je nachdem, ob die vorher
+    // gelaufen sind, trifft ein globaler Text-Locator ein oder zwei Elemente, und
+    // Playwrights strict mode bricht ab. Genau so ist dieser Fall im Gesamtlauf
+    // wiederholt gescheitert, waehrend er einzeln immer gruen war.
+    //
+    // Geprueft wird hier nur, DASS das Verzeichnis Inhalt zeigt (also das Gate nicht
+    // greift) — welcher der beiden Treffer es ist, spielt fuer diese Aussage keine
+    // Rolle. Die Zeile darunter traegt die eigentliche Zusicherung.
+    await expect(page.getByText('Relay Admin').first()).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Noch kein Vereinsmitglied')).toBeHidden()
 })
 
