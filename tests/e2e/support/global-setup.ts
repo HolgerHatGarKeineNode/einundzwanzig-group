@@ -35,6 +35,13 @@ function needsBuild(): boolean {
 }
 
 export default function globalSetup(): void {
+    // Lauf-Marker der zooid-Instanzen loeschen. Sie schuetzen INNERHALB eines Laufs
+    // davor, dass ein neu gestarteter Worker den Relay neu aufsetzt und damit den
+    // gerade laufenden Test mitreisst (Begruendung in zooid-testserver.sh, RUNMARK).
+    // Zu Lauf-Beginn muessen sie weg, sonst wuerde der Bloat-Guard nie wieder greifen
+    // und die Raeume wuechsen ueber Laeufe hinweg unbegrenzt.
+    execFileSync('bash', ['-c', 'rm -f /tmp/e2e-zooid-*.run'], { stdio: 'inherit' })
+
     execFileSync(
         'bash',
         ['-c', '[ -f /home/user/Code/zooid/bin/zooid ] || (cd /home/user/Code/zooid && CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go)'],
