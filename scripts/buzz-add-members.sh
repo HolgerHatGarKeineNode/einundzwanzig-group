@@ -106,6 +106,13 @@ for pk in "${PUBKEYS[@]}"; do
     else
         OK=$((OK + 1))
     fi
+    # Kurze Pause zwischen den Events. Beim ersten Lauf ueber die 116er-Liste (2026-07-28)
+    # meldete nak fuer ALLE Erfolg, vier Eintraege fehlten danach trotzdem in der DB —
+    # einzeln nachgefahren gingen genau dieselben Pubkeys sofort durch. Ein „success" von
+    # nak belegt also nur, dass der Relay das Event angenommen hat, nicht dass er es
+    # verarbeitet hat. Die Pause macht den Effekt unwahrscheinlicher, beseitigt ihn aber
+    # nicht — siehe die Nachkontrolle unten.
+    sleep 0.1
 done
 printf '\r%*s\r' 40 ''
 
@@ -116,3 +123,21 @@ if [ -n "$FAILED_LIST" ]; then
     printf "%b" "$FAILED_LIST"
     exit 1
 fi
+
+cat <<'HINT'
+
+NACHKONTROLLE NICHT UEBERSPRINGEN. Ein "erfolgreich" oben heisst: der Relay hat das
+Event angenommen — nicht, dass die Mitgliedschaft in der Datenbank steht. Beim ersten
+Lauf ueber die 116er-Liste fehlten danach vier Eintraege, obwohl nak fuer alle Erfolg
+meldete; einzeln nachgefahren gingen dieselben Pubkeys sofort durch.
+
+Abgleich (lokaler Stack, Soll-Datei gegen relay_members):
+
+  docker exec <postgres-container> psql -U buzz -d buzz -t -A \
+      -c "select pubkey from relay_members;" | sort -u > /tmp/ist.txt
+  sort -u <soll-datei> > /tmp/soll.txt
+  comm -23 /tmp/soll.txt /tmp/ist.txt      # muss leer sein
+
+Was uebrig bleibt, in eine Datei schreiben und dieses Skript erneut damit aufrufen —
+9030 ist idempotent, ein zweiter Lauf schadet nie.
+HINT
