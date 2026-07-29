@@ -248,6 +248,14 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         // Die eigentliche Zusage: der Composer erscheint, ohne dass jemand neu lädt.
         await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 20_000 })
         await expect(joinButton).toBeHidden()
+
+        // Und der Rueckweg, im selben Fall: Buzz schickt die aktualisierte 39002 auch
+        // nach dem Austritt nicht ueber den Fan-out. Ohne das gespiegelte Nachladen
+        // bliebe der Composer stehen, obwohl der Nutzer draussen ist — der naechste
+        // Sendeversuch scheiterte dann am Relay, ohne dass die Oberflaeche es andeutet.
+        await page.getByRole('button', { name: 'Raum verlassen' }).click()
+        await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeHidden({ timeout: 20_000 })
+        await expect(joinButton).toBeVisible()
     })
 
     /**
