@@ -9,7 +9,11 @@ async function openSettings(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
     await page.goto('/settings/space')
-    await expect(page.getByText('Darstellung')).toBeVisible()
+    // Auf die ÜBERSCHRIFT ankern, nicht auf den Text: seit dem Settings-Merge
+    // (2026-07-10) nennt der Untertitel „Konto, Space, Wallet und Darstellung an
+    // einem Ort." dasselbe Wort, und `getByText` bricht dann mit einer
+    // strict-mode-Verletzung ab — der Test war seitdem still rot.
+    await expect(page.getByRole('heading', { name: 'Darstellung' })).toBeVisible()
 }
 
 /**
