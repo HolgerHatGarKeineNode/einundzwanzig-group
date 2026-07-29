@@ -1793,6 +1793,21 @@ test('Anker 20: Glockenzahl entspricht exakt den ungelesenen /updates-Zeilen (Ga
         }
     }
 
+    // ERST auf das Eintreffen warten, DANN auf Stabilität. `waitStable` allein genügt
+    // hier nicht: es wartet darauf, dass die Zahl sich nicht mehr ÄNDERT — vier gleiche
+    // Lesungen im Sekundentakt reichen ihm. Ist die Nachricht nach vier Sekunden noch
+    // unterwegs, liest es viermal die 0, hält sie für stabil und der Test fällt mit
+    // „muss mindestens EINE Zeile beitragen". Genau so ist er im Gesamtlauf vom
+    // 2026-07-29 gefallen, während er einzeln zuverlässig lief: unter Last dauert die
+    // Zustellung länger als die Stabilitätsfrist. Kein Produktfehler — der Test hat auf
+    // „ändert sich nicht mehr" geprüft, wo er „ist angekommen" meinte.
+    await expect
+        .poll(readBellCount, {
+            message: 'die eigene Nachricht muss mindestens EINE Zeile beitragen',
+            timeout: 60_000,
+        })
+        .toBeGreaterThan(0)
+
     let bellCount = await waitStable(readBellCount)
     console.log(`[anker20] Glocke zunächst stabil bei ${bellCount} ungelesenen Hinweisen`)
     expect(bellCount, 'die eigene Nachricht muss mindestens EINE Zeile beitragen').toBeGreaterThan(0)
