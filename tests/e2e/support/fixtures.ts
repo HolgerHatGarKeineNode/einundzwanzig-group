@@ -24,6 +24,11 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
  */
 const SLOT_OFFSET = Number(process.env.E2E_SLOT_OFFSET ?? '0')
 
+// `E2E_RELAY=buzz|zooid` (Default zooid) — siehe support/global-setup.ts + support/buzz.ts.
+// Im Buzz-Modus seedet global-setup.ts den GETEILTEN Docker-Stack einmalig VOR allen
+// Workern; hier gibt es dann nichts pro Worker zu seeden (kein Pro-Worker-zooid-Äquivalent).
+const relayMode = (): 'zooid' | 'buzz' => (process.env.E2E_RELAY === 'buzz' ? 'buzz' : 'zooid')
+
 /** Pollt, bis `serve` HTTP beantwortet (< 500). Wirft nach `timeoutMs`. */
 const waitForHttp = async (url: string, timeoutMs = 60_000): Promise<void> => {
     const deadline = Date.now() + timeoutMs
@@ -52,10 +57,14 @@ export const test = base.extend<object, { workerBackend: void }>({
             const zooidPort = 3335 + slot
             const servePort = 8137 + slot
 
-            execFileSync('bash', ['tests/e2e/support/zooid-testserver.sh'], {
-                env: { ...process.env, ZOOID_PORT: String(zooidPort) },
-                stdio: 'inherit',
-            })
+            if (relayMode() === 'zooid') {
+                execFileSync('bash', ['tests/e2e/support/zooid-testserver.sh'], {
+                    env: { ...process.env, ZOOID_PORT: String(zooidPort) },
+                    stdio: 'inherit',
+                })
+            }
+            // buzz-Modus: der Stack ist schon in global-setup.ts geseedet+verifiziert —
+            // hier ist nichts pro Worker zu tun (siehe relayMode-Kommentar oben).
 
             const serve: ChildProcess = spawn(
                 'php',

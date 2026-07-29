@@ -5,7 +5,10 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
-        "test:e2e": "playwright test"
+        "test:e2e": "playwright test",
+        "test:e2e:buzz": "E2E_RELAY=buzz playwright test",
+        "test:e2e:headed": "playwright test --headed",
+        "test:e2e:buzz:headed": "E2E_RELAY=buzz playwright test --headed"
     },
     "dependencies": {
         "@einundzwanzig/group": "file:packages/einundzwanzig-group",
