@@ -33,6 +33,20 @@ function queryComment(pred: (e: RelayEvent) => boolean): RelayEvent | undefined 
         .find(pred)
 }
 
+/**
+ * Der Thread-COMPOSER liegt NICHT im `role="dialog"`-Element.
+ *
+ * Das Thread-Layout teilt sich die Composer-Bühne mit dem Raum (`⚡room.blade.php`:
+ * „Thread-Composer: tauscht denselben Composer-Platz wie der Raum") — der Dialog umfasst
+ * nur Root + Antwortenliste, die Eingabezeile ist sein Geschwister. Tests, die den
+ * Composer über `dialog.locator(…)` suchen, laufen deshalb in einen 30-s-Timeout, ohne
+ * dass am Composer etwas kaputt wäre. Anker ist stattdessen das `x-ref`-Attribut des
+ * versteckten Datei-Feldes: es steht im DOM, ist pro Kontext eindeutig
+ * (`threadImageInput` vs. `imageInput`) und überlebt jede Layout-Umstellung.
+ */
+const threadComposer = (page: Page) => page.locator('div:has(> input[x-ref="threadImageInput"])')
+const threadFileInput = (page: Page) => page.locator('input[x-ref="threadImageInput"]')
+
 async function openComposerRoom(page: Page, h = 'welcome'): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
@@ -204,10 +218,10 @@ test('C6b: Bild im Thread anhängen — kind-1111 trägt imeta + URL + h (Root, 
     }, { url: imgUrl, marker })
 
     // Anhang-Vorschau erscheint im Thread-Composer, Senden wird auch ohne Text aktiv.
-    await expect(dialog.getByText('Bild angehängt')).toBeVisible()
-    const send = dialog.getByRole('button', { name: 'Antwort senden' })
+    await expect(threadComposer(page).getByText('Bild angehängt')).toBeVisible()
+    const send = page.getByRole('button', { name: 'Antwort senden' })
     await expect(send).toBeEnabled({ timeout: 15_000 })
-    await dialog.getByPlaceholder('Im Thread antworten…').fill(`Meme ${marker}`)
+    await page.getByPlaceholder('Im Thread antworten…').fill(`Meme ${marker}`)
     await send.click()
 
     // Am Relay: kind-1111 mit imeta + URL im Content, MIT h des Thread-Roots (Interop P1).
@@ -240,7 +254,7 @@ test('C6b: Cropper aus dem Thread — Escape/Klick-außerhalb schließt NUR den 
     await expect(thread).toBeVisible()
 
     // Aus dem Thread-Composer ein Bild wählen → echter Cropper legt sich über den Thread.
-    await thread.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: 'meme.png', mimeType: 'image/png', buffer: IMAGE })
+    await threadFileInput(page).setInputFiles({ name: 'meme.png', mimeType: 'image/png', buffer: IMAGE })
     const crop = page.getByRole('dialog', { name: 'Bild zuschneiden' })
     await expect(crop).toBeVisible()
     await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
@@ -251,7 +265,7 @@ test('C6b: Cropper aus dem Thread — Escape/Klick-außerhalb schließt NUR den 
     await expect(thread).toBeVisible()
 
     // Erneut öffnen, diesmal per Klick auf den abgedunkelten Bereich neben der Crop-Karte abbrechen.
-    await thread.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: 'meme2.png', mimeType: 'image/png', buffer: IMAGE })
+    await threadFileInput(page).setInputFiles({ name: 'meme2.png', mimeType: 'image/png', buffer: IMAGE })
     await expect(crop).toBeVisible()
     await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
     await page.mouse.click(8, 8) // linke obere Ecke = Crop-Backdrop, außerhalb beider Karten
@@ -293,14 +307,14 @@ test('C6b: confirmCrop aus dem Thread schreibt threadAttachment, NICHT das Haupt
     await expect(thread).toBeVisible()
 
     // Echtes Bild wählen → Cropper → „Anhängen" (confirmCrop läuft den echten Pfad).
-    await thread.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: 'meme.png', mimeType: 'image/png', buffer: IMAGE })
+    await threadFileInput(page).setInputFiles({ name: 'meme.png', mimeType: 'image/png', buffer: IMAGE })
     const crop = page.getByRole('dialog', { name: 'Bild zuschneiden' })
     await expect(crop).toBeVisible()
     await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
     await crop.getByRole('button', { name: /Anhängen|Lade hoch/ }).click()
 
     // Routing-Beleg: der Anhang landet im Thread-Composer, NICHT im Haupt-Composer.
-    await expect(thread.getByText('Bild angehängt')).toBeVisible({ timeout: 15_000 })
+    await expect(threadComposer(page).getByText('Bild angehängt')).toBeVisible({ timeout: 15_000 })
     expect(await islandState(page, 'threadAttachment')).toBe(true)
     expect(await islandState(page, 'attachment')).toBe(false) // KEIN Übersprechen in den Haupt-Composer
 })
@@ -340,7 +354,9 @@ test('C6b: Haupt-Composer-Anhang überlebt das Öffnen/Schließen eines Threads'
     expect(await islandState(page, 'threadAttachment')).toBe(false)
 
     // Thread schließen → Haupt-Anhang immer noch da.
-    await thread.getByRole('button', { name: 'Zurück' }).click()
+    // Der Zurück-Knopf sitzt im GETEILTEN Kopf (banner), nicht im Dialog — derselbe
+    // Layout-Grund wie beim Composer (siehe `threadComposer`).
+    await page.getByRole('banner').getByRole('button', { name: 'Zurück' }).click()
     await expect(thread).toBeHidden()
     expect(await islandState(page, 'attachment')).toBe(true)
     await expect(page.getByText('Bild angehängt').first()).toBeVisible()
