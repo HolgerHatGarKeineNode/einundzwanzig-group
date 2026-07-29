@@ -127,4 +127,37 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             String(BUZZ_PORT),
         )
     })
+
+    test('zurück auf die Raumliste verlässt den Workspace — sie zeigt wieder zooid', async ({ page }) => {
+        joinBuzzRelay()
+        await useZooid(page)
+        await page.addInitScript((url) => {
+            ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
+        }, BUZZ_URL)
+        await loginNsec(page, NSEC)
+        await expect(page.getByRole('tab', { name: 'Workspaces' })).toBeVisible({ timeout: 20_000 })
+
+        // In den Workspace wechseln (wie der Raum-Klick) …
+        await page.evaluate(() => {
+            const el = document.querySelector('[x-data="nostrSpaces"]')!
+            const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
+            ;(data.openWorkspaceRoom as (r: unknown) => void)({ h: 'egal' })
+        })
+        await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
+        await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
+
+        // … und zurück auf die Raumliste. Sie IST der Vereins-Space: der ephemere
+        // Workspace muss dabei wegfallen, sonst käme der Nutzer nur über die
+        // Einstellungen zurück und sähe derweil die falschen Räume.
+        await page.goto('/spaces')
+        await expect(page.locator('[x-data="nostrSpaces"]')).toBeVisible({ timeout: 20_000 })
+        const active = await page.evaluate(() => {
+            const el = document.querySelector('[x-data="nostrSpaces"]')!
+            const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
+            return data._url as string
+        })
+        expect(active, 'die Raumliste muss wieder auf dem Vereins-Space stehen').toBe(ZOOID_WS + '/')
+        // Gegenprobe: der zooid-Seed-Raum ist auch wirklich da (nicht bloß die URL stimmt).
+        await expect(page.getByRole('tabpanel').getByText('Willkommen', { exact: true })).toBeVisible({ timeout: 20_000 })
+    })
 })
