@@ -9,6 +9,12 @@
         "noEmit": true,
         "isolatedModules": true,
         "resolveJsonModule": true,
+        // Die reinen Logik-Module unter `packages/*/js/` importieren einander MIT
+        // `.ts`-Endung — sie muessen aus Vite UND aus `node --test` ladbar sein, und
+        // der Node-Test-Runner loest ohne Endung nicht auf. Ohne dieses Flag meldet
+        // der Editor dort TS5097, obwohl Build und Tests gruen sind. `noEmit` ist
+        // gesetzt, die Bedingung des Flags also erfuellt.
+        "allowImportingTsExtensions": true,
         "types": []
     },
     "include": ["resources/js/**/*.ts"]

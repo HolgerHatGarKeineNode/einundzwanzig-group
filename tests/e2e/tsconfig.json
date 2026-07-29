@@ -8,7 +8,10 @@
         "strict": true,
         "skipLibCheck": true,
         "esModuleInterop": true,
-        "noEmit": true
+        "noEmit": true,
+        // Siehe tsconfig.json in der Repo-Wurzel: die Logik-Specs importieren die
+        // reinen Module aus `packages/*/js/` mit `.ts`-Endung.
+        "allowImportingTsExtensions": true
     },
     "include": ["**/*.ts"]
 }
