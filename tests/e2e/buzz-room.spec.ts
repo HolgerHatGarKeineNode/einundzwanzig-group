@@ -2,6 +2,10 @@ import { test, expect } from './support/fixtures'
 import { useBuzz, BUZZ_USER_NSEC, BUZZ_OWNER_SEC_HEX, BUZZ_ROOM_WELCOME, BUZZ_PORT } from './support/buzz'
 import { loginNsec } from './support/login'
 import { spawnSync } from 'node:child_process'
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { nsecEncode } from 'nostr-tools/nip19'
+import { makeBlossomAuthEvent } from '@welshman/util'
+import { buildAttachment, relayHttpOrigin } from '../../packages/einundzwanzig-group/js/uploads'
 
 /** Pfad zum `nak`-Binary (wie in den Seed-Skripten und buzz-admin.spec.ts). */
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
@@ -133,6 +137,117 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         const orphan = publish([`e=${'1'.repeat(64)};;reply`], `THREADSPEC-ORPHAN-${stamp}`)
         expect(orphan.accepted).toBe(false)
         expect(orphan.detail).toContain('reply parent not found')
+    })
+
+    /**
+     * **Bild-Anhang gegen Buzz — der ganze Weg**, nicht nur der Tag-Bau: Blob hochladen,
+     * Descriptor lesen, `imeta` mit dem ECHTEN Client-Bauer erzeugen, kind 9 publizieren.
+     *
+     * Drei Dinge standen dem im Weg, jedes für sich ein harter Reject; die Gegenproben
+     * halten alle drei fest, damit keins davon unbemerkt zurückfällt:
+     *  1. **Ziel-Server.** Buzz nimmt nur Anhänge aus seinem eigenen Medienspeicher an
+     *     (`imeta.rs`) — eine Vereins-Blossom-URL ist dort grundsätzlich unbrauchbar.
+     *  2. **`size` fehlte** im Client-Tag. Ohne das Feld: harter Reject.
+     *  3. **`X-SHA-256`** (BUD-11) war nicht gesetzt — der Upload selbst endete in 401.
+     *     Deshalb steht der Upload hier mit im Test und nicht nur der Tag.
+     *
+     * `makeBlossomAuthEvent` ist unverändert welshmans Helfer: er setzt `["u", …]`,
+     * Buzz prüft `["server", …]` nur, wenn vorhanden — die Auth passt ohne Zutun.
+     */
+    test('Bild-Anhang: Upload + imeta wird angenommen — Fremd-URL und fehlendes size nicht', async () => {
+        const stamp = Math.floor(Math.random() * 1e9)
+        const server = relayHttpOrigin(WS())
+        expect(server).toBe(`http://localhost:${BUZZ_PORT}`)
+
+        // Minimales gültiges WebP (1×1) — Buzz sniffed den Typ, ein Fantasie-Blob fliegt raus.
+        const bytes = Uint8Array.from(atob('UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA='), (c) => c.charCodeAt(0))
+        const digest = await crypto.subtle.digest('SHA-256', bytes)
+        const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+
+        // Hex → Bytes lokal: `@noble/hashes/utils` ist über die package-exports des Pakets
+        // nicht importierbar (Playwright lädt die Spec als ESM in node).
+        const sk = Uint8Array.from(BUZZ_OWNER_SEC_HEX.match(/../g)!.map((b) => parseInt(b, 16)))
+        const authTemplate = makeBlossomAuthEvent({ action: 'upload', server, hashes: [hash] })
+        const authEvent = finalizeEvent({ ...authTemplate, created_at: Math.floor(Date.now() / 1000) }, sk)
+        const authHeader = `Nostr ${btoa(JSON.stringify(authEvent))}`
+
+        // Gegenprobe zuerst: OHNE den BUD-11-Header lehnt Buzz den Upload ab (401).
+        const withoutHeader = await fetch(`${server}/upload`, {
+            method: 'PUT',
+            headers: { Authorization: authHeader },
+            body: bytes,
+        })
+        expect(withoutHeader.status, 'ohne X-SHA-256 muss der Upload scheitern').toBe(401)
+
+        const res = await fetch(`${server}/upload`, {
+            method: 'PUT',
+            headers: { Authorization: authHeader, 'X-SHA-256': hash },
+            body: bytes,
+        })
+        expect(res.status).toBe(200)
+        const desc = (await res.json()) as { url: string; sha256: string; size: number; type: string }
+        expect(desc.url).toContain(`${server}/media/`)
+        expect(desc.sha256).toBe(hash)
+
+        // Der echte Client-Bauer — kein nachgebautes Tag.
+        const att = buildAttachment(desc.url, desc.type, desc.sha256, desc.size, '1x1')
+        const imetaArg = (tag: string[]) => `imeta=${tag.slice(1).join(';')}`
+
+        const ok = publish([imetaArg(att.imetaTag)], `IMETA-OK-${stamp} ${att.url}`)
+        expect(ok.accepted, `Anhang abgelehnt: ${ok.detail}`).toBe(true)
+
+        // Gegenprobe 1: dasselbe Bild, aber als Vereins-Blossom-URL.
+        const fremd = ['imeta', `url https://blossom.einundzwanzig.space/${hash}.webp`, `m ${desc.type}`, `x ${hash}`, `size ${desc.size}`]
+        const fremdRes = publish([imetaArg(fremd)], `IMETA-FREMD-${stamp}`)
+        expect(fremdRes.accepted).toBe(false)
+        expect(fremdRes.detail).toContain('imeta url must be a local /media/ path')
+
+        // Gegenprobe 2: der Tag, den der Client bis P6 gebaut hat — ohne `size`.
+        const ohneSize = att.imetaTag.filter((t) => !t.startsWith('size '))
+        const ohneSizeRes = publish([imetaArg(ohneSize)], `IMETA-NOSIZE-${stamp}`)
+        expect(ohneSizeRes.accepted).toBe(false)
+        expect(ohneSizeRes.detail).toContain('imeta tag must include url, m, x, and size')
+    })
+
+    /**
+     * **Beitreten → Composer, OHNE Reload.**
+     *
+     * Der Beitritt selbst lief immer: das Relay nimmt den 9021 an, `channel_members`
+     * bekommt die Zeile und die relay-signierte 39002 führt den Pubkey. Nur sah die
+     * Oberfläche das nicht — sie wartete auf die Live-Sub `{kinds:[39002], limit:0}`, und
+     * **die liefert bei Buzz nichts**: Gruppen-Events liegen kanal-gescopt und gehen nicht
+     * über den globalen Fan-out (`NOSTR.md:124`). Am Relay nachgemessen: 19 s nach einem
+     * angenommenen Join kam über die Live-Sub kein einziges Event, ein historisches REQ
+     * lieferte die neue Liste sofort. Der Composer erschien deshalb erst nach F5.
+     *
+     * Der Test fährt bewusst mit einem FRISCHEN Schlüssel, damit der Beitritt echt ist und
+     * nicht durch eine Wiederverwendung des Stacks trivial grün wird. `page.reload()` kommt
+     * hier absichtlich NICHT vor — genau das ist die Aussage.
+     */
+    test('Beitreten zeigt den Composer ohne Reload (39002 wird gezielt nachgeladen)', async ({ page }) => {
+        const sk = generateSecretKey()
+        const pub = getPublicKey(sk)
+
+        // Relay-Mitgliedschaft (9030) durch den Owner — ohne sie darf der Key gar nichts.
+        const add = spawnSync(
+            NAK,
+            ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9030', '-t', `p=${pub}`, '-t', 'role=member', WS()],
+            { encoding: 'utf8', timeout: 30_000 },
+        )
+        expect(`${add.stdout ?? ''}${add.stderr ?? ''}`, 'Relay-Mitgliedschaft konnte nicht gesetzt werden').toContain('success')
+
+        await loginNsec(page, nsecEncode(sk))
+        await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
+
+        // Vorbedingung: dieser Schlüssel ist noch KEIN Raum-Mitglied.
+        const joinButton = page.getByRole('button', { name: 'Beitreten' })
+        await expect(joinButton, 'frischer Schlüssel muss erst beitreten müssen').toBeVisible({ timeout: 20_000 })
+
+        await joinButton.click()
+
+        // Die eigentliche Zusage: der Composer erscheint, ohne dass jemand neu lädt.
+        await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 20_000 })
+        await expect(joinButton).toBeHidden()
     })
 
     /**
