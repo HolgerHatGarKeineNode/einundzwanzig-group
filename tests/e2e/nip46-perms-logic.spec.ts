@@ -24,7 +24,7 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
         // `restricted: unknown event kind` ab). Die Gegenprobe darunter nagelt das fest.
         const required = [
             0, 5, 7, 9, 1984,
-            9000, 9001, 9002, 9005, 9007, 9008, 9021, 9022, 9734,
+            9000, 9002, 9005, 9007, 9008, 9021, 9022, 9734,
             10009, 22242, 27235, 28934, 28936,
             // 30078 (NIP-78 App-Data) = Lesestand. Publiziert wird er erst in P6 —
             // die Berechtigung muss trotzdem heute schon drinstehen, weil welshman die
@@ -42,6 +42,11 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
         // Amber zeigt dem Nutzer beim Koppeln jeden Kind einzeln an.
         expect(perms).not.toContain('sign_event:1111')
         expect(perms).not.toContain('sign_event:10')
+        // 9001 (remove-user) ist mit dem Mitglieder-Dialog entfallen (P8) — der Client
+        // signiert es nirgends mehr. 9000 bleibt: es trägt das Annehmen einer offenen
+        // Beitrittsanfrage in der Vorstands-Queue.
+        expect(perms).not.toContain('sign_event:9001')
+        expect(perms).toContain('sign_event:9000')
     })
 
     test('enthält nip44 encrypt/decrypt, aber kein nip04 (Client nutzt nur nip44)', () => {

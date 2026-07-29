@@ -109,11 +109,18 @@ test('M2: Space-Wechsel liegt in den Einstellungen', async ({ page }) => {
 })
 
 /**
- * P4 (Raum-Verwaltung, NIP-29 9007/9002/9008) — voller Lebenszyklus als Admin:
- * anlegen (kind 9007+9002, Ersteller tritt bei), bearbeiten (9002) und löschen
- * (9008 → 39000-Tombstone). Self-contained (eigener Wegwerf-Raum) → bloat-frei.
+ * P4 (Raum-Verwaltung, NIP-29 9007/9002) — Lebenszyklus als Admin: anlegen
+ * (kind 9007+9002, Ersteller tritt bei) und bearbeiten (9002).
+ *
+ * **Löschen fehlt hier bewusst — und der Test hält genau das fest.** Seit P8 bietet die
+ * Oberfläche „Löschen" nur noch an, wenn der eingeloggte Pubkey `owner` des Raums ist,
+ * gelesen aus der Rolle in der relay-signierten 39002 (`["p",…,"","owner"]`). **zooid
+ * führt in seiner 39002 gar keine Rollen** (gemessen 2026-07-29: `["p","2dbaf5…"]`) —
+ * hier ist also NIEMAND als Eigentümer erkennbar, und die konservative Regel („lieber
+ * keine Eigentümerschaft behaupten als eine falsche") blendet den Eintrag aus.
+ * Aufgeräumt wird deshalb per nak statt über die Oberfläche.
  */
-test('P4: Admin legt einen Raum an, bearbeitet und löscht ihn', async ({ page }) => {
+test('P4: Admin legt einen Raum an und bearbeitet ihn (Löschen bietet zooid nicht an)', async ({ page }) => {
     const name = `Neu-${Math.floor(Math.random() * 1e9)}`
     const renamed = `Edit-${Math.floor(Math.random() * 1e9)}`
     await loginAdmin(page)
@@ -142,11 +149,24 @@ test('P4: Admin legt einen Raum an, bearbeitet und löscht ihn', async ({ page }
     await editForm.getByRole('button', { name: 'Speichern' }).click()
     await expect(page.getByText(renamed, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    // Löschen über das Kachel-„…"-Menü → Bestätigung (9008).
+    // Das „…"-Menü zeigt Bearbeiten, aber KEIN Löschen (kein Eigentümer ableitbar).
     const tile2 = page.locator('div.group', { hasText: renamed })
     await tile2.getByRole('button', { name: 'Raum verwalten' }).click()
-    await page.getByRole('menuitem', { name: 'Löschen' }).click()
-    await page.locator('dialog[data-modal="delete-room"]').getByRole('button', { name: 'Löschen', exact: true }).click()
+    await expect(page.getByRole('menuitem', { name: 'Bearbeiten' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'Löschen' })).toHaveCount(0)
+    await page.keyboard.press('Escape')
+
+    // Aufräumen ohne Oberfläche (9008 → 39000-Tombstone), damit der Test bloat-frei bleibt.
+    const h = execFileSync(NAK, ['req', '-k', '39000', '--auth', '--sec', ADMIN_HEX, ZOOID_WS])
+        .toString()
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { tags: string[][] })
+        .find((e) => e.tags.some((t) => t[0] === 'name' && t[1] === renamed))
+        ?.tags.find((t) => t[0] === 'd')?.[1]
+    if (h) {
+        execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9008', '-t', `h=${h}`, ZOOID_WS])
+    }
     await expect(page.getByText(renamed, { exact: true })).toHaveCount(0, { timeout: 15_000 })
 })
 
@@ -197,7 +217,73 @@ test('P4: normaler User sieht keine Raum-Verwaltung', async ({ page }) => {
  * das Wasserzeichen, hier gegen denselben Sekunden-Gleichstand in einer anderen
  * Ableitung. Gemeldet an den zooid-Maintainer statt gepatcht (Boundary).
  */
-test('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ page }) => {
+/**
+ * **Ein Namens-Edit darf die Beschreibung nicht mitnehmen** — der teuerste Nebeneffekt der
+ * Raum-Verwaltung, und auf zooid ein echter Datenverlust.
+ *
+ * Am Relay gemessen (2026-07-29), und die beiden Relays verhalten sich GEGENSÄTZLICH:
+ *  - **zooid ersetzt das 39000 komplett** aus den 9002-Tags. Ein 9002 mit `name`, aber ohne
+ *    `about`, liefert ein 39000 **ohne** `about` — die Beschreibung ist weg.
+ *  - Buzz behandelt das 9002 als Teil-Update; dort überlebt sie die Auslassung ohnehin.
+ *
+ * Weil die Beschreibung seit P5 die Kategorie-Konvention trägt (`einundzwanzig:meetup:<id> — …`),
+ * fiele der Raum damit lautlos aus seiner Kategorie. `roomMetaEvent` schreibt sie deshalb beim
+ * Bearbeiten unverändert zurück, statt sich auf das Relay zu verlassen — und dieser Test hält
+ * genau das auf dem Relay fest, das den Fehler bestrafen würde.
+ */
+test('P8: Umbenennen erhält die Beschreibung (Kategorie-Konvention)', async ({ page }) => {
+    const h = `about${Math.floor(Math.random() * 1e9)}`
+    const name = `AboutRoom-${Math.floor(Math.random() * 1e9)}`
+    const renamed = `${name}-neu`
+    // BEWUSST ohne den `einundzwanzig:`-Präfix: genau dieser Präfix kategorisiert den Raum
+    // (`roomCategories.ts`, Buzz-Pfad) und schöbe ihn aus der normalen Raumliste in den
+    // Meetup-/Antrags-Fokus — die Kachel wäre hier gar nicht zu finden. Dass der Präfix so
+    // wirkt, IST der Grund für diesen Test; geprüft wird hier der Träger, nicht die Wirkung.
+    const about = 'Beschreibung, die einen Namens-Edit ueberleben muss'
+    // Raum MIT Beschreibung anlegen, bevor der Client lädt — so trägt sein 39000 sie
+    // sicher, wenn die Oberfläche das Bearbeiten öffnet (kein Live-Sub-Rennen).
+    createRoomNak(h, name, ['-t', `about=${about}`])
+
+    const aboutAtRelay = (): string =>
+        execFileSync(NAK, ['req', '-k', '39000', '-d', h, '--auth', '--sec', ADMIN_HEX, ZOOID_WS])
+            .toString()
+            .split('\n')
+            .filter(Boolean)
+            .map((l) => JSON.parse(l) as { tags: string[][] })
+            .flatMap((e) => e.tags)
+            .find((t) => t[0] === 'about')?.[1] ?? ''
+
+    expect(aboutAtRelay(), 'Vorbedingung: die Beschreibung steht im 39000').toBe(about)
+
+    await loginAdmin(page)
+    const tile = page.locator('div.group', { hasText: name })
+    await expect(tile).toBeVisible({ timeout: 15_000 })
+    await tile.getByRole('button', { name: 'Raum verwalten' }).click()
+    await page.getByRole('menuitem', { name: 'Bearbeiten' }).click()
+
+    const form = page.locator('dialog[data-modal="room-form"]')
+    // Die Beschreibung ist gar kein Feld mehr — niemand kann sie hier verändern.
+    await expect(form.getByLabel('Beschreibung')).toHaveCount(0)
+    await form.getByPlaceholder('z.B. Allgemein').fill(renamed)
+    await form.getByRole('button', { name: 'Speichern' }).click()
+    await expect(page.getByText(renamed, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Die eigentliche Zusage: der Name ist neu, die Beschreibung unverändert.
+    await expect.poll(aboutAtRelay, { timeout: 15_000 }).toBe(about)
+
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9008', '-t', `h=${h}`, ZOOID_WS])
+})
+
+// ÜBERSPRUNGEN seit P8: Der Mitglieder-Dialog ist auf ausdrücklichen Wunsch entfallen —
+// Raum-Mitgliedschaften kommen ausschliesslich aus dem Sync der Vereinsmitglieder
+// (kind 9030) und dem Beitritt des Nutzers selbst. Damit gibt es kein „Mitglieder"-Menü
+// und keinen npub-Eingabepfad mehr, den dieser Test bedienen könnte.
+//
+// Der Fall ist NICHT gelöscht, weil er zwei Dinge festhält, die weiterleben: die
+// relay-seitige 9000/9001-Semantik und den dokumentierten zooid-Sortier-Bug bei
+// Sekunden-Gleichstand (siehe Kommentar oben). Ob er als relay-naher Test ohne
+// Oberfläche wiederbelebt oder entfernt wird, entscheidet der Nutzer.
+test.skip('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ page }) => {
     const h = `mem${Math.floor(Math.random() * 1e9)}`
     const name = `MemRoom-${Math.floor(Math.random() * 1e9)}`
     createRoomNak(h, name)

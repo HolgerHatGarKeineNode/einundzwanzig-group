@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures'
-import { useBuzz, BUZZ_USER_NSEC, BUZZ_OWNER_SEC_HEX, BUZZ_ROOM_WELCOME, BUZZ_PORT } from './support/buzz'
+import { useBuzz, BUZZ_USER_NSEC, BUZZ_OWNER_NSEC, BUZZ_OWNER_SEC_HEX, BUZZ_ROOM_WELCOME, BUZZ_PORT } from './support/buzz'
 import { loginNsec } from './support/login'
 import { spawnSync } from 'node:child_process'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -54,7 +54,11 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
 
         // Raumliste (39000, historisches REQ mit EOSE — Buzz pusht 39000 nicht live,
         // aber der Erstladefall ist ein normales REQ, siehe Plan „Belegte Ausgangslage").
-        await expect(page.getByText('E2E-Welcome')).toBeVisible({ timeout: 15_000 })
+        // Auf die RAUM-KACHEL zielen, nicht auf irgendeinen Text: seit die Threading-Tests
+        // in denselben Raum schreiben, nennt auch die Threads-Übersicht („# E2E-Welcome"
+        // als Herkunft einer Thread-Zeile) diesen Namen — `getByText` traf dann zwei
+        // Elemente und der Fall kippte, sobald der Stack NICHT frisch geseedet war.
+        await expect(page.getByRole('button', { name: '# E2E-Welcome' })).toBeVisible({ timeout: 15_000 })
 
         await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
 
@@ -224,6 +228,79 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
      * nicht durch eine Wiederverwendung des Stacks trivial grün wird. `page.reload()` kommt
      * hier absichtlich NICHT vor — genau das ist die Aussage.
      */
+    /**
+     * **„Löschen" nur am eigenen Raum** — mit zwei Schlüsseln belegt, weil eine Regel, die
+     * nur am Eigentümer geprüft wird, auch dann grün wäre, wenn sie gar nicht griffe.
+     *
+     * Die Quelle ist die relay-signierte 39002: Buzz trägt den Ersteller eines Channels als
+     * `["p","<pk>","","owner"]` ein (Rolle auf Index 3, am Relay gemessen). Der zweite
+     * Schlüssel wird bewusst als Relay-**admin** aufgenommen — sonst sähe er das
+     * „…"-Menü gar nicht, und der Test bewiese nur das Admin-Gate statt der Eigentümer-Regel.
+     *
+     * **Das ist ein Schutz gegen Versehen, keine Zugriffskontrolle.** Der Relay lässt jeden
+     * Admin weiterhin jeden Raum löschen; hier verschwindet nur die Schaltfläche.
+     */
+    test('Löschen erscheint nur beim eigenen Raum (zwei Schlüssel, Rolle aus der 39002)', async ({ page, browser, baseURL }) => {
+        const roomName = `OwnerRoom-${Math.floor(Math.random() * 1e9)}`
+        const h = crypto.randomUUID()
+        // Raum vom OWNER anlegen → Buzz setzt ihn als `owner` der 39002.
+        const create = spawnSync(
+            NAK,
+            ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9007', '-t', `h=${h}`, '-t', `name=${roomName}`, WS()],
+            { encoding: 'utf8', timeout: 30_000 },
+        )
+        expect(`${create.stdout ?? ''}${create.stderr ?? ''}`).toContain('success')
+
+        // Vorbedingung am Relay: die Rolle steht wirklich in der 39002.
+        const members = spawnSync(
+            NAK,
+            ['req', '-k', '39002', '-d', h, '--auth', '--sec', BUZZ_OWNER_SEC_HEX, WS()],
+            { encoding: 'utf8', timeout: 20_000 },
+        )
+        expect(members.stdout, 'Buzz muss den Ersteller als owner führen').toContain('"owner"')
+
+        // 1) Eigentümer sieht „Löschen".
+        await loginNsec(page, BUZZ_OWNER_NSEC)
+        const tile = page.locator('div.group', { hasText: roomName })
+        await expect(tile).toBeVisible({ timeout: 20_000 })
+        await tile.getByRole('button', { name: 'Raum verwalten' }).click()
+        await expect(page.getByRole('menuitem', { name: 'Bearbeiten' })).toBeVisible()
+        await expect(page.getByRole('menuitem', { name: 'Löschen' })).toBeVisible()
+        await page.keyboard.press('Escape')
+
+        // 2) Zweiter Schlüssel: Relay-ADMIN, aber nicht Eigentümer dieses Raums.
+        const sk = generateSecretKey()
+        const addAdmin = spawnSync(
+            NAK,
+            ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9030', '-t', `p=${getPublicKey(sk)}`, '-t', 'role=admin', WS()],
+            { encoding: 'utf8', timeout: 30_000 },
+        )
+        expect(`${addAdmin.stdout ?? ''}${addAdmin.stderr ?? ''}`).toContain('success')
+
+        // EIGENER Browser-Kontext für den zweiten Schlüssel: `loginNsec` erwartet das
+        // Login-Formular, und die erste Sitzung liegt im localStorage — ein zweiter Login
+        // in derselben Seite läuft ins Leere (gemessen: Timeout auf „Andere Optionen",
+        // weil die Seite längst auf /spaces stand).
+        const ctx = await browser.newContext({ baseURL })
+        const page2 = await ctx.newPage()
+        await useBuzz(page2)
+        await loginNsec(page2, nsecEncode(sk))
+        const tileAsAdmin = page2.locator('div.group', { hasText: roomName })
+        await expect(tileAsAdmin).toBeVisible({ timeout: 20_000 })
+        await tileAsAdmin.getByRole('button', { name: 'Raum verwalten' }).click()
+        // Das Menü ist da (also greift das Admin-Gate), aber Löschen fehlt.
+        await expect(page2.getByRole('menuitem', { name: 'Bearbeiten' })).toBeVisible()
+        await expect(page2.getByRole('menuitem', { name: 'Löschen' })).toHaveCount(0)
+        // Kein „Mitglieder"-Eintrag mehr — in keiner der beiden Rollen.
+        await expect(page2.getByRole('menuitem', { name: 'Mitglieder' })).toHaveCount(0)
+        await ctx.close()
+
+        spawnSync(NAK, ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9008', '-t', `h=${h}`, WS()], {
+            encoding: 'utf8',
+            timeout: 30_000,
+        })
+    })
+
     test('Beitreten zeigt den Composer ohne Reload (39002 wird gezielt nachgeladen)', async ({ page }) => {
         const sk = generateSecretKey()
         const pub = getPublicKey(sk)
