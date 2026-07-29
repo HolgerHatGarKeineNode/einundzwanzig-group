@@ -36,6 +36,18 @@ ZOOID_PORT="${ZOOID_PORT:-3335}"
 R=ws://localhost:$ZOOID_PORT
 HTTP=http://localhost:$ZOOID_PORT
 PIDFILE=/tmp/e2e-zooid-$ZOOID_PORT.pid
+# Lauf-Marker gegen die KASKADE: Playwright startet einen Worker nach einem
+# Test-Timeout neu, und das worker-scoped Fixture ruft dieses Skript dann ERNEUT auf.
+# Ohne Marker hielte der Guard unten den (inzwischen normal aufgeblaehten) Stand fuer
+# unsauber, killte den laufenden Relay und baute neu — mitten im Lauf. Der naechste
+# Test lief dann in `connection refused` und fiel, ohne selbst defekt zu sein. Genau
+# so entstand das Bild „jedes Mal faellt ein anderer Test" (gemessen 2026-07-29: nach
+# einem 15-Minuten-Lauf war der zooid-Prozess erst 8 Minuten alt).
+#
+# Der Marker wird von global-setup.ts zu Lauf-Beginn geloescht. Existiert er UND
+# antwortet der Relay, ist innerhalb dieses Laufs nichts mehr zu tun — Bloat wird bis
+# zum naechsten Lauf toleriert, ein ABGESTUERZTER Relay aber weiterhin neu aufgesetzt.
+RUNMARK=/tmp/e2e-zooid-$ZOOID_PORT.run
 DATA=./data-test-$ZOOID_PORT
 CONFIG=./config-test-$ZOOID_PORT
 LOG=/tmp/e2e-zooid-$ZOOID_PORT.log
@@ -67,8 +79,17 @@ seeded_and_clean() {
 cd "$ZOOID_DIR" || exit 1
 [ -f bin/zooid ] || CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go
 
+# Zweiter Aufruf INNERHALB desselben Laufs (Worker-Neustart nach einem Test-Timeout):
+# nur pruefen, ob der Relay noch da ist — niemals neu aufsetzen. Ein Neuaufbau hier
+# wuerde den gerade laufenden Test mitreissen (siehe RUNMARK oben).
+if [ -f "$RUNMARK" ] && timeout 5 curl -sf "$HTTP" >/dev/null 2>&1; then
+    echo "zooid:$ZOOID_PORT laeuft bereits in diesem Lauf → unangetastet (Kaskaden-Schutz)"
+    exit 0
+fi
+
 if seeded_and_clean; then
     echo "zooid:$ZOOID_PORT bereits sauber geseedet → Wiederverwendung (kein Reset)"
+    touch "$RUNMARK"
     exit 0
 fi
 
@@ -230,4 +251,7 @@ for _ in $(seq 1 40); do
     timeout 5 nak req -k 39002 -d edit --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' && break
     sleep 0.25
 done
+# Ab hier gilt der Relay als „in diesem Lauf aufgesetzt" — ein zweiter Aufruf durch
+# einen neu gestarteten Worker laesst ihn dann in Ruhe (siehe RUNMARK oben).
+touch "$RUNMARK"
 echo "zooid:$ZOOID_PORT frisch aufgesetzt + geseedet + verifiziert"

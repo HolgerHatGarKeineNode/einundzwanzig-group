@@ -38,6 +38,13 @@ function needsBuild(): boolean {
 const relayMode = (): 'zooid' | 'buzz' => (process.env.E2E_RELAY === 'buzz' ? 'buzz' : 'zooid')
 
 export default function globalSetup(): void {
+    // Lauf-Marker der zooid-Instanzen loeschen. Sie schuetzen INNERHALB eines Laufs
+    // davor, dass ein neu gestarteter Worker den Relay neu aufsetzt und damit den
+    // gerade laufenden Test mitreisst (Begruendung in zooid-testserver.sh, RUNMARK).
+    // Zu Lauf-Beginn muessen sie weg, sonst wuerde der Bloat-Guard nie wieder greifen
+    // und die Raeume wuechsen ueber Laeufe hinweg unbegrenzt.
+    execFileSync('bash', ['-c', 'rm -f /tmp/e2e-zooid-*.run'], { stdio: 'inherit' })
+
     if (relayMode() === 'buzz') {
         // Der Buzz-Stack ist EIN geteilter Docker-Compose-Stack (Postgres/Redis/MinIO),
         // kein Pro-Worker-Prozess wie zooid — deshalb hier EINMAL aufsetzen/seeden/
