@@ -134,4 +134,36 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         expect(orphan.accepted).toBe(false)
         expect(orphan.detail).toContain('reply parent not found')
     })
+
+    /**
+     * Kein NIP-86 gegen Buzz — der Regressionstest zu einem Bug, den erst das
+     * Browser-Log des Nutzers sichtbar gemacht hat (2026-07-29).
+     *
+     * `deriveUserIsSpaceAdmin` schützte den Probe-Aufruf mit der SYNCHRONEN
+     * `spaceIsBuzz`. Die liefert beim ersten Rendern aber immer `false` — das
+     * NIP-11-Doc ist da noch unterwegs, sie stößt das Laden nur an. Also feuerte
+     * der Aufruf doch, Buzz quittierte mit `405 Method Not Allowed`, und der
+     * Nutzer bekam bei JEDEM Seitenaufbau eine Signatur-Anfrage für ein
+     * NIP-98-Event, das niemand auswertet.
+     *
+     * Der Test hängt am Netzwerkverkehr statt an einer Store-Zusicherung: was
+     * zählt, ist dass nichts rausgeht — nicht, wie der Client intern entscheidet.
+     */
+    test('kein NIP-86-Management-Request gegen Buzz (kein 405, keine Signatur-Anfrage)', async ({ page }) => {
+        const posts: string[] = []
+        page.on('request', (req) => {
+            if (req.method() === 'POST' && req.url().includes(`:${BUZZ_PORT}`)) {
+                posts.push(req.url())
+            }
+        })
+
+        await loginNsec(page, BUZZ_USER_NSEC)
+        await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
+        await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
+        // Der Probe-Aufruf hing an der Admin-Ableitung beim Seitenaufbau; nach dem
+        // ersten Paint ist er entweder passiert oder er passiert nicht mehr.
+        await page.waitForTimeout(2_000)
+
+        expect(posts, `NIP-86-Request(s) an Buzz gegangen: ${posts.join(', ')}`).toHaveLength(0)
+    })
 })

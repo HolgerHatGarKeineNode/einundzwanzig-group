@@ -34,7 +34,12 @@
 {{-- Prod-Default-Space: setzt die Vereins-Relay-URL VOR dem welshman-Boot.
      Muss VOR @vite stehen (das ES-Modul-Bundle liest window.__nostrSpace beim Init). --}}
 @if (config('group.space_url'))
-    <script>window.__nostrSpace = @js(config('group.space_url'));</script>
+    {{-- `??`, nicht `=`: ein vorab gesetzter Wert GEWINNT — genau wie beim
+         __nostrMobile-Flag darunter. Die E2E-Suite setzt den Space per
+         addInitScript, also bevor diese Zeile laeuft; eine harte Zuweisung
+         ueberschrieb ihn und schickte die Buzz-Specs gegen den falschen Relay.
+         Solange NOSTR_SPACE_URL leer war, fiel das nicht auf. --}}
+    <script>window.__nostrSpace = window.__nostrSpace ?? @js(config('group.space_url'));</script>
 @endif
 
 {{-- Plattform-Flag: auf dem Gerät gated die Insel client-seitig (kein NIP-98).
