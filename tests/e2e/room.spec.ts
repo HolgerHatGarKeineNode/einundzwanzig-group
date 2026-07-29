@@ -1164,6 +1164,14 @@ function publishToScroll(content: string): void {
  * Seite automatisch nach; „Zeile 1" erscheint, ohne den Button zu klicken.
  */
 test('D1: Ältere laden automatisch beim Hochscrollen', async ({ page }) => {
+    // Der teuerste Fall der Datei: 50 Nachrichten laden, an den oberen Rand scrollen,
+    // eine zweite Seite nachladen. Mit dem 30-s-Standard ist er im Gesamtlauf am
+    // 2026-07-29 in den TEST-Timeout gelaufen (nicht in eine fehlgeschlagene Zusicherung
+    // — der Seed war mit 60/60 vollstaendig). Einzeln braucht er ein Vielfaches weniger.
+    // Der Fehlschlag blieb nicht folgenlos: Playwright startete den Worker neu, das
+    // worker-scoped Fixture setzte zooid neu auf, und der NAECHSTE Test lief in ein
+    // `connection refused` — ein Timeout hier reisst also einen unbeteiligten Test mit.
+    test.setTimeout(90_000)
     await openRoom(page, 'scroll')
     await expect(page.getByText('Zeile 60', { exact: true })).toBeVisible({ timeout: 15_000 })
 
