@@ -229,18 +229,22 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
      * hier absichtlich NICHT vor — genau das ist die Aussage.
      */
     /**
-     * **„Löschen" nur am eigenen Raum** — mit zwei Schlüsseln belegt, weil eine Regel, die
-     * nur am Eigentümer geprüft wird, auch dann grün wäre, wenn sie gar nicht griffe.
+     * **Das Raum-Menü kennt nur noch „Bearbeiten"** — weder „Löschen" noch „Mitglieder",
+     * und zwar in KEINER Rolle.
      *
-     * Die Quelle ist die relay-signierte 39002: Buzz trägt den Ersteller eines Channels als
-     * `["p","<pk>","","owner"]` ein (Rolle auf Index 3, am Relay gemessen). Der zweite
-     * Schlüssel wird bewusst als Relay-**admin** aufgenommen — sonst sähe er das
-     * „…"-Menü gar nicht, und der Test bewiese nur das Admin-Gate statt der Eigentümer-Regel.
+     * Mit zwei Schlüsseln belegt, weil eine Abwesenheit, die nur an einem Schlüssel
+     * geprüft wird, auch dann grün wäre, wenn das Menü aus einem ganz anderen Grund
+     * leer bliebe: Der erste ist der Eigentümer des Raums (Buzz trägt den Ersteller als
+     * `["p","<pk>","","owner"]` in die 39002 ein), der zweite ein Relay-**admin** ohne
+     * Eigentum. Beide sehen dasselbe — genau das ist die Aussage. Der Admin-Schlüssel
+     * ist nötig, damit das „…"-Menü überhaupt erscheint; sonst prüfte der Fall nur das
+     * Admin-Gate.
      *
      * **Das ist ein Schutz gegen Versehen, keine Zugriffskontrolle.** Der Relay lässt jeden
-     * Admin weiterhin jeden Raum löschen; hier verschwindet nur die Schaltfläche.
+     * Admin weiterhin jeden Raum löschen und Mitglieder setzen; hier fehlen nur die
+     * Schaltflächen.
      */
-    test('Löschen erscheint nur beim eigenen Raum (zwei Schlüssel, Rolle aus der 39002)', async ({ page, browser, baseURL }) => {
+    test('Raum-Menü bietet nur „Bearbeiten" — kein Löschen, keine Mitglieder (zwei Schlüssel)', async ({ page, browser, baseURL }) => {
         const roomName = `OwnerRoom-${Math.floor(Math.random() * 1e9)}`
         const h = crypto.randomUUID()
         // Raum vom OWNER anlegen → Buzz setzt ihn als `owner` der 39002.
@@ -259,13 +263,14 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         )
         expect(members.stdout, 'Buzz muss den Ersteller als owner führen').toContain('"owner"')
 
-        // 1) Eigentümer sieht „Löschen".
+        // 1) Der EIGENTÜMER sieht „Bearbeiten" — und weder Löschen noch Mitglieder.
         await loginNsec(page, BUZZ_OWNER_NSEC)
         const tile = page.locator('div.group', { hasText: roomName })
         await expect(tile).toBeVisible({ timeout: 20_000 })
         await tile.getByRole('button', { name: 'Raum verwalten' }).click()
         await expect(page.getByRole('menuitem', { name: 'Bearbeiten' })).toBeVisible()
-        await expect(page.getByRole('menuitem', { name: 'Löschen' })).toBeVisible()
+        await expect(page.getByRole('menuitem', { name: 'Löschen' })).toHaveCount(0)
+        await expect(page.getByRole('menuitem', { name: 'Mitglieder' })).toHaveCount(0)
         await page.keyboard.press('Escape')
 
         // 2) Zweiter Schlüssel: Relay-ADMIN, aber nicht Eigentümer dieses Raums.
@@ -288,10 +293,10 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         const tileAsAdmin = page2.locator('div.group', { hasText: roomName })
         await expect(tileAsAdmin).toBeVisible({ timeout: 20_000 })
         await tileAsAdmin.getByRole('button', { name: 'Raum verwalten' }).click()
-        // Das Menü ist da (also greift das Admin-Gate), aber Löschen fehlt.
+        // Zweiter Schlüssel, gleiches Bild: Menü da (Admin-Gate greift), Löschen fehlt.
         await expect(page2.getByRole('menuitem', { name: 'Bearbeiten' })).toBeVisible()
         await expect(page2.getByRole('menuitem', { name: 'Löschen' })).toHaveCount(0)
-        // Kein „Mitglieder"-Eintrag mehr — in keiner der beiden Rollen.
+        // Und auch hier kein „Mitglieder" — in keiner der beiden Rollen.
         await expect(page2.getByRole('menuitem', { name: 'Mitglieder' })).toHaveCount(0)
         await ctx.close()
 
