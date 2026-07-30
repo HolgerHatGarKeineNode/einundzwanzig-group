@@ -35,6 +35,48 @@ function publish(tags: string[], content: string): { accepted: boolean; detail: 
     return { accepted: out.includes('success') && !failed, detail: failed || out.trim(), id }
 }
 
+/** Eine Relay-Zeile, so weit sie die Threading-Prüfungen brauchen. */
+type RelayRow = { id: string; content: string; tags: string[][] }
+
+/**
+ * Alle kind-9-Events eines Raums, direkt vom Relay gelesen (als Owner authentifiziert).
+ * Über `nak` statt über den DOM, weil die Tag-FORM geprüft wird — die sieht man in der
+ * Oberfläche nicht, und ein Rendering-Detail darf den Befund nicht verschieben.
+ *
+ * Der Retry ist kein Schmuck: `nak req` liefert sporadisch leer, wenn die NIP-42-AUTH-Runde
+ * scheitert. Ein leeres Ergebnis sähe hier aus wie „die Antwort ist nicht am Relay" — genau
+ * diese Verwechslung hat in diesem Repo schon einmal einen falschen Befund getragen.
+ * Deshalb wirft die Funktion, statt leer zurückzugeben.
+ */
+function roomEvents(h: string): RelayRow[] {
+    for (let attempt = 0; attempt < 6; attempt++) {
+        const out = spawnSync(
+            NAK,
+            ['req', '-k', '9', '-t', `h=${h}`, '-l', '200', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, WS()],
+            { encoding: 'utf8', timeout: 20_000 },
+        )
+        const rows = (out.stdout ?? '')
+            .split('\n')
+            .filter(Boolean)
+            .flatMap((line) => {
+                try {
+                    const e = JSON.parse(line) as RelayRow
+                    return e?.id ? [e] : []
+                } catch {
+                    return []
+                }
+            })
+        if (rows.length > 0) {
+            return rows
+        }
+        spawnSync('sleep', ['0.5'])
+    }
+    throw new Error(
+        `Relay-Abfrage lieferte sechsmal nichts für ${h}. Der Aufrufer hat gerade selbst in ` +
+            'diesen Raum geschrieben — leer heißt hier: die Abfrage ist kaputt, nicht der Raum.',
+    )
+}
+
 /**
  * P1 (Buzz-Migrationsplan, docs/plans/2026-07-28T1542-buzz-relay-migration.md) — das
  * Buzz-Pendant zu den zooid-E2E-Specs. Läuft NUR mit `E2E_RELAY=buzz` (siehe
@@ -400,5 +442,118 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         await page.waitForTimeout(2_000)
 
         expect(posts, `NIP-86-Request(s) an Buzz gegangen: ${posts.join(', ')}`).toHaveLength(0)
+    })
+    /**
+     * **Threading gegen Buzz — der ganze Weg durch den echten Client.**
+     *
+     * Der Gegenpart zu `C6b` in `room.spec.ts` (dort NIP-22/kind 1111 gegen zooid). Hier
+     * steht die andere Hälfte der Weiche: auf Buzz ist eine Antwort eine kind-9-Nachricht
+     * mit markierten `e`-Tags. Der Grund, warum das kein Feinschliff ist, sondern die
+     * Bedingung dafür, dass es die Funktion überhaupt gibt: **Buzz weist kind 1111 hart ab**
+     * (`restricted: unknown event kind`, am laufenden Relay gemessen) — mit dem NIP-22-Pfad
+     * liefe jede Antwort in einen Fehler.
+     *
+     * Drei Dinge werden gemessen, nicht eines:
+     * 1. die **Tag-Form** am Relay (Tiefe 1 = nur `reply`, Tiefe 2 = `root` + `reply`) — die
+     *    falsche Form nimmt Buzz teils an, ohne sie zu verknüpfen (stiller Verlust);
+     * 2. dass die Antwort **im Thread** erscheint und den Zähler hebt;
+     * 3. dass sie **nicht zusätzlich im Raum-Verlauf** steht — sie liegt im selben `#h`,
+     *    ohne den Schnitt stünde sie doppelt da.
+     *
+     * **Eigener Wegwerf-Raum, nicht `welcome`.** Der Buzz-Stack überlebt den Lauf; drei
+     * Nachrichten pro Durchgang in den geteilten Raum verschieben dort auf Dauer das
+     * Scroll-Fenster, und ein anderer Test, der die ÄLTESTE Seed-Nachricht sehen will, kippt
+     * irgendwann ohne eigenen Fehler. Genau so ist es beim ersten Lauf passiert:
+     * `buzz-room:108` rot in der Suite, isoliert grün.
+     */
+    test('Threading: Antwort ist kind 9 mit reply-Marker — im Thread, NICHT im Raum-Verlauf', async ({ page }) => {
+        const stamp = Math.floor(Math.random() * 1e9)
+        const h = crypto.randomUUID()
+        const create = spawnSync(
+            NAK,
+            ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9007', '-t', `h=${h}`, '-t', `name=Thread-${stamp}`, WS()],
+            { encoding: 'utf8', timeout: 30_000 },
+        )
+        expect(`${create.stdout ?? ''}${create.stderr ?? ''}`).toContain('success')
+
+        try {
+            await loginNsec(page, BUZZ_OWNER_NSEC)
+            await page.goto(`/rooms/${h}`)
+            const composer = page.getByPlaceholder('Nachricht schreiben…')
+            await expect(composer).toBeVisible({ timeout: 20_000 })
+
+            const wurzel = `BUZZTHREAD-ROOT-${stamp}`
+            await composer.fill(wurzel)
+            await page.getByRole('button', { name: 'Senden' }).click()
+            await expect(page.getByText(wurzel, { exact: true })).toBeVisible({ timeout: 20_000 })
+
+            // Die Wurzel-id vom Relay holen — die Tag-Prüfung unten braucht sie, und der
+            // Umweg über den DOM wäre eine zweite Fehlerquelle.
+            let rootId = ''
+            await expect
+                .poll(() => (rootId = roomEvents(h).find((e) => e.content === wurzel)?.id ?? ''), { timeout: 20_000 })
+                .not.toBe('')
+
+            // 1) Thread öffnen und in Tiefe 1 antworten.
+            const row = page.locator('div.group', { hasText: wurzel })
+            await row.hover()
+            await row.getByRole('button', { name: 'Im Thread antworten' }).click()
+            const dialog = page.getByRole('dialog', { name: 'Thread' })
+            await expect(dialog).toBeVisible()
+
+            const a1 = `BUZZTHREAD-R1-${stamp}`
+            await page.getByPlaceholder('Im Thread antworten…').fill(a1)
+            await page.getByRole('button', { name: 'Antwort senden' }).click()
+            await expect(dialog.getByText(a1, { exact: true })).toBeVisible({ timeout: 20_000 })
+            await expect(page.getByRole('banner').getByText('1 Antwort', { exact: true })).toBeVisible({ timeout: 20_000 })
+
+            // Tiefe 1 am Relay: kind 9, `h` des Raums, GENAU EIN `e`-Tag mit `reply` — kein
+            // `root`. Die NIP-10-konforme root-only-Form nimmt Buzz an und verknüpft sie
+            // nicht (`buzz-room:111` Schritt 4 hält das als Tatsache fest); die hier
+            // geprüfte Form ist die einzige, die ankommt.
+            let r1: RelayRow | undefined
+            await expect
+                .poll(() => (r1 = roomEvents(h).find((e) => e.content === a1)) !== undefined, { timeout: 20_000 })
+                .toBe(true)
+            const eTags1 = (r1 as RelayRow).tags.filter((t) => t[0] === 'e')
+            expect(eTags1, 'Tiefe 1 trägt GENAU ein e-Tag').toHaveLength(1)
+            expect(eTags1[0][1]).toBe(rootId)
+            expect(eTags1[0][2], 'Position 2 (Relay-Hint) muss existieren, sonst rutscht der Marker').toBe('')
+            expect(eTags1[0][3]).toBe('reply')
+            expect((r1 as RelayRow).tags.find((t) => t[0] === 'h')?.[1]).toBe(h)
+
+            // 2) Auf die Antwort antworten (Tiefe 2) → `root` UND `reply`.
+            const r1Row = dialog.locator('div.group', { hasText: a1 })
+            await r1Row.hover()
+            await r1Row.getByRole('button', { name: 'Antworten', exact: true }).click()
+            const a2 = `BUZZTHREAD-R2-${stamp}`
+            await page.getByPlaceholder('Im Thread antworten…').fill(a2)
+            await page.getByRole('button', { name: 'Antwort senden' }).click()
+            await expect(dialog.getByText(a2, { exact: true })).toBeVisible({ timeout: 20_000 })
+            await expect(page.getByRole('banner').getByText('2 Antworten', { exact: true })).toBeVisible({ timeout: 20_000 })
+
+            let r2: RelayRow | undefined
+            await expect
+                .poll(() => (r2 = roomEvents(h).find((e) => e.content === a2)) !== undefined, { timeout: 20_000 })
+                .toBe(true)
+            const eTags2 = (r2 as RelayRow).tags.filter((t) => t[0] === 'e')
+            expect(eTags2, 'Tiefe 2 braucht BEIDE Tags — nur `reply` lehnt Buzz hart ab').toHaveLength(2)
+            expect(eTags2.find((t) => t[3] === 'root')?.[1], 'root zeigt auf die WURZEL, nicht auf das Ziel').toBe(rootId)
+            expect(eTags2.find((t) => t[3] === 'reply')?.[1]).toBe((r1 as RelayRow).id)
+
+            // 3) Zurück im Raum: der Indikator steht an der Wurzel — und die beiden Antworten
+            //    stehen NICHT als eigene Zeilen im Verlauf, obwohl sie dasselbe `h` tragen.
+            await page.getByRole('button', { name: 'Zurück' }).click()
+            await expect(row.getByText('2 Antworten')).toBeVisible({ timeout: 20_000 })
+            await expect(page.getByText(a1, { exact: true }), 'Antwort gehört in den Thread, nicht in den Verlauf').toHaveCount(0)
+            await expect(page.getByText(a2, { exact: true })).toHaveCount(0)
+        } finally {
+            // Buzz entfernt den Raum still (ohne Tombstone) — für den geteilten Stack genau
+            // richtig: die nächste Suite sieht ihn nicht mehr.
+            spawnSync(NAK, ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9008', '-t', `h=${h}`, WS()], {
+                encoding: 'utf8',
+                timeout: 30_000,
+            })
+        }
     })
 })
