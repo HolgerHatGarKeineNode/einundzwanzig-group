@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
-import { BUZZ_URL, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX } from './support/buzz'
+import { BUZZ_URL, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_USER_NSEC, BUZZ_USER_PUB } from './support/buzz'
 import { loginNsec } from './support/login'
 import { spawnSync } from 'node:child_process'
 import { getPublicKey } from 'nostr-tools/pure'
@@ -126,6 +126,90 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
         expect(persisted, 'der Workspace darf nicht in den localStorage geschrieben werden').not.toContain(
             String(BUZZ_PORT),
         )
+    })
+
+    /**
+     * **Das Profil des Workspace-Relays darf das echte Nostr-Profil nicht verdrängen.**
+     *
+     * Buzz legt beim Onboarding ein eigenes kind-0 an. kind 0 ist ersetzbar, im
+     * welshman-Repository gewinnt pro Pubkey der jüngste Zeitstempel — ein frisch
+     * erzeugtes Buzz-Profil schlägt damit fast immer das echte, über Jahre gepflegte.
+     * Der Effekt ist app-weit, nicht auf den Workspace begrenzt: `profilesByPubkey`
+     * hat EINE Quelle pro Pubkey.
+     *
+     * Der Test stellt genau das nach: derselbe Pubkey hat auf zooid „Alice Test" und
+     * auf Buzz einen frischeren Fantasienamen. Nach dem Betreten eines Workspace-Raums
+     * muss weiterhin der zooid-Name stehen.
+     */
+    test('das Buzz-Profil verdrängt das echte Nostr-Profil nicht', async ({ page }) => {
+        joinBuzzRelay()
+        // Den EINGELOGGTEN Nutzer in den Buzz-Raum aufnehmen (kind 9000, Admin) — ohne
+        // Raum-Mitgliedschaft bleibt der Feed gated (`membershipReady: false`), die
+        // Nachrichtenliste leer und der Test prüfte nichts.
+        spawnSync(
+            NAK,
+            ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9000', '-t', `h=${BUZZ_ROOM_WELCOME}`, '-t', `p=${getPublicKey(decode(NSEC).data as Uint8Array)}`, `ws://localhost:${BUZZ_PORT}`],
+            { encoding: 'utf8', timeout: 30_000 },
+        )
+        // Autor ist der EINGELOGGTE zooid-Testnutzer. Bewusst nicht der buzz-eigene
+        // Seed-Nutzer: dessen Schlüssel ist auf zooid nicht zugelassen, ein dortiges
+        // kind-0 würde abgelehnt — es gäbe gar kein „echtes" Profil zum Verteidigen.
+        const pub = getPublicKey(decode(NSEC).data as Uint8Array)
+        const fake = `BuzzFake-${Math.random().toString(36).slice(2, 8)}`
+        const nak = (args: string[]) => spawnSync(NAK, args, { encoding: 'utf8', timeout: 30_000 })
+
+        // Das Buzz-Profil entsteht JETZT und ist damit jünger als das zooid-Seed-Profil
+        // — genau die Richtung, in der es ohne den Fix gewinnt, weil kind 0 ersetzbar
+        // ist und der jüngste Zeitstempel zählt.
+        nak(['event', '--auth', '--sec', NSEC, '-k', '0', '-c', JSON.stringify({ name: fake }), `ws://localhost:${BUZZ_PORT}`])
+        nak(['event', '--auth', '--sec', NSEC, '-k', '9', '-t', `h=${BUZZ_ROOM_WELCOME}`, '-c', `Profil-Probe ${fake}`, `ws://localhost:${BUZZ_PORT}`])
+
+        await useZooid(page)
+        await page.addInitScript((url) => {
+            ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
+        }, BUZZ_URL)
+        await loginNsec(page, NSEC)
+        await expect(page.getByRole('tab', { name: 'Workspaces' })).toBeVisible({ timeout: 20_000 })
+
+        // Über den ECHTEN Klick-Pfad in den Raum: Tab „Workspaces" → Raum-Kachel.
+        // Der Abkürzungs-Weg der Nachbartests (`openWorkspaceRoom` + `goto`) genügt hier
+        // nicht — er stellt den Space um, aber der Raum-Feed bleibt leer.
+        await page.getByRole('tab', { name: 'Workspaces' }).click()
+        const panel = page.getByRole('tabpanel')
+        await expect.poll(async () => (await panel.locator('button').count()) > 0, { timeout: 30_000 }).toBe(true)
+        await panel.locator('button').first().click()
+        await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
+
+        // Der Name, den die Insel für DIESEN Pubkey führt — über die Insel statt über
+        // das Markup, weil derselbe Text auch im Nachrichtentext steht.
+        //
+        // Bewusst OHNE `profileReady`-Filter: geprüft wird die Aussage des Nutzers
+        // („in einem Workspace-Raum springt mein Profil um"), und die gilt für jeden
+        // Zustand. Ein Test, der auf ein aufgelöstes Profil wartet, würde in dieser
+        // Umgebung an der Vorbedingung hängen statt die Sache zu prüfen.
+        const nameFor = async (): Promise<string | null> =>
+            page.evaluate((pk) => {
+                const el = document.querySelector('[x-data^="nostrRoomChat"]')!
+                const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
+                const msg = (data.messages as { pubkey: string; name: string }[]).find((m) => m.pubkey === pk)
+                return msg ? msg.name : null
+            }, pub)
+
+        await expect
+            .poll(async () => (await nameFor()) !== null, {
+                timeout: 30_000,
+                message: 'die Nachricht des Autors muss im Workspace-Raum ankommen',
+            })
+            .toBe(true)
+
+        // Die eigentliche Zusicherung: der Buzz-Name darf NIE erscheinen. Er ist das
+        // jüngere kind-0 und würde ohne den Fix gewinnen.
+        expect(await nameFor(), 'das Buzz-Profil darf das echte nicht verdrängen').not.toBe(fake)
+
+        // Und er darf auch nach 5 s nicht nachträglich einspringen — genau das
+        // beschreibt der Bericht: man betritt den Raum und das Profil kippt.
+        await page.waitForTimeout(5_000)
+        expect(await nameFor(), 'auch verzögert darf das Buzz-Profil nicht gewinnen').not.toBe(fake)
     })
 
     test('zurück auf die Raumliste verlässt den Workspace — sie zeigt wieder zooid', async ({ page }) => {
