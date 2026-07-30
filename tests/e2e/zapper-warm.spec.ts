@@ -157,3 +157,76 @@ test('Unerreichbarer LNURL-Endpoint eines Autors: kein unhandled rejection, Chat
         setAdminProfile({ name: 'Relay Admin' }, now + 1)
     }
 })
+
+/**
+ * Dritter Anker: der **Zap-Sheet-Pfad** (expliziter Nutzer-Tap), nicht der Warmlauf.
+ *
+ * Er lief bis 2026-07-30 über welshmans `forceLoadZapper` und damit durch denselben
+ * kaputten Batcher: bei totem Endpoint settlete dessen Promise NIE (nur der
+ * `withTimeout(…, 15000)` in `bridge.ts` rettete die UI) UND es feuerte dieselbe
+ * verwaiste Rejection wie der Warmlauf. Seither geht auch dieser Pfad über
+ * `loadZapperNow` (`js/zaps.ts`) — dieselbe Funktion, die die beiden Anker oben decken.
+ *
+ * Geprüft wird deshalb genau das, was hier ANDERS ist als im Warmlauf: dass der Tap
+ * zu einem ERGEBNIS führt (die „nicht erreichbar"-Meldung) statt in den 15-s-Timeout
+ * zu laufen — und dass dabei keine Rejection entsteht.
+ */
+test('Zap-Sheet bei totem Endpoint: klare Meldung statt Timeout, keine unhandled rejection', async ({ page }) => {
+    const now = Math.floor(Date.now() / 1000)
+    setAdminProfile({ name: 'Relay Admin', lud16: 'admin@lnurl-dead.test' }, now)
+
+    try {
+        const pageErrors: string[] = []
+        page.on('pageerror', (e) => pageErrors.push(e.message))
+
+        await page.addInitScript(() => {
+            ;(window as unknown as { __rejections: string[] }).__rejections = []
+            window.addEventListener('unhandledrejection', (e) =>
+                (window as unknown as { __rejections: string[] }).__rejections.push(String(e.reason)),
+            )
+        })
+
+        // Deterministisch tot: `abort('failed')` erzeugt exakt „TypeError: Failed to fetch".
+        // Kein DNS, nichts verlässt die Maschine.
+        let lnurlHits = 0
+        await page.route(/\.well-known\/lnurlp/, (route) => {
+            lnurlHits += 1
+
+            return route.abort('failed')
+        })
+
+        await useZooid(page)
+        await loginNsec(page, NSEC)
+        await page.goto('/rooms/welcome')
+        await expect(page.getByText(WELCOME)).toBeVisible({ timeout: 15_000 })
+
+        // Der Warmlauf muss den toten Endpoint bereits angefasst haben — sonst prüfte
+        // der Rest dieses Tests einen Zustand, den es gar nicht gab.
+        await expect
+            .poll(() => lnurlHits, { timeout: 15_000, message: 'LNURL-Abruf hat nie stattgefunden' })
+            .toBeGreaterThan(0)
+
+        // Zap-Sheet braucht eine FREMDE Nachricht: `zappable = !mine && Boolean(lnurl)`
+        // (`feeds.ts:551`). Die Willkommens-Nachricht des Seeds stammt vom Test-USER selbst
+        // (`zooid-testserver.sh:223`) und ist damit nie zappbar — deshalb hier eine eigene
+        // Admin-Nachricht.
+        const zapMarker = `ZAP-DEAD-${Math.floor(Math.random() * 1e9)}`
+        execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=welcome', '-c', `E2E ${zapMarker}`, ZOOID_WS])
+        await expect(page.getByText(`E2E ${zapMarker}`)).toBeVisible({ timeout: 15_000 })
+
+        const row = page.locator('div.chat-row', { hasText: zapMarker }).first()
+        await row.hover()
+        await row.getByRole('button', { name: 'Zap', exact: true }).click()
+
+        // Das Ergebnis, auf das es ankommt: eine AUSSAGE, und zwar deutlich schneller als
+        // der 15-s-Notausgang. Mit der verwaisten Promise kam hier nie etwas an.
+        await expect(page.getByText('Der Zahlungs-Endpoint des Empfängers ist nicht erreichbar.', { exact: false }))
+            .toBeVisible({ timeout: 10_000 })
+
+        const rejections = await page.evaluate(() => (window as unknown as { __rejections: string[] }).__rejections)
+        expect(rejections, `unhandled rejections: ${rejections.join(' | ')}`).toEqual([])
+        expect(pageErrors, `page errors: ${pageErrors.join(' | ')}`).toEqual([])
+    } finally {
+        setAdminProfile({ name: 'Relay Admin' }, now + 1)
+    }
+})
