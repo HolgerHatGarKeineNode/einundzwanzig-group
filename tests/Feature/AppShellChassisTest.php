@@ -26,14 +26,47 @@ test('P2 Web-Host-Config: group.spaces rendert die 3 Web-Tabs (Chat · Wallet ·
     $res->assertDontSee('>Mitglieder<', false);
     // Wallet-Tab ist per Nav erreichbar (verlinkt die Wallet-Route).
     $res->assertSee('href="'.route('group.wallet').'"', false);
-    // Kein Takeover: exit=null (eigenständiger Web-Client) → Brand-Mark, kein
-    // Host-Rücksprung.
-    $res->assertSee('aria-label="Startseite"', false);
+    // Kein Takeover: ohne `group.exit` (eigenständiger Web-Client) gibt es keinen
+    // Host-Rücksprung — und auch keinen Home-Link. Die Startseite braucht keinen
+    // Link auf sich selbst; ihre Marke ist der Space-Block (Icon + NIP-11-Name),
+    // seit dem Kopf-Redesign in `60a696e` (Space- und User-Identität getrennt).
+    // Der Brand-Mark lebt weiter im `app-header` — geprüft im Test darunter.
     $res->assertDontSee('aria-label="Zurück zu', false);
+    $res->assertDontSee('aria-label="Startseite"', false);
     // Aktiver Tab trägt den kontrastsicheren brand-700 (≥4.5:1 auf hellem Nav-Grund),
     // nicht das AA-verletzende brand-500/text-accent (§7.6).
     $res->assertSee('text-brand-700 dark:text-brand-400', false);
     $res->assertDontSee('nav-pill absolute inset-x-0 top-0 mx-auto h-1 w-8 rounded-full bg-accent', false);
+});
+
+/**
+ * Die Gegenprobe zum „kein Rücksprung"-Satz oben: Der Ausgang ist keine Eigenschaft
+ * der Seite, sondern der Host-Config. Ohne diesen Test wäre die Aussage rein negativ —
+ * ein versehentlich entfernter exit-Zweig fiele niemandem auf, und der Nutzer säße im
+ * Vollbild-Takeover fest (genau der Fall, für den `group.exit` existiert).
+ */
+test('P2 Host-Takeover: mit config(group.exit) trägt group.spaces den Rücksprung, statt eines Home-Links', function () {
+    config(['group.exit' => ['route' => 'group.settings', 'label' => 'Meetups']]);
+
+    $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+        ->get(route('group.spaces'))
+        ->assertOk()
+        ->assertSee('aria-label="'.__('Zurück zu :label', ['label' => 'Meetups']).'"', false)
+        ->assertSee('href="'.route('group.settings').'"', false)
+        ->assertDontSee('aria-label="Startseite"', false);
+});
+
+/**
+ * Der Brand-Mark ist nicht verschwunden, er ist nur nicht mehr auf der Startseite: Der
+ * `app-header` zeigt ihn als dritte Wahl — kein screen-interner Zurück-Pfeil, kein
+ * Host-Ausgang, also die Marke mit Link nach Hause. `/settings` ist genau dieser Fall.
+ */
+test('app-header zeigt ohne back und ohne exit den Brand-Mark als Home-Link', function () {
+    $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+        ->get(route('group.settings'))
+        ->assertOk()
+        ->assertSee('aria-label="Startseite"', false)
+        ->assertSee('href="'.route('home').'"', false);
 });
 
 test('bottom-nav iteriert config(group.nav): eine Config-Zeile ergibt vier Tabs', function () {
