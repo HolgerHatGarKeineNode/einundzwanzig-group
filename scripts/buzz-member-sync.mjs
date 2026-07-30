@@ -285,7 +285,9 @@ async function main() {
         throw new Error(
             `Der Signierschluessel ${signerPub.slice(0, 12)}… hat auf ${RELAY} die Rolle ` +
                 `"${signerRole ?? 'keine'}" — 9030/9031 verlangen owner oder admin. ` +
-                'Der Owner muss ihn einmalig heraufstufen (kind 9032, role=admin).',
+                'Der Owner muss ihn einmalig heraufstufen: kind 9030 mit ["role","admin"], wenn der ' +
+                'Pubkey noch KEIN Mitglied ist — kind 9032 aendert nur die Rolle eines BESTEHENDEN ' +
+                'Mitglieds und antwortet sonst mit "invalid: member not found".',
         )
     }
 
