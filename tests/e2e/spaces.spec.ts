@@ -564,3 +564,93 @@ test('P7: „Meine Räume" teilt sich ab 5 Zeilen in Räume und Meetups', async 
         }
     }
 })
+
+/**
+ * Das Suchfeld der Standardliste erscheint ab 10 Räumen — und NUR unterhalb xl.
+ *
+ * Zwei Aussagen in einem Anker, weil beide am selben Element hängen:
+ * 1. die Schwelle (`showRoomSearch()`, gemessen am UNGEFILTERTEN Bestand),
+ * 2. die Breakpoint-Gatung (`xl:hidden`) — oberhalb trägt der Navigator seinen
+ *    eigenen `#`-Prompt, zwei Suchfelder nebeneinander wären ein Bedienfehler.
+ *
+ * **Die Räume werden am Ende wieder gelöscht (9008, im `finally`).** Der
+ * Worker-zooid ist GETEILT und überlebt den Lauf: blieben sie stehen, läge jeder
+ * spätere Lauf dauerhaft über der Schwelle und die Gegenprobe unten prüfte nichts
+ * mehr. Dasselbe Muster trug den wochenlangen `storage-cache`-Flake.
+ */
+test('P8: Suchfeld der Standardliste ab 10 Räumen — und nur unterhalb xl', async ({ page }) => {
+    const rnd = Math.floor(Math.random() * 1e9)
+    const angelegt: string[] = []
+    const suchfeld = page.locator('[data-room-search]')
+
+    /** `standardRoomTotal()` aus der laufenden Insel — die Zahl, die die Schwelle liest. */
+    const bestand = () => page.evaluate(() => {
+        for (const el of document.querySelectorAll('[x-data]')) {
+            const stack = (el as unknown as { _x_dataStack?: Record<string, unknown>[] })._x_dataStack ?? []
+            for (const frame of stack) {
+                if (typeof frame.standardRoomTotal === 'function') {
+                    return (frame.standardRoomTotal as () => number)()
+                }
+            }
+        }
+
+        return -1
+    })
+
+    try {
+        await login(page)
+        await expect(page.getByText('Willkommen')).toBeVisible({ timeout: 15_000 })
+
+        // Gegenprobe nach unten — nur wenn der Lauf sie hergibt. Frühere Tests
+        // derselben Datei legen Räume an; ob der Ausgangsbestand unter 10 liegt,
+        // kontrolliert dieser Test nicht. Statt eine wackelige Behauptung fest zu
+        // verdrahten, wird der tatsächliche Bestand GEMESSEN und die Aussage nur
+        // dann geprüft, wenn sie überhaupt etwas bedeutet.
+        const vorher = await bestand()
+        expect(vorher, 'Insel gefunden').toBeGreaterThanOrEqual(0)
+        if (vorher < 10) {
+            await expect(suchfeld, `unter der Schwelle (${vorher}) kein Suchfeld`).toHaveCount(0)
+        }
+
+        // Über die Schwelle: fehlende Standardräume auffüllen, mit Reserve. Nicht
+        // beitreten (kein 9021) — für `standardRoomTotal()` zählen „Andere Räume"
+        // gleichrangig mit, und ein Beitritt wäre nur zusätzlicher Aufräum-Ballast.
+        const fehlend = Math.max(0, 10 - vorher)
+        const namen: string[] = []
+        for (let i = 0; i < fehlend; i++) {
+            const h = `sf${rnd}${i}`
+            const name = `SuchRaum-${rnd}-${i}`
+            createRoomNak(h, name)
+            angelegt.push(h)
+            namen.push(name)
+        }
+
+        await page.reload()
+        await expect.poll(bestand, { timeout: 20_000 }).toBeGreaterThanOrEqual(10)
+        await expect(suchfeld).toBeVisible({ timeout: 20_000 })
+
+        // Es filtert wirklich — und zwar die vorhandene `roomQuery`, kein zweiter
+        // Filter daneben. Nach einem Namensfragment bleibt „Willkommen" weg.
+        const feld = suchfeld.locator('input')
+        await feld.fill(`SuchRaum-${rnd}`)
+        await expect(page.getByText('Willkommen', { exact: true })).toHaveCount(0, { timeout: 10_000 })
+        // … und das Feld überlebt seine eigene Wirkung: die Schwelle liest den
+        // ungefilterten Bestand. Am gefilterten gemessen verschwände es hier.
+        await expect(suchfeld).toBeVisible()
+        await feld.fill('')
+
+        // Oberhalb von xl gehört das Feld dem Navigator. Der Beweis, dass der
+        // Breakpoint wirklich überschritten wurde, ist dessen eigener Prompt.
+        await page.setViewportSize({ width: 1440, height: 900 })
+        await expect(page.locator('[data-rail] input[type="search"]')).toBeVisible({ timeout: 20_000 })
+        await expect(suchfeld, 'ab xl trägt der Navigator die Suche').toBeHidden()
+    } finally {
+        for (const h of angelegt) {
+            try {
+                execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9008', '-t', `h=${h}`, ZOOID_WS])
+            } catch {
+                /* Aufräumen darf den Testbefund nicht überschreiben */
+            }
+        }
+    }
+})

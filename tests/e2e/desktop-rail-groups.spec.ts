@@ -145,4 +145,15 @@ test('Ab 1280 px zeigt die Bühne die Raumliste nicht mehr — die Rail trägt s
     // Antragsräume existieren, und der zooid-Seed hat keine. Eine Zusicherung über
     // eine Zeile, die im Seed gar nicht vorkommt, prüfte den Seed, nicht den Umbau.
     await expect(buehne.getByText('Meetup-Räume entdecken')).toBeVisible({ timeout: 20_000 })
+
+    // Und die Trennlinie über den Entdecken-Wegen ist weg: sie trennt von den
+    // Raumlisten, die es hier nicht mehr gibt. Ein Strich am oberen Rand der Karte
+    // trennt nichts von nichts.
+    // Gemessen an der GERENDERTEN Kante, nicht an einer Klassenliste: die Klasse
+    // hängt an einer Alpine-Bindung, und ein Klassen-Locator prüfte den Ausdruck
+    // statt seiner Wirkung.
+    const borderTop = await buehne.locator('[data-discover]').evaluate(
+        (el) => getComputedStyle(el).borderTopWidth,
+    )
+    expect(borderTop, 'kein Strich am oberen Rand der Karte').toBe('0px')
 })
