@@ -102,6 +102,7 @@ test.describe('Buzz-Melde-Queue (E2E, nur E2E_RELAY=buzz)', () => {
         seedMessage(keeper)
         expect(targetId).toMatch(/^[0-9a-f]{64}$/)
 
+
         await loginNsec(page, BUZZ_OWNER_NSEC)
 
         // ── 1. Melden über die Raum-Insel ───────────────────────────────────────
@@ -184,7 +185,33 @@ test.describe('Buzz-Melde-Queue (E2E, nur E2E_RELAY=buzz)', () => {
             )
             .toBe('resolved')
 
-        const inRoom = relayEvents().map((e) => e.content)
+        // Die Löschung braucht einen POLL, keine Momentaufnahme. 9044 (Report schließen)
+        // und 9005 (Event löschen) sind ZWEI Events; der Report kann längst `resolved`
+        // sein, während das 9005 noch in der Verarbeitung steckt. Buzz bestätigt ein
+        // Event, bevor es über einen frischen REQ sichtbar ist — dieselbe Verzögerung
+        // ist in `buzz-admin.spec.ts` beim Seeden dokumentiert, hier wirkt sie
+        // andersherum.
+        //
+        // **Das war die Ursache der langen Fehlersuche.** Der Test galt als hart rot und
+        // wurde gegen fünf Hypothesen geprüft (Kanal-Admin, synchrone Buzz-Weiche,
+        // loadRelay-Cache, busy-Gate, Signer-Rechte) — alle widerlegt, weil er in
+        // Wahrheit INTERMITTIEREND ist: am 2026-07-30 isoliert gemessen 3× grün, dann
+        // rot, dann wieder mehrfach grün. Eine Momentaufnahme direkt nach dem Klick
+        // erwischt die Löschung mal, mal nicht.
+        //
+        // Die Gegenprobe steckt IM selben Lesevorgang: eine leere oder kaputte Abfrage
+        // erfüllt „enthält den Marker nicht" sonst trivial — genau die Grün-Falle, vor
+        // der `relayEvents()` oben schon einmal schützt.
+        let inRoom: string[] = []
+        await expect
+            .poll(
+                () => {
+                    inRoom = relayEvents().map((e) => e.content)
+                    return inRoom.includes(keeper) && !inRoom.includes(marker)
+                },
+                { timeout: 30_000, message: 'das 9005 muss das gemeldete Event am Relay entfernen (Gegenprobe bleibt liegen)' },
+            )
+            .toBe(true)
         expect(inRoom, 'gelöschtes Event darf nicht mehr am Relay liegen').not.toContain(marker)
         expect(inRoom, 'Gegenprobe muss am Relay liegen (sonst prüft der Test nichts)').toContain(keeper)
 
