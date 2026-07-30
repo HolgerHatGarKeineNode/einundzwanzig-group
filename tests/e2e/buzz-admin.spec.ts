@@ -263,6 +263,58 @@ test.describe('Buzz-Space-Verwaltung (E2E, nur E2E_RELAY=buzz)', () => {
         }
     })
 
+    /**
+     * „Bearbeiten" ist der EINZIGE Verwaltungs-Menüpunkt, den die Kachel auf einem
+     * Buzz-Space noch anbietet (`room-tile.blade.php`: Mitglieder/Löschen sind hinter
+     * `!isBuzz` gegatet). Er hat dieselbe Falle wie das Anlegen: Buzz schiebt die neu
+     * signierte 39000 nicht in die offene Live-Sub. Ohne Nachladen bliebe der ALTE
+     * Name stehen — der Nutzer sähe einen Menüpunkt, der nichts tut, obwohl das 9002
+     * längst am Relay liegt.
+     */
+    test('Owner benennt einen Raum um — die Liste zieht ohne Reload nach (9002)', async ({ page }) => {
+        const name = `E2E-Alt-${Math.random().toString(36).slice(2, 8)}`
+        const renamed = `E2E-Neu-${Math.random().toString(36).slice(2, 8)}`
+        await loginNsec(page, BUZZ_OWNER_NSEC)
+
+        // Anlegen über die Oberfläche (derselbe Pfad wie im Test darüber).
+        const addBtn = page.getByRole('button', { name: 'Neuen Raum anlegen', exact: true })
+        await expect(addBtn).toBeVisible({ timeout: 20_000 })
+        await addBtn.click()
+        const form = page.locator('dialog[data-modal="room-form"]')
+        await form.getByPlaceholder('z.B. Allgemein').fill(name)
+        await form.getByRole('button', { name: 'Speichern' }).click()
+        await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 25_000 })
+
+        const room = roomsAtRelay().find((r) => r.name === name)
+        expect(room, 'der Ausgangsraum muss am Relay liegen').toBeTruthy()
+
+        try {
+            // Umbenennen über das Kachel-„…"-Menü.
+            const tile = page.locator('div.group', { hasText: name })
+            await tile.getByRole('button', { name: 'Raum verwalten' }).click()
+            await page.getByRole('menuitem', { name: 'Bearbeiten' }).click()
+            const editForm = page.locator('dialog[data-modal="room-form"]')
+            await expect(editForm.getByPlaceholder('z.B. Allgemein')).toHaveValue(name)
+            await editForm.getByPlaceholder('z.B. Allgemein').fill(renamed)
+            await editForm.getByRole('button', { name: 'Speichern' }).click()
+
+            // Der Kern: OHNE Reload. Ein `page.reload()` hier würde den Test grün
+            // machen und die Aussage zerstören.
+            await expect(page.getByText(renamed, { exact: true })).toBeVisible({ timeout: 25_000 })
+            await expect(page.getByText(name, { exact: true })).toHaveCount(0)
+
+            // Gegenprobe am Relay: derselbe Raum (gleiches `d`), neuer Name — nicht
+            // etwa ein zweiter Raum, den ein verirrtes 9007 angelegt hätte.
+            const after = roomsAtRelay().filter((r) => r.d === room!.d)
+            expect(after.map((r) => r.name), 'die 39000 muss unter derselben ID den neuen Namen tragen').toEqual([renamed])
+        } finally {
+            execFileSync(NAK, ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9008', '-t', `h=${room!.d}`, WS()], {
+                encoding: 'utf8',
+                timeout: 20_000,
+            })
+        }
+    })
+
     test('Owner kann ein Mitglied aufnehmen (9030) und wieder entfernen (9031)', async ({ page }) => {
         // Frischer Wegwerf-Pubkey pro Lauf — so ist der Test wiederholbar, ohne den
         // Seed-Zustand des geteilten buzz-test-Stacks anzufassen.
