@@ -81,3 +81,43 @@ test('Raum-Seite setzt per-Raum-OG-Bild aus dem Raum-picture (B5)', function () 
         ->assertOk()
         ->assertSee('property="og:image" content="'.url('/img/og?src='.rawurlencode('https://img/w.png')), false);
 });
+
+/**
+ * Die Space-Weiche an der Raum-URL (`?space=workspace`).
+ *
+ * Sie ist die Server-Hälfte des Reload-Fixes: ein Workspace-Raum liegt auf dem ZWEITEN
+ * Relay, der Read-Cache ist aber pro URL geschlüsselt. Ohne die Weiche schlägt der
+ * Titel/OG-Blick immer im Vereins-Space nach — Cache-Miss, rohe UUID im Kopf.
+ */
+test('urlForSpaceParam schaltet nur auf den konfigurierten Workspace, sonst Default', function () {
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+
+    expect(SpaceCache::urlForSpaceParam('workspace'))->toBe('wss://buzz.test/')
+        ->and(SpaceCache::urlForSpaceParam(null))->toBe(SpaceCache::spaceUrl())
+        // Fremde Eingabe aus der Adressleiste: nie als URL lesen, nur das eine Wort kennen.
+        ->and(SpaceCache::urlForSpaceParam('wss://evil.tld/'))->toBe(SpaceCache::spaceUrl())
+        ->and(SpaceCache::urlForSpaceParam(['workspace']))->toBe(SpaceCache::spaceUrl());
+
+    // Ohne konfigurierten Workspace gibt es nichts umzuschalten.
+    config(['group.workspace_url' => null]);
+    expect(SpaceCache::urlForSpaceParam('workspace'))->toBe(SpaceCache::spaceUrl());
+});
+
+test('Raum-Seite liest bei ?space=workspace den Cache des zweiten Space', function () {
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+    // Derselbe `h` steht in BEIDEN Caches mit verschiedenen Namen — nur so zeigt der
+    // Test, dass wirklich der zweite gelesen wird und nicht bloß irgendeiner trifft.
+    Cache::put('nostr:rooms:'.SpaceCache::spaceUrl(), [
+        'welcome' => ['name' => 'Vereins-Willkommen', 'about' => '', 'picture' => '', 'locked' => false],
+    ]);
+    Cache::put('nostr:rooms:wss://buzz.test/', [
+        'welcome' => ['name' => 'Workspace-Willkommen', 'about' => 'Zweiter Space', 'picture' => '', 'locked' => false],
+    ]);
+
+    $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+        ->get(route('group.room', ['h' => 'welcome', 'space' => 'workspace']))
+        ->assertOk()
+        ->assertSee('# Workspace-Willkommen')
+        ->assertSee('Zweiter Space')
+        ->assertDontSee('Vereins-Willkommen');
+});

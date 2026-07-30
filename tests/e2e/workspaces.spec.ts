@@ -1,3 +1,4 @@
+import { type Page } from '@playwright/test'
 import { test, expect } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { BUZZ_URL, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_USER_NSEC, BUZZ_USER_PUB } from './support/buzz'
@@ -48,6 +49,18 @@ const buzzUp = (): boolean => {
     })
     return res.status === 0
 }
+
+/**
+ * Gegen welches Relay arbeitet die Raum-Insel gerade? (`_url` = der aktive Space, aus
+ * dem der Feed kommt und an den Beitritt/Senden gehen.) Über die Insel statt über das
+ * Markup: die Relay-URL steht nirgends im DOM, und sie ist die Größe, um die es geht.
+ */
+const roomSpaceUrl = (page: Page): Promise<string> =>
+    page.evaluate(() => {
+        const el = document.querySelector('[x-data^="nostrRoomChat"]')!
+        const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
+        return data._url as string
+    })
 
 test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
     test.skip(process.env.E2E_RELAY === 'buzz', 'braucht den zooid-Modus als Basis')
@@ -115,6 +128,8 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
             ;(data.openWorkspaceRoom as (r: unknown) => void)({ h: 'egal' })
         })
+        // OHNE Space-Markierung an der URL — genau so, wie ein Deep-Link in den
+        // Vereins-Space aussieht.
         await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
         await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
 
@@ -126,6 +141,64 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
         expect(persisted, 'der Workspace darf nicht in den localStorage geschrieben werden').not.toContain(
             String(BUZZ_PORT),
         )
+        // Und die Gegenprobe zum Titel: die unmarkierte Raum-URL steht wirklich auf zooid.
+        expect(await roomSpaceUrl(page), 'ohne Markierung gehört der Raum dem Vereins-Space').toBe(ZOOID_WS + '/')
+    })
+
+    /**
+     * **Der Reload-Fehler: `invalid: group not found`.**
+     *
+     * Gemeldet am 2026-07-30 aus Produktion — nach F5 in einem Workspace-Raum scheiterte
+     * der Beitritt mit genau dieser Relay-Antwort und der Verlauf blieb leer. Ursache: der
+     * ephemere Space überlebt keinen Reload, also stand wieder der Vereins-Space aktiv,
+     * und der Beitritt (kind 9021) ging an ein Relay, das diesen Raum gar nicht kennt.
+     *
+     * Deshalb trägt die Raum-URL die Zuordnung jetzt selbst (`?space=workspace`). Der Test
+     * geht den ECHTEN Klick-Pfad (Tab → Kachel), lädt hart neu und prüft, wogegen der Raum
+     * danach spricht.
+     */
+    test('ein Reload im Workspace-Raum bleibt im Workspace', async ({ page }) => {
+        joinBuzzRelay()
+        await useZooid(page)
+        await page.addInitScript((url) => {
+            ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
+        }, BUZZ_URL)
+        await loginNsec(page, NSEC)
+        await page.getByRole('tab', { name: 'Workspaces' }).click()
+        const panel = page.getByRole('tabpanel')
+        await expect.poll(async () => (await panel.locator('button').count()) > 0, { timeout: 30_000 }).toBe(true)
+        await panel.locator('button').first().click()
+        await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
+
+        // Die Markierung steht in der Adressleiste — sonst gäbe es nach dem Reload nichts,
+        // woraus die Zuordnung noch abzuleiten wäre.
+        await expect.poll(() => new URL(page.url()).searchParams.get('space'), { timeout: 10_000 }).toBe('workspace')
+
+        await page.reload()
+        await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
+
+        // Der Punkt der Sache: der Raum-Feed hängt nach dem Reload am BUZZ-Relay. Stünde
+        // hier die zooid-URL, ginge auch der Beitritt wieder dorthin — der gemeldete Fehler.
+        await expect
+            .poll(() => roomSpaceUrl(page), {
+                timeout: 20_000,
+                message: 'nach dem Reload muss der Raum weiter am Workspace-Relay hängen',
+            })
+            .toBe(BUZZ_URL)
+
+        // Gegenprobe aus den Daten statt aus der URL: die Raum-Metadaten (39000) kommen nur
+        // vom Buzz-Relay, also steht nach dem Reload ein Name da und nicht die rohe UUID.
+        await expect
+            .poll(
+                () =>
+                    page.evaluate(() => {
+                        const el = document.querySelector('[x-data^="nostrRoomChat"]')!
+                        const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
+                        return data.roomName as string
+                    }),
+                { timeout: 30_000, message: 'der Raumname muss vom Workspace-Relay nachgeladen werden' },
+            )
+            .not.toBe(BUZZ_ROOM_WELCOME)
     })
 
     /**
