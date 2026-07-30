@@ -131,3 +131,32 @@ test('app-shell rendert Chrome (status-strip + main-Outlet + nav); chrome=false 
         ->toContain('inhalt')
         ->not->toContain('aria-label="Hauptnavigation"');
 });
+
+test('app-frame rendert GENAU EIN Wurzelelement (Livewire-Vertrag)', function () {
+    // Livewire erlaubt pro Full-Page-Komponente genau eine Wurzel und prüft das mit
+    // `DOMDocument` (SupportMultipleRootElementDetection). Ein einziges überzähliges
+    // `</div>` irgendwo IM Navigator schließt den Rahmen zu früh, der Seiteninhalt
+    // rutscht daneben — und jede Seite antwortet mit 500.
+    //
+    // Der Defekt ist stumm: Blade rendert klaglos, kein Linter schlägt an, und die
+    // Fehlermeldung nennt die Livewire-Komponente, nicht die Blade-Datei mit dem
+    // Tippfehler. Genau deshalb dieser Wächter — er misst dieselbe Frage mit
+    // demselben Parser wie Livewire, aber am kleinsten Baustein.
+    $html = Blade::render('<x-group::app-frame><div id="sonde">x</div></x-group::app-frame>');
+
+    $dom = new DOMDocument;
+    $dom->loadHTML($html, LIBXML_NOERROR);
+    $body = $dom->getElementsByTagName('body')->item(0);
+
+    $roots = 0;
+    foreach ($body->childNodes as $child) {
+        if ($child->nodeType === XML_ELEMENT_NODE) {
+            $roots++;
+        }
+    }
+
+    expect($roots)->toBe(1, 'unbalanciertes Markup in app-frame oder desktop-rail');
+    // Und die Sonde muss DRIN liegen, nicht daneben — sonst wäre „1 Wurzel" auch
+    // dann erfüllt, wenn der Inhalt ganz verloren ginge.
+    expect($dom->getElementById('sonde'))->not->toBeNull();
+});

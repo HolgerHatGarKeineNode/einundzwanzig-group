@@ -102,6 +102,13 @@ test('Abmelden lebt an EINEM Ort ganz unten (nostrAuth-Teardown)', function () {
 
     $res->assertSee('doLogout()', false);
     $res->assertSee('Abmelden');
-    // Keine zweite Logout-Doppelung im selben Screen (3× → 1×).
-    expect(substr_count($res->getContent(), 'doLogout()'))->toBe(1);
+
+    // Gezählt wird im SEITENINHALT, nicht im ganzen Dokument. Der Test hält fest,
+    // dass der Einstellungen-Screen EINEN Abmelden-Knopf hat (dort waren es einmal
+    // drei) — nicht, dass die App insgesamt nur einen kennt. Seit der Desktop-Shell
+    // trägt das Profil-Popover im Navigator ebenfalls einen; er steht in der
+    // `desktop-rail`, also VOR dem `<main>`, und ist damit sauber abgrenzbar.
+    $main = mb_strstr($res->getContent(), '<main');
+    expect($main)->not->toBeFalse('Marke <main> fehlt — die Zählung wäre sonst wieder dokumentweit');
+    expect(substr_count($main, 'doLogout()'))->toBe(1);
 });

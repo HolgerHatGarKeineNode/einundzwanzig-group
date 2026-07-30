@@ -66,3 +66,20 @@ test('🟡 Wallet „Nicht gesetzt" ist hinter profileReady gegated (kein Lade-F
     // während des async Nachladens (sonst blitzt er kurz auf).
     expect($html)->toContain('profileReady && !profileLud16');
 });
+
+test('Abgeleitete Räume tragen kein Verwalten-Menü (Meetup + Projektunterstützung)', function () {
+    // Meetup- und Antragsräume erzeugt das Vereins-Portal; ihr 39000 ist abgeleitet.
+    // Ein Admin, der sie hier bearbeitet oder löscht, bricht die Bindung zur Quelle,
+    // ohne dass die Quelle davon erfährt. Deshalb: kein „…"-Menü an diesen Kacheln.
+    $tile = file_get_contents(base_path('packages/einundzwanzig-group/resources/views/components/room-tile.blade.php'));
+    $meetup = file_get_contents(base_path('packages/einundzwanzig-group/resources/views/components/meetup-tile.blade.php'));
+
+    // Die Bedingung hängt an den Raum-Markern, nicht an der Kachel — sie gilt damit
+    // in jeder Liste gleich.
+    expect($tile)->toContain('x-if="isAdmin && !room.isMeetup && !room.isProjectSupport"');
+
+    // Die Meetup-Kachel zeigt ausschließlich Meetups → gar kein Menü mehr.
+    foreach (['openRoomEdit', 'openRoomMembers', 'askDeleteRoom'] as $action) {
+        expect($meetup)->not->toContain($action);
+    }
+});
