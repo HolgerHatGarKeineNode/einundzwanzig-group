@@ -478,3 +478,89 @@ test('P6: ungelesene Nachricht in beigetretenem Antragsraum zeigt die Summenpill
     await expect(pill).toBeVisible({ timeout: 20_000 })
     await expect(pill).toHaveText('1')
 })
+
+/**
+ * „Meine Räume" untergliedert sich ab 5 Zeilen nach Typ — Räume und Meetups.
+ *
+ * Die Regel liegt in `js/railGroups.ts` (`splitMine`, node-getestet); dieser Anker
+ * prüft, dass sie im Mobil-Layout ankommt UND dass die Schwelle wirkt.
+ *
+ * **Der Test räumt seine Mitgliedschaften wieder ab (9022, im `finally`).** Der
+ * Worker-zooid ist GETEILT und überlebt den Lauf: bliebe der Beitritt stehen, läge
+ * jeder spätere Test dieses Workers dauerhaft über der Schwelle — und die
+ * Gegenprobe unten prüfte ab dem zweiten Lauf nichts mehr. Genau dieses Muster
+ * (ein nicht aufgeräumter Seed auf dem geteilten Relay) trug den wochenlangen
+ * `storage-cache`-Flake.
+ */
+/** Das gerenderte Sektionslabel — siehe Begründung an der ersten Verwendung. */
+const sectionLabel = (page: Page, text: string) =>
+    page.locator('span').filter({ hasText: new RegExp(`^${text}$`) })
+
+test('P7: „Meine Räume" teilt sich ab 5 Zeilen in Räume und Meetups', async ({ page }) => {
+    const rnd = Math.floor(Math.random() * 1e9)
+    const angelegt: string[] = []
+
+    try {
+        // KEINE Schwellen-Gegenprobe hier. Sie stünde auf einem Zustand, den dieser
+        // Test nicht kontrolliert: neun Tests derselben Datei laufen vorher im
+        // selben Worker, mehrere davon legen Räume an und treten ihnen bei (das
+        // „Raum anlegen"-Flow schickt 9007→9002→9021). Wie viele Zeilen „Meine
+        // Räume" beim Start hat, ist damit Lauf-abhängig — eine Behauptung darüber
+        // wäre wackelig und würde beim nächsten neuen Test still falsch.
+        //
+        // Die Schwelle selbst ist ohnehin am richtigen Ort geprüft: `splitMine`
+        // liegt als reine Funktion in `railGroups.ts` und hat dort vier Fälle
+        // (4 gemischte → 1 Sektion, 5 → 2, nur ein Typ → 1, leer → keine). Dieser
+        // Anker beantwortet die andere Frage: kommt die Regel in der Oberfläche an?
+        await login(page)
+        await expect(page.getByText('Willkommen')).toBeVisible({ timeout: 15_000 })
+
+        // Jetzt über die Schwelle: 3 weitere Standardräume + 2 Meetup-Räume, alle
+        // beigetreten (9021 als zugelassenes Relay-Mitglied, Muster aus dem Seed).
+        const namen: string[] = []
+        for (let i = 0; i < 3; i++) {
+            const h = `ms${rnd}${i}`
+            const name = `MeinRaum-${rnd}-${i}`
+            createRoomNak(h, name)
+            execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
+            angelegt.push(h)
+            namen.push(name)
+        }
+        for (let i = 0; i < 2; i++) {
+            const h = `mm${rnd}${i}`
+            const name = `MeinMeetup-${rnd}-${i}`
+            createRoomNak(h, name, ['-t', 't=meetup', '-t', `i=meetup:${rnd}${i}`, '-t', `meetup_slug=mm-${rnd}-${i}`])
+            execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
+            angelegt.push(h)
+            namen.push(name)
+        }
+
+        await page.reload()
+        await expect(page.getByText(namen[0], { exact: true })).toBeVisible({ timeout: 20_000 })
+
+        // Beide Sektionen stehen, und zwar in dieser Reihenfolge (wie RAIL_GROUP_ORDER).
+        await expect(sectionLabel(page, 'Meine Räume')).toBeVisible({ timeout: 20_000 })
+        await expect(sectionLabel(page, 'Meine Meetups')).toBeVisible()
+
+        // Reihenfolge über die Position im Layout, nicht über die Position im
+        // Quelltext — letztere träfe wieder das Attribut.
+        const yRaeume = (await sectionLabel(page, 'Meine Räume').first().boundingBox())?.y ?? 0
+        const yMeetups = (await sectionLabel(page, 'Meine Meetups').first().boundingBox())?.y ?? 0
+        expect(yRaeume, 'Räume stehen über Meetups').toBeLessThan(yMeetups)
+
+        // Und die drei Entdecken-Zeilen darunter sind unangetastet — sie waren
+        // ausdrücklich nicht Teil des Umbaus.
+        // „Neuen Raum anlegen" bleibt bewusst außen vor: die Zeile ist admin-gegated,
+        // dieser Test läuft als normaler Nutzer und sähe sie nie.
+        await expect(page.getByText('Meetup-Räume entdecken')).toBeVisible()
+    } finally {
+        // Mitgliedschaft zurücknehmen (kind 9022) — der Relay überlebt den Lauf.
+        for (const h of angelegt) {
+            try {
+                execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '9022', '-t', `h=${h}`, ZOOID_WS])
+            } catch {
+                /* Aufräumen darf den Testbefund nicht überschreiben */
+            }
+        }
+    }
+})
