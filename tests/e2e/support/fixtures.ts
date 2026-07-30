@@ -95,6 +95,16 @@ export const test = base.extend<object, { workerBackend: void }>({
                         // bedienen sie parallel → schnellerer Seiten-Aufbau je Test. Mit
                         // DB-Cache (nicht array) teilen alle Worker-Prozesse den k1-Challenge.
                         PHP_CLI_SERVER_WORKERS: '4',
+                        // Hermetik des SERVERS. `ProfileCache` (GET /nostr/profiles) fragt
+                        // sonst den Profil-Indexer `wss://purplepag.es/` — eine echte
+                        // WebSocket-Verbindung ins öffentliche Internet, aus jedem Testlauf.
+                        // Leer = nur der eigene Space-Relay wird gefragt.
+                        NOSTR_PROFILE_INDEXER: '',
+                        // …und der „eigene Space" ist im Test der WORKER-Relay, nicht der
+                        // Mitschau-zooid aus der lokalen .env. Ohne das fragte der Server
+                        // :3334 nach Profilen, die nur auf :3335+ liegen, und schrieb das
+                        // Ergebnis („abwesend", 24 h) in den geteilten Cache-Store.
+                        NOSTR_SPACE_URL: `ws://localhost:${zooidPort}`,
                     },
                     stdio: 'ignore',
                 },
