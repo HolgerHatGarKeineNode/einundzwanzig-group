@@ -113,3 +113,36 @@ test('Token-Lift: getipptes `m:` wandert in den Chip und filtert auf Meetups', a
     // Und der Scope wirkt: ein Raum aus der Gruppe „Räume" ist jetzt draußen.
     await expect(rail(page).getByRole('button', { name: /Meetup Berlin/ }).first()).toBeVisible({ timeout: 20_000 })
 })
+
+/**
+ * P5 — die Bühne doppelt die Rail nicht.
+ *
+ * Auf `/spaces` standen die Räume ab 1280px zweimal im selben Blick: links im
+ * Navigator und rechts in der Karte. Ab xl trägt sie der Navigator; auf der Bühne
+ * bleibt, was die Rail bewusst NICHT kann — Banner, Entdecken-Wege, Threads.
+ *
+ * Ausgeblendet wird per CSS, nicht per `x-if`: unterhalb xl muss der Block
+ * zeichengleich bleiben, und eine zweite Breakpoint-Bedingung in Alpine wäre eine
+ * zweite Wahrheit. Der Gegenbeweis für Mobil steht in `spaces.spec.ts` (P7) und
+ * `rail-guard.spec.ts`.
+ */
+test('Ab 1280 px zeigt die Bühne die Raumliste nicht mehr — die Rail trägt sie', async ({ page }) => {
+    await openApp(page)
+
+    // Der Navigator führt die Räume.
+    await expect(rail(page).getByRole('button', { name: /Willkommen/ }).first())
+        .toBeVisible({ timeout: 20_000 })
+
+    // Die Bühne nicht mehr: das Sektionslabel existiert dort zwar im DOM, ist aber
+    // ab xl unsichtbar. Auf „unsichtbar" prüfen und nicht auf „weg", weil genau das
+    // der Mechanismus ist — ein `toHaveCount(0)` liefe grün, wenn jemand den Block
+    // versehentlich ganz entfernte, und würde den Mobil-Fall stillschweigend decken.
+    const buehne = page.locator('main')
+    await expect(buehne.locator('span').filter({ hasText: /^Meine Räume$/ })).toBeHidden()
+
+    // Was bleiben MUSS: die Wege, die es in der Rail nicht gibt.
+    // Nur die Meetup-Zeile: „Projektunterstützung entdecken" erscheint erst, wenn
+    // Antragsräume existieren, und der zooid-Seed hat keine. Eine Zusicherung über
+    // eine Zeile, die im Seed gar nicht vorkommt, prüfte den Seed, nicht den Umbau.
+    await expect(buehne.getByText('Meetup-Räume entdecken')).toBeVisible({ timeout: 20_000 })
+})
