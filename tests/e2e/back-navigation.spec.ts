@@ -7,7 +7,8 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 /**
  * Regressionsanker für den Rückweg aus dem Raum (`backFromRoom`, `js/bridge.ts`):
  * `history.back()`, wenn dieser Tab per `livewire:navigate` schon einen App-internen
- * Vorgänger gesetzt hat (`sessionStorage['appNav']`), sonst `Livewire.navigate(upTarget)`
+ * Vorgänger GENAU DAS UP-ZIEL ist (`sessionStorage['appNavPrev']`, Pfad-Vergleich),
+ * sonst `Livewire.navigate(upTarget)`
  * (`/spaces`) — der Fallback für den Deep-Link-Kaltstart, der KEINEN Vorgänger hat.
  *
  * Eigene Datei statt Ergänzung von `spaces.spec.ts`/`room.spec.ts`: der Rückweg ist ein
@@ -44,7 +45,7 @@ async function readWarmSentinel(page: Page): Promise<number | undefined> {
 /**
  * Fall 1 — Übersicht → Raum → Zurück landet wieder in der Übersicht, Alpine lebt.
  * `history.back()` trägt hier, weil der Klick auf die Raum-Kachel selbst schon ein
- * `Livewire.navigate()` war (setzt den `appNav`-Marker + pusht einen History-Eintrag).
+ * `Livewire.navigate()` war (setzt den `appNavPrev`-Wert + pusht einen History-Eintrag).
  */
 test('Rückweg (1): Übersicht → Raum → Zurück landet wieder in der Übersicht, warm', async ({ page }) => {
     await login(page)
@@ -113,13 +114,13 @@ test('Rückweg (2): gefilterte Meetup-Liste → Raum → Zurück landet im selbe
  * Fall 3 — Deep-Link-Kaltstart in einen Raum (frischer `page.goto`, keine App-interne
  * Navigation in diesem Tab zuvor): Zurück muss auf das explizite UP-Ziel `/spaces` gehen,
  * NICHT per `history.back()` irgendwohin (aus der App raus, auf eine Zwischenseite wie
- * `/nostr-login` o.ä.) — genau das ist der Grund für den `hasInternalHistory()`-Guard.
+ * `/nostr-login` o.ä.) — genau das ist der Grund für den `backLeadsTo()`-Guard.
  */
 test('Rückweg (3): Deep-Link-Kaltstart in einen Raum → Zurück landet auf dem UP-Ziel /spaces', async ({ page }) => {
     await login(page)
 
     // Frischer, direkter Aufruf der Raum-Route — kein Klick, keine Livewire.navigate()-
-    // Navigation in diesem Tab, damit der `appNav`-Marker unbeteiligt bleibt.
+    // Navigation in diesem Tab, damit der `appNavPrev`-Wert unbeteiligt bleibt.
     await page.goto(`/rooms/${MEETUP_H}`)
     await expect(page.getByRole('heading', { name: `# ${MEETUP_NAME}` })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Tritt dem Raum bei, um mitzuschreiben.')).toBeVisible({ timeout: 15_000 })
@@ -176,4 +177,51 @@ test('Rückweg (6): mehrfaches Filtern erhöht history.length NICHT', async ({ p
 
     const after = await page.evaluate(() => window.history.length)
     expect(after).toBe(before)
+})
+
+/**
+ * Fall 4 — Raum → Raum → Zurück landet in der ÜBERSICHT, nicht im vorigen Raum.
+ *
+ * Der Fall, den der Desktop-Navigator alltäglich gemacht hat: mit stehender Rail
+ * springt man Raum→Raum→Raum, ohne die Liste je zu sehen. Der Vorgänger im
+ * History-Stack ist dann ein anderer RAUM — und der Kopf-Pfeil ist UP (Hierarchie),
+ * nicht BACK. Er muss auf die Liste führen.
+ *
+ * Bis 2026-07-30 tat er das nicht: der Guard fragte nur „hat dieser Tab schon einmal
+ * app-intern navigiert?" (ein sessionStorage-BIT, nach der ersten Navigation für immer
+ * gesetzt) und nahm dann blind `history.back()`. Aus Raum B landete man in Raum A,
+ * aus einem Raum nach einem Wallet-Besuch in der Wallet. Vom Nutzer als „der Back-Pfeil
+ * führt komisch zurück" gemeldet.
+ *
+ * Der Anker läuft ohne Rail — er braucht sie nicht: entscheidend ist allein, dass der
+ * VORGÄNGER kein `/spaces` ist. Zwei aufeinanderfolgende Raum-Navigationen stellen das
+ * unabhängig vom Viewport her, und der Test bleibt damit auch im 1279er Projekt gültig.
+ */
+test('Rückweg (4): Raum → Raum → Zurück führt in die Übersicht, nicht in den vorigen Raum', async ({ page }) => {
+    await login(page)
+    await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
+
+    // Raum 1 über die Liste betreten (Vorgänger = /spaces).
+    await page.getByRole('button', { name: '# Willkommen', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '# Willkommen' })).toBeVisible({ timeout: 15_000 })
+
+    // Raum 2 OHNE Umweg über die Liste — wie ein Rail-Sprung. Danach ist der
+    // History-Vorgänger Raum 1, nicht die Übersicht.
+    await page.evaluate((h) => {
+        ;(window as unknown as { Livewire: { navigate(u: string): void } }).Livewire.navigate(`/rooms/${h}`)
+    }, MEETUP_H)
+    await expect(page.getByRole('heading', { name: `# ${MEETUP_NAME}` })).toBeVisible({ timeout: 15_000 })
+
+    // Vorbedingung scharf halten: der zuletzt verlassene Ort war Raum 1, NICHT /spaces.
+    expect(
+        await page.evaluate(() => sessionStorage.getItem('appNavPrev')),
+        'Vorbedingung: der Vorgänger muss ein Raum sein, sonst prüft der Test den alten Fall',
+    ).toContain('/rooms/')
+
+    await page.getByRole('button', { name: 'Zurück' }).click()
+
+    // Die Übersicht — nicht Raum 1.
+    await expect(page).toHaveURL(/\/spaces/, { timeout: 15_000 })
+    await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('heading', { name: '# Willkommen' })).toHaveCount(0)
 })

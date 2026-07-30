@@ -410,7 +410,7 @@ test('Anker 2: Zeile → /rooms/{h}?from=updates, Kopf-Pfeil führt zurück nach
 
     // ── kalt: derselbe Link, frisch aufgerufen, ohne App-internen Vorgänger ────
     await page.goto(`/rooms/${room.h}?from=updates`)
-    await page.evaluate(() => sessionStorage.removeItem('appNav'))
+    await page.evaluate(() => sessionStorage.removeItem('appNavPrev'))
     await expect(page.getByRole('heading', { name: `# ${room.name}` })).toBeVisible({ timeout: 25_000 })
     const before = await backCalls(page)
 
@@ -504,10 +504,10 @@ test('Anker 4: Kaltstart im Thread ohne from → 2× Zurück auf /spaces, ohne h
     await spyHistoryBack(page)
     await login(page)
 
-    // Frischer, direkter Aufruf — KEIN Klick, kein wire:navigate: der `appNav`-Marker
-    // bleibt unbeteiligt, `hasInternalHistory()` ist falsch, das UP-Ziel muss greifen.
+    // Frischer, direkter Aufruf — KEIN Klick, kein wire:navigate: der `appNavPrev`-Wert
+    // bleibt unbeteiligt, `backLeadsTo()` ist falsch, das UP-Ziel muss greifen.
     await page.goto(`/rooms/${room.h}/thread/${nevent}`)
-    await page.evaluate(() => sessionStorage.removeItem('appNav'))
+    await page.evaluate(() => sessionStorage.removeItem('appNavPrev'))
     await expect(page.getByRole('dialog', { name: 'Thread' })).toBeVisible({ timeout: 30_000 })
     const before = await backCalls(page)
 
@@ -556,11 +556,11 @@ test('Anker 5: kaputtes ?from= landet auf /spaces und taucht in keiner Thread-UR
     for (const junk of [...JUNK, 'room']) {
         await page.goto(`/rooms/${room.h}?from=${encodeURIComponent(junk)}`)
         // Frischen Tab herstellen: der Rückweg des VORIGEN Durchlaufs war ein
-        // `Livewire.navigate` und hat den `appNav`-Marker gesetzt. Ohne das Leeren
-        // fände `hasInternalHistory()` ab Runde 2 einen Vorgänger, spränge per
+        // `Livewire.navigate` und hat den `appNavPrev`-Wert gesetzt. Ohne das Leeren
+        // fände `backLeadsTo()` ab Runde 2 einen Vorgänger, spränge per
         // `history.back()` zurück — und der Test bewiese nichts mehr über `?from=`.
-        await page.evaluate(() => sessionStorage.removeItem('appNav'))
-        expect(await page.evaluate(() => sessionStorage.getItem('appNav')), 'Vorbedingung: Tab ohne App-Vorgänger').toBeNull()
+        await page.evaluate(() => sessionStorage.removeItem('appNavPrev'))
+        expect(await page.evaluate(() => sessionStorage.getItem('appNavPrev')), 'Vorbedingung: Tab ohne App-Vorgänger').toBeNull()
         await expect(page.getByRole('heading', { name: `# ${room.name}` })).toBeVisible({ timeout: 25_000 })
         // Zwei Stufen, weil zwei Ladepfade: erst der Verlauf (kind 9), dann die
         // Kommentare (kind 1111) — die Pille hängt an letzteren. Ohne die erste Stufe
@@ -996,7 +996,7 @@ test('Anker 11: zweiter Tap auf „Alles" zerstört das Rückgängig nicht — K
  * ANKER 12 — der Rückweg aus einem geteilten THREAD-Link (M2), im frischen Tab.
  *
  * Dieser Pfad ist über die laufende App NICHT prüfbar: dort hat der Tab den
- * `appNav`-Marker, `backFromRoom` nimmt `history.back()` und trifft `/updates`
+ * `appNavPrev`-Wert, `backFromRoom` nimmt `history.back()` und trifft `/updates`
  * zufällig richtig. Der Defekt zeigt sich nur, wo es keinen Vorgänger gibt — geteilter
  * Link, Notification-Tap, frisch geöffneter Tab. Deshalb ein **eigener Browser-Kontext**
  * (leerer `sessionStorage`, eigene History) statt eines `goto` im laufenden.
@@ -1024,7 +1024,7 @@ test('Anker 12: geteilter Thread-Link im frischen Tab — zweimal Zurück landet
         // ── a) THREAD-Link ────────────────────────────────────────────────────
         await fresh.goto(`/rooms/${room.h}/thread/${nevent}?from=updates`)
         expect(
-            await fresh.evaluate(() => sessionStorage.getItem('appNav')),
+            await fresh.evaluate(() => sessionStorage.getItem('appNavPrev')),
             'Vorbedingung verletzt: dieser Tab hat einen App-Vorgänger, der Fall wäre nicht der geteilte Link',
         ).toBeNull()
         await expect(fresh.getByRole('dialog', { name: 'Thread' })).toBeVisible({ timeout: 30_000 })
@@ -1046,7 +1046,7 @@ test('Anker 12: geteilter Thread-Link im frischen Tab — zweimal Zurück landet
 
         // ── b) Kontrast: RAUM-Link im selben frischen Tab ─────────────────────
         await fresh.goto(`/rooms/${room.h}?from=updates`)
-        await fresh.evaluate(() => sessionStorage.removeItem('appNav'))
+        await fresh.evaluate(() => sessionStorage.removeItem('appNavPrev'))
         await expect(fresh.getByRole('heading', { name: `# ${room.name}` })).toBeVisible({ timeout: 25_000 })
         const beforeRoom = await backCalls(fresh)
         await fresh.getByRole('button', { name: 'Zurück' }).click()
