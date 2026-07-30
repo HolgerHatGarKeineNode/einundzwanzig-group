@@ -4,7 +4,7 @@ import { useZooid, ZOOID_PORT, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 const VIEWER = '2dbaf5f4f86a1eed0948852ad48fa40aae2e48d5e347a77fac2ac936d6c94e7b' // pub von NOSTR_TEST_NSEC
 const CACHE_DB = `einundzwanzig-cache-${VIEWER}` // §4.4: eine IndexedDB pro pubkey

@@ -7,7 +7,7 @@ import { loginNsec } from './support/login'
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 // Relay-Owner-Secret (Pubkey = relay.self) — der einzige NIP-86-Admin des zooid.
 const ADMIN_HEX = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const HTTP = `http://localhost:${ZOOID_PORT}/`
 
 /** NIP-86-Management-Call als ADMIN (NIP-98 HTTP-Auth), wie das Seed-Skript. */

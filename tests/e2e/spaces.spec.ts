@@ -7,7 +7,7 @@ import { loginNsec } from './support/login'
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 // Relay-Owner-Secret (Pubkey = relay.self) — der einzige NIP-86/Raum-Admin des zooid.
 const ADMIN_HEX = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 // Wegwerf-Pubkey zum Hinzufügen als Raum-Mitglied (foreign zu allen echten Membern).
 const MEMBER_TARGET = '5555555555555555555555555555555555555555555555555555555555555555'
 

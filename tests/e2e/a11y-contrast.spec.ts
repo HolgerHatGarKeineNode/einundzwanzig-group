@@ -50,7 +50,7 @@ import { loginNsec } from './support/login'
  * naive Anker: er misst, was gerendert ist, und ungerendert sieht aus wie grün.
  */
 const NSEC = process.env.NOSTR_TEST_NSEC as string
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
 /**

@@ -51,7 +51,7 @@ import { loginNsec } from './support/login'
  */
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 /** Relay-Owner-Secret (= relay.self). FREMDER Autor — eigene Ereignisse zählen nie. */
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 const ADMIN_PUB = 'da99fbe39247109327ac8504750d0227d50a8f84049ac8bd2f6c7ad0806ed76d'

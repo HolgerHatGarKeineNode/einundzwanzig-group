@@ -4,7 +4,7 @@ import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 
 /**
  * Blossom ist auf den Vereins-Server fixiert (alle Nutzer sind Mitglieder): die Profil-

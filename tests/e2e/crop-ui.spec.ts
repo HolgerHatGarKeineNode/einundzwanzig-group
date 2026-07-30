@@ -5,7 +5,7 @@ import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 // Echtes, ausreichend großes PNG aus dem Repo (OG-Bild) als Crop-Vorlage.
 const IMAGE = readFileSync('public/og.png')
 

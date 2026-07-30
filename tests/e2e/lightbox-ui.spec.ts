@@ -6,7 +6,7 @@ import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414' // zooid-Admin-SECRET (wie in den Nachbar-Specs)
 // Echtes, ausreichend großes PNG (wie crop-ui.spec.ts) für Tests, die das Lightbox-<img>
 // selbst anfassen (Klick/Hover) — s. Kommentar bei `openEditRoom(realImage)` unten.

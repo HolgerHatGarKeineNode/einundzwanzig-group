@@ -77,7 +77,7 @@ import { testKeys } from './support/keys'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const { pk: VIEWER } = testKeys() // pub von NOSTR_TEST_NSEC — Autor des zu prüfenden 30078
-const NAK = '/home/user/go/bin/nak'
+const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 /** `js/readState.ts READ_STATE_D` — hier dupliziert (kein Import über Repo-Grenze). */
 const READ_STATE_D = 'einundzwanzig/read-state/v1'
