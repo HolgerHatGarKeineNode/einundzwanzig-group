@@ -76,7 +76,14 @@ test('Abgeleitete Räume tragen kein Verwalten-Menü (Meetup + Projektunterstüt
 
     // Die Bedingung hängt an den Raum-Markern, nicht an der Kachel — sie gilt damit
     // in jeder Liste gleich.
-    expect($tile)->toContain('x-if="isAdmin && !room.isMeetup && !room.isProjectSupport"');
+    expect($tile)->toContain('x-if="!room.isMeetup && !room.isProjectSupport"');
+
+    // Und der Platz des Menüs bleibt für JEDE Admin-Zeile reserviert: sonst rutschen
+    // Schloss und Ungelesen-Pille genau dort nach rechts, wo das Menü fehlt, und die
+    // Liste bekommt zwei rechte Kanten. Die Gatung sitzt deshalb INNERHALB des
+    // reservierten Containers, nicht davor.
+    expect($tile)->toContain('x-if="isAdmin"');
+    expect($tile)->toMatch('/x-if="isAdmin".*?min-w-11.*?x-if="!room\.isMeetup/s');
 
     // Die Meetup-Kachel zeigt ausschließlich Meetups → gar kein Menü mehr.
     foreach (['openRoomEdit', 'openRoomMembers', 'askDeleteRoom'] as $action) {

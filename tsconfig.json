@@ -17,5 +17,11 @@
         "allowImportingTsExtensions": true,
         "types": []
     },
-    "include": ["resources/js/**/*.ts"]
+    // `resources/js/app.ts` importiert das Package und zieht `bridge.ts` damit
+    // transitiv in DIESES Projekt. Dessen Ambient-Deklarationen (`qrcode.d.ts`,
+    // `css.d.ts`) liegen aber daneben und wären ohne den zweiten Glob nicht
+    // sichtbar — die Folge waren zwei Fehler über Module, für die genau hier eine
+    // Deklaration bereitliegt. Nur `.d.ts`: die Implementierungsdateien haben ihr
+    // eigenes Projekt (`packages/*/js/tsconfig.json`) und gehören nicht doppelt geprüft.
+    "include": ["resources/js/**/*.ts", "packages/*/js/**/*.d.ts"]
 }

@@ -8,7 +8,8 @@
         "test:e2e": "playwright test",
         "test:e2e:buzz": "E2E_RELAY=buzz playwright test",
         "test:e2e:headed": "playwright test --headed",
-        "test:e2e:buzz:headed": "E2E_RELAY=buzz playwright test --headed"
+        "test:e2e:buzz:headed": "E2E_RELAY=buzz playwright test --headed",
+        "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/e2e/tsconfig.json --noEmit && tsc -p packages/einundzwanzig-group/js/tsconfig.json --noEmit"
     },
     "dependencies": {
         "@einundzwanzig/group": "file:packages/einundzwanzig-group",
@@ -28,6 +29,7 @@
     },
     "devDependencies": {
         "@playwright/test": "^1.59.1",
-        "@types/node": "^26.1.0"
+        "@types/node": "^26.1.0",
+        "typescript": "^5.9.3"
     }
 }
