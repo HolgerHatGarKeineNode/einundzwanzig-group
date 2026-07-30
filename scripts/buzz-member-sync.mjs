@@ -219,6 +219,22 @@ class Relay {
         return withTimeout(done, 20_000, `EVENT kind ${kind}`)
     }
 
+    /**
+     * Verbindung verwerfen und neu aufbauen (inkl. AUTH). Wird gebraucht, wenn der
+     * Relay auf ein Event nicht antwortet — der Socket ist dann oft schon tot, und
+     * jedes weitere Senden liefe nur in dasselbe Zeitlimit.
+     */
+    async reconnect() {
+        this.close()
+        this.pending.clear()
+        this.subs.clear()
+        this.challenge = undefined
+        this.onChallenge = undefined
+        await sleep(2000)
+        await this.connect()
+        await this.authenticate()
+    }
+
     close() {
         try {
             this.ws?.close()
@@ -253,13 +269,36 @@ function parseMemberList(events) {
 }
 
 /**
- * Sendet ein Event und wiederholt bei Drosselung. Buzz antwortet unter Last mit
- * `rate-limited: quota exceeded; retry in Ns` — am Test-Stack beobachtet. Ein
- * fachlicher Fehlschlag wird NICHT wiederholt, der gehoert in den Bericht.
+ * Sendet ein Event und wiederholt bei Drosselung ODER ausbleibender Antwort.
+ *
+ * Zwei verschiedene Stoerungen, beide am echten Relay erlebt:
+ *
+ * 1. **Drosselung** — Buzz antwortet unter Last mit `rate-limited: quota exceeded;
+ *    retry in Ns`. Warten und nochmal.
+ * 2. **Keine Antwort.** Beim ersten Prod-Lauf ueber die 116er-Liste (2026-07-30) blieb
+ *    nach 60 erfolgreichen Events das `OK` zum 61. einfach aus. Dieselbe Beobachtung
+ *    steht in `buzz-add-members.sh`: der Relay haengt gelegentlich am WebSocket, dort
+ *    gemessen bis ~9 min. Ein Zeitlimit, das den GESAMTEN Lauf abbricht, ist hier die
+ *    falsche Antwort — 60 Mitglieder waren bereits eingetragen, der Rest blieb liegen.
+ *    Deshalb: neu verbinden, neu authentifizieren, nochmal senden. Erst wenn auch das
+ *    scheitert, wird dieses EINE Event als Fehlschlag verbucht und der Lauf geht
+ *    weiter. Was dann fehlt, benennt die Nachkontrolle namentlich.
+ *
+ * Ein FACHLICHER Fehlschlag (`OK false` mit Begruendung) wird nie wiederholt — das ist
+ * eine Aussage des Relays und gehoert in den Bericht, nicht in vier Runden.
  */
 async function publishWithRetry(relay, kind, tags) {
     for (let attempt = 1; ; attempt++) {
-        const res = await relay.publish(kind, tags)
+        let res
+        try {
+            res = await relay.publish(kind, tags)
+        } catch (e) {
+            if (attempt >= 3) {
+                return { ok: false, message: `keine Antwort (${e.message})` }
+            }
+            await relay.reconnect()
+            continue
+        }
         if (res.ok || !/rate.?limit/i.test(res.message) || attempt >= 4) {
             return res
         }
@@ -354,7 +393,15 @@ async function main() {
     // durch. Deshalb wird der Sollzustand hier gegen die neu gelesene 13534 geprueft
     // und nicht gegen die Antworten von eben.
     await sleep(1500)
-    const after = parseMemberList(await relay.req({ kinds: [MEMBER_LIST], limit: 1 }))
+    let after
+    try {
+        after = parseMemberList(await relay.req({ kinds: [MEMBER_LIST], limit: 1 }))
+    } catch {
+        // Der Socket kann nach einem Haenger tot sein. Die Nachkontrolle ist der
+        // wichtigste Teil des Laufs — sie darf nicht daran scheitern.
+        await relay.reconnect()
+        after = parseMemberList(await relay.req({ kinds: [MEMBER_LIST], limit: 1 }))
+    }
     relay.close()
 
     const stillMissing = [...desired].filter((pk) => !after.has(pk))
