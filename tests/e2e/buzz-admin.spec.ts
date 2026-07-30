@@ -92,6 +92,42 @@ function relayContents(): string[] {
 }
 
 /**
+ * Alle Räume des Space, direkt aus den relay-signierten 39000 gelesen (`d` = die
+ * Kanal-UUID, `name` = der Anzeigename).
+ *
+ * Wie bei `relayEvents()` ist ein LEERES Ergebnis hier kein gültiger Messwert,
+ * sondern ein Defekt: der buzz-test-Stack ist immer mit `E2E-Welcome`/`E2E-General`
+ * geseedet. Ohne diese Unterscheidung wäre eine gescheiterte AUTH-Runde von „der
+ * Raum wurde nicht angelegt" nicht zu trennen — genau die Verwechslung, an der die
+ * Fehlersuche zu diesem Test schon einmal hängen geblieben ist.
+ */
+function roomsAtRelay(): { d: string; name: string }[] {
+    for (let attempt = 0; attempt < 6; attempt++) {
+        const out = execFileSync(NAK, ['req', '-k', '39000', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, WS()], {
+            encoding: 'utf8',
+            timeout: 20_000,
+        })
+        const rows = out
+            .split('\n')
+            .filter(Boolean)
+            .flatMap((line) => {
+                try {
+                    const e = JSON.parse(line) as { tags?: string[][] }
+                    const tags = Object.fromEntries((e.tags ?? []).filter((t) => t.length > 1).map((t) => [t[0], t[1]]))
+                    return tags.d ? [{ d: tags.d, name: String(tags.name ?? '') }] : []
+                } catch {
+                    return []
+                }
+            })
+        if (rows.length > 0) {
+            return rows
+        }
+        execFileSync('sleep', ['0.5'])
+    }
+    throw new Error('39000-Abfrage lieferte sechsmal nichts — die Seed-Räume sind immer da, also ist die Abfrage kaputt.')
+}
+
+/**
  * P3 (Buzz-Migrationsplan) — Space-Verwaltung ohne NIP-86.
  *
  * Buzz kennt kein NIP-86; am laufenden Relay gemessen antwortet `POST /` mit
@@ -144,6 +180,87 @@ test.describe('Buzz-Space-Verwaltung (E2E, nur E2E_RELAY=buzz)', () => {
         // Der Kernbeleg: vor P3 blieb isAdmin dauerhaft false (NIP-86-Probe scheitert
         // an Buzz' 405), die Zeile existierte im DOM gar nicht (x-if).
         await expect(page.getByRole('button', { name: 'Neuen Raum anlegen' })).toBeVisible({ timeout: 20_000 })
+    })
+
+    /**
+     * Der Knopf war sichtbar — angelegt wurde trotzdem nichts. Genau diese Lücke ließ
+     * der Test darüber offen, und sie kostete drei Fehlannahmen, bis sie am laufenden
+     * Relay sichtbar wurde. Buzz weicht beim 9007 in DREI Punkten von zooid ab:
+     *
+     * 1. **`name` ist Pflicht.** Ein 9007 mit nur `h` beantwortet Buzz mit
+     *    `invalid: channel name is required` (`ingest.rs:2085`). Der Client schickte
+     *    genau das — das Anlegen scheiterte am ersten Schritt.
+     * 2. **`h` wird nur als UUID übernommen** (`ingest.rs:2132`). welshmans
+     *    `randomId()` ist keine; das Relay legte den Kanal still unter einer eigenen
+     *    UUID an, die nachfolgenden 9002/9021 zeigten ins Leere.
+     * 3. **Kein 9021.** Der Ersteller steht nach dem 9007 schon als `owner` in der
+     *    39002; auf einem privaten Raum antwortet Buzz dem Beitritt sogar mit
+     *    `restricted: channel is private`.
+     *
+     * Der Test prüft alle drei über EINEN Anlege-Vorgang durch die echte Oberfläche.
+     */
+    test('Owner legt einen Raum an (9007 mit Name, Client-UUID, ohne 9021)', async ({ page }) => {
+        // Eigener Name pro Lauf — der buzz-test-Stack ist geteilt und wird nicht
+        // zwischen den Tests zurückgesetzt.
+        const name = `E2E-Neu-${Math.random().toString(36).slice(2, 8)}`
+        await loginNsec(page, BUZZ_OWNER_NSEC)
+
+        const addBtn = page.getByRole('button', { name: 'Neuen Raum anlegen', exact: true })
+        await expect(addBtn).toBeVisible({ timeout: 20_000 })
+        await addBtn.click()
+
+        const form = page.locator('dialog[data-modal="room-form"]')
+        await form.getByPlaceholder('z.B. Allgemein').fill(name)
+
+        // Das `h`, das die Insel VOR dem Speichern vergeben hat — die Gegenprobe für
+        // Punkt 2. Ohne sie bliebe nur die UUID-FORM prüfbar, und die erfüllt auch
+        // eine vom Relay ersatzweise gemintete ID.
+        const formH = await page.evaluate(() => {
+            const el = document.querySelector('[x-data="nostrSpaces"]')!
+            const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
+            return (data.roomForm as { h: string }).h
+        })
+
+        await form.getByRole('button', { name: 'Speichern' }).click()
+
+        // (1) Der Name kam an. Vor dem Fix blieb das 9007 mit
+        // `invalid: channel name is required` liegen — es gab gar keinen Raum.
+        await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 25_000 })
+
+        const room = roomsAtRelay().find((r) => r.name === name)
+        expect(room, 'der neue Raum muss als relay-signierte 39000 am Relay liegen').toBeTruthy()
+
+        try {
+            // (2) Die ID stammt vom CLIENT, nicht vom Relay. Die UUID-FORM allein
+            // belegte das nicht — ein ersatzweise vom Relay gemintetes `h` ist auch
+            // eine UUIDv4. Erst der Abgleich mit dem Wert aus dem Formular trennt die
+            // beiden Fälle, und genau daran scheiterte der alte `randomId()`-Pfad.
+            expect(formH, 'die Insel muss eine UUIDv4 vergeben, sonst verwirft Buzz sie').toMatch(
+                /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+            )
+            expect(room!.d, 'Buzz muss die vom Client vergebene UUID übernehmen').toBe(formH)
+
+            // (3) Der Ersteller ist Mitglied, OHNE dass ein 9021 gesendet wurde — der
+            // Raum steht unter „Meine Räume". Genau hier hätte ein 9021 auf einem
+            // privaten Raum den ganzen Vorgang mit einem Fehler beendet.
+            await expect
+                .poll(
+                    async () =>
+                        page.evaluate((wanted) => {
+                            const el = document.querySelector('[x-data="nostrSpaces"]')!
+                            const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
+                            return (data.filteredMine as () => { name?: string }[])().some((r) => r.name === wanted)
+                        }, name),
+                    { timeout: 25_000, message: 'der Ersteller muss ohne 9021 Mitglied seines neuen Raums sein' },
+                )
+                .toBe(true)
+        } finally {
+            // Aufräumen am Relay (die Kachel bietet auf Buzz keine Löschen-Aktion).
+            execFileSync(NAK, ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9008', '-t', `h=${room!.d}`, WS()], {
+                encoding: 'utf8',
+                timeout: 20_000,
+            })
+        }
     })
 
     test('Owner kann ein Mitglied aufnehmen (9030) und wieder entfernen (9031)', async ({ page }) => {
