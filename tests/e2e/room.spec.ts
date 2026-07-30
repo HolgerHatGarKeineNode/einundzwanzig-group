@@ -1161,21 +1161,48 @@ test('C3: Bearbeiten einer Antwort erhält q/p + nevent-Präfix', async ({ page 
  */
 test('B3: Autor-Profil-Karte zeigt about/website/lud16', async ({ page }) => {
     const bio = `E2E-Bio-${Math.floor(Math.random() * 1e9)}`
+    const ts = Math.floor(Date.now() / 1000)
     execFileSync(NAK, [
-        'event', '--auth', '--sec', ADMIN, '-k', '0',
+        'event', '--auth', '--sec', ADMIN, '-k', '0', '--ts', String(ts),
         '-c', JSON.stringify({ name: 'Relay Admin', about: bio, website: 'https://profil-test.example', lud16: 'admin@ln.test' }),
         ZOOID_WS,
     ])
 
-    await openRoom(page)
-    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+    try {
+        await openRoom(page)
+        await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
 
-    // Autor-Namen anklicken → Karte (Dialog) mit den Tiefen-Feldern.
-    await page.getByRole('button', { name: 'Relay Admin' }).first().click()
-    const card = page.getByRole('dialog')
-    await expect(card.getByText(bio)).toBeVisible({ timeout: 15_000 })
-    await expect(card.getByRole('link', { name: /profil-test\.example/ })).toBeVisible()
-    await expect(card.getByText('admin@ln.test')).toBeVisible()
+        // Autor-Namen anklicken → Karte (Dialog) mit den Tiefen-Feldern.
+        await page.getByRole('button', { name: 'Relay Admin' }).first().click()
+        const card = page.getByRole('dialog')
+        await expect(card.getByText(bio)).toBeVisible({ timeout: 15_000 })
+        await expect(card.getByRole('link', { name: /profil-test\.example/ })).toBeVisible()
+        await expect(card.getByText('admin@ln.test')).toBeVisible()
+    } finally {
+        // AUFRÄUMEN — sonst verseucht dieser Test den Rest des Laufs. Der zooid lebt für
+        // den ganzen Lauf und wird von ALLEN Tests desselben Workers geteilt; kind 0 ist
+        // ersetzbar, also blieb `lud16: admin@ln.test` bis zum Laufende am Autor kleben
+        // (das Aufräum-kind-0 von B4 half nicht: bei `fullyParallel` landet B4 in aller
+        // Regel auf einem ANDEREN Worker — nachgemessen am 2026-07-30, Relay von Worker 2
+        // trug die lud16 noch nach dem gesamten Lauf).
+        //
+        // Folge war der wochenlang undiagnostizierte „Flake" in storage-cache.spec.ts:196:
+        // jeder spätere Test dieses Workers wärmte beim Öffnen eines Raums den LNURL-
+        // Endpoint `ln.test` an — eine nicht auflösbare Domain, also ein echter, jedes Mal
+        // scheiternder DNS-Abruf VON DER TESTMASCHINE AUS. Der Fehlschlag erzeugte eine
+        // unhandled rejection (Details in `js/zaps.ts` `warmZappers` und im Wächter
+        // `tests/e2e/zapper-warm.spec.ts`), und nur P4 prüft darauf — deshalb sah es aus
+        // wie ein Cache-Problem und wanderte je nach Worker-Zuteilung durch die Suite.
+        //
+        // `ts + 1` (nicht weiter in die Zukunft): es gewinnt das grössere `created_at`,
+        // ein vorausdatiertes Aufräum-Event würde den Setz-Aufruf eines kurz danach
+        // laufenden Tests schlagen.
+        execFileSync(NAK, [
+            'event', '--auth', '--sec', ADMIN, '-k', '0', '--ts', String(ts + 1),
+            '-c', JSON.stringify({ name: 'Relay Admin' }),
+            ZOOID_WS,
+        ])
+    }
 })
 
 /** Publiziert eine kind-9-Nachricht direkt in „scroll" (fremder Autor = ADMIN). */
@@ -1403,8 +1430,9 @@ test('B4: verifizierter NIP-05-Handle zeigt Häkchen in der Profil-Karte', async
     const handle = 'admin@nip05-test.example'
     // ADMIN ist der SECRET; die zugehörige Autor-pubkey im Chat ist SELF (Relay-Owner).
     const SELF = 'da99fbe39247109327ac8504750d0227d50a8f84049ac8bd2f6c7ad0806ed76d'
+    const ts = Math.floor(Date.now() / 1000)
     execFileSync(NAK, [
-        'event', '--auth', '--sec', ADMIN, '-k', '0',
+        'event', '--auth', '--sec', ADMIN, '-k', '0', '--ts', String(ts),
         '-c', JSON.stringify({ name: 'Relay Admin', nip05: handle }),
         ZOOID_WS,
     ])
@@ -1420,14 +1448,26 @@ test('B4: verifizierter NIP-05-Handle zeigt Häkchen in der Profil-Karte', async
         }),
     )
 
-    await openRoom(page)
-    await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
+    try {
+        await openRoom(page)
+        await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
 
-    await page.getByRole('button', { name: 'Relay Admin' }).first().click()
-    const card = page.getByRole('dialog')
-    // Häkchen (Titel „NIP-05 verifiziert: …") + Handle-Text erscheinen nur bei Match.
-    await expect(card.getByText(handle)).toBeVisible({ timeout: 15_000 })
-    await expect(card.getByTitle(`NIP-05 verifiziert: ${handle}`)).toBeVisible()
+        await page.getByRole('button', { name: 'Relay Admin' }).first().click()
+        const card = page.getByRole('dialog')
+        // Häkchen (Titel „NIP-05 verifiziert: …") + Handle-Text erscheinen nur bei Match.
+        await expect(card.getByText(handle)).toBeVisible({ timeout: 15_000 })
+        await expect(card.getByTitle(`NIP-05 verifiziert: ${handle}`)).toBeVisible()
+    } finally {
+        // Aufräumen wie bei B3: der Route-Stub gilt nur für DIESEN Test. Bliebe der
+        // `nip05` am Autor kleben, führe jeder spätere Test dieses Workers beim Öffnen
+        // eines Raums einen echten `.well-known`-Abruf nach `nip05-test.example` aus —
+        // Netz-I/O, das die Testmaschine verlässt und dort nichts zu suchen hat.
+        execFileSync(NAK, [
+            'event', '--auth', '--sec', ADMIN, '-k', '0', '--ts', String(ts + 1),
+            '-c', JSON.stringify({ name: 'Relay Admin' }),
+            ZOOID_WS,
+        ])
+    }
 })
 
 /**
@@ -2642,6 +2682,92 @@ test('P1: Kaltstart holt verpasste Admin-Löschung nach (loadRoomDeletes, ohne R
     //    verschwindet sie, ohne dass der Nutzer etwas tut.
     await page.goto('/rooms/mod')
     await expect(page.getByText(marker, { exact: true })).toHaveCount(0, { timeout: 15_000 })
+})
+
+/**
+ * LAYOUT-WÄCHTER — kein horizontaler Querlauf im Raum (WCAG 1.4.10).
+ *
+ * Bis hierher gab es genau EINEN viewport-gebundenen Layout-Wächter in der Suite
+ * (`updates.spec.ts` „Anker 9"), und der deckte nur `/updates` und `/spaces` ab.
+ * `/rooms/{h}` — die Seite mit Verlauf, Composer und Thread, also dem größten
+ * Umbau-Risiko — war ungeschützt. Dieser Test schließt die Lücke.
+ *
+ * ── Zwei Ebenen, weil eine nicht reicht ──────────────────────────────────────
+ * Anker 9 misst `document.documentElement`. Das ist für den Raum NICHT ausreichend:
+ * der Verlaufscontainer trägt `overflow-y-auto`, und CSS erlaubt kein „eine Achse
+ * scrollt, die andere ist visible" — `overflow-x` rechnet damit ebenfalls auf `auto`.
+ * Ein zu breites Kind (langer Code-Block, nicht umbrechende URL, eine feste
+ * Mindestbreite aus dem Desktop-Umbau) erzeugt dort eine EIGENE horizontale
+ * Scrollbar INNERHALB des Verlaufs — das Dokument bleibt dabei sauber, und ein
+ * reiner documentElement-Wächter meldet grün, während der Nutzer bei 320 px
+ * seitwärts scrollen muss. Deshalb wird zusätzlich der Verlauf selbst gemessen.
+ *
+ * Beide Ebenen sind per Mutationsprobe belegt (2026-07-30, je einzeln gefahren
+ * und zurückgenommen) — sie fangen VERSCHIEDENE Fehler, keine ist redundant:
+ *   - `min-w-[600px]` AM Verlaufscontainer → Dokument 616 gegen 320 px: nur die
+ *     Dokument-Ebene wird rot, die Container-Ebene bleibt grün (der Container ist
+ *     dann selbst breit, sein Inhalt passt hinein).
+ *   - `min-w-[600px]` an einem KIND im Verlauf (der Zeilen-Wrapper der x-for) →
+ *     Dokument bleibt bei 320/320 GRÜN, nur der Verlauf wird rot (608 gegen 288).
+ *     Genau dieser Fall — ein zu breiter Inhalt in einem Scroll-Container — wäre
+ *     einem documentElement-Wächter allein vollständig entgangen.
+ *
+ * ── Vorbedingung, nicht Hoffnung ─────────────────────────────────────────────
+ * Ein leerer Verlauf kann nicht überlaufen — ein Wächter, der auf einem leeren
+ * Baum misst, ist Dekoration. Vor jeder Messung wird deshalb geprüft, dass der
+ * gemessene Baum wirklich gefüllt ist (Seed-Nachricht im Raum, Raum-Kachel auf
+ * der Übersicht).
+ *
+ * ── Warum 320 UND 768 ────────────────────────────────────────────────────────
+ * 320 px ist die WCAG-Untergrenze (Mobil). 768 px ist die `md:`-Schwelle, an der
+ * eine linke Rail frühestens stehen könnte — die Messung sagt, ob dieser Bereich
+ * heute überhaupt querlauffrei ist. Der Viewport wird VOR dem Laden gesetzt und
+ * die Seite pro Breite neu geladen: die Insel entscheidet beim Mount (`isMobile`),
+ * ein bloßes Nachziehen der Fenstergröße misst sonst einen Mischzustand.
+ */
+const HORIZONTAL_GUARD_WIDTHS = [320, 768] as const
+
+/** Misst Dokument-Querlauf; gibt die Rohwerte fürs Protokoll zurück. */
+async function documentOverflow(page: Page): Promise<{ scrollWidth: number; clientWidth: number }> {
+    return page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+    }))
+}
+
+test('Layout: /rooms/{h} und /spaces laufen bei 320 px und 768 px nicht quer (WCAG 1.4.10)', async ({ page }) => {
+    test.setTimeout(180_000)
+
+    await page.setViewportSize({ width: HORIZONTAL_GUARD_WIDTHS[0], height: 720 })
+    await openRoom(page, 'welcome')
+
+    for (const width of HORIZONTAL_GUARD_WIDTHS) {
+        await page.setViewportSize({ width, height: 720 })
+
+        // ── Raum ──────────────────────────────────────────────────────────────
+        await page.goto('/rooms/welcome')
+        const log = page.getByRole('log', { name: 'Chat-Verlauf' })
+        await expect(log).toBeVisible({ timeout: 25_000 })
+        // Vorbedingung: der Verlauf ist WIRKLICH gefüllt (Seed-Nachricht aus
+        // zooid-testserver.sh) — sonst misst der Wächter einen leeren Kasten.
+        await expect(page.getByText('Willkommen im Space!')).toBeVisible({ timeout: 30_000 })
+
+        const room = await documentOverflow(page)
+        console.log(`[layout] /rooms/welcome @${width}px: Dokument scrollWidth=${room.scrollWidth} clientWidth=${room.clientWidth}`)
+        expect(room.scrollWidth, `/rooms/welcome läuft bei ${width} px quer über`).toBeLessThanOrEqual(room.clientWidth)
+
+        const history = await log.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
+        console.log(`[layout] /rooms/welcome @${width}px: Verlauf scrollWidth=${history.scrollWidth} clientWidth=${history.clientWidth}`)
+        expect(history.scrollWidth, `Chat-Verlauf scrollt bei ${width} px horizontal`).toBeLessThanOrEqual(history.clientWidth)
+
+        // ── Übersicht ─────────────────────────────────────────────────────────
+        await page.goto('/spaces')
+        await expect(page.getByText('Willkommen').first()).toBeVisible({ timeout: 30_000 })
+
+        const spaces = await documentOverflow(page)
+        console.log(`[layout] /spaces @${width}px: Dokument scrollWidth=${spaces.scrollWidth} clientWidth=${spaces.clientWidth}`)
+        expect(spaces.scrollWidth, `/spaces läuft bei ${width} px quer über`).toBeLessThanOrEqual(spaces.clientWidth)
+    }
 })
 
 // „Autor bannen" (banpubkey) ist vorerst NICHT im UI angeboten (bewusst deaktiviert).

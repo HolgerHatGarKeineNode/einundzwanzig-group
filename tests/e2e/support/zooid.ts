@@ -84,5 +84,13 @@ export async function useZooid(page: Page): Promise<void> {
         // hardcodierten Default (ws://localhost:3334/) zurück → die Room-Subs gingen
         // an :3334 statt an den isolierten Test-zooid auf :3335 (Chat lud nicht).
         ;(window as unknown as { __nostrSpace: string }).__nostrSpace = url
+        // Zweiten Space AUSDRÜCKLICH abschalten. `partials/head.blade.php` injiziert
+        // `config('group.workspace_url')` per `??` — ein Wert in der lokalen `.env`
+        // (z.B. das Prod-Buzz) käme sonst in JEDEN Testlauf und würde über die Leitung
+        // gezogen: gemessen am 2026-07-30 mit 25 roten Tests und Timeouts von 17–32 s,
+        // die wie ein Regress im gerade geänderten Code aussahen.
+        // Wer den zweiten Space BRAUCHT, setzt ihn nach `useZooid()` per eigenem
+        // `addInitScript` (siehe `workspaces.spec.ts`) — das läuft später und gewinnt.
+        ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = ''
     }, ZOOID_URL)
 }

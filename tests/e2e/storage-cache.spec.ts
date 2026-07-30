@@ -199,9 +199,15 @@ test('P4: IDB-Write-Fehler bricht Live-Sync/Chat nicht (fail-soft, keine unhandl
 
     await page.addInitScript(() => {
         ;(window as unknown as { __rejections: string[] }).__rejections = []
-        window.addEventListener('unhandledrejection', (e) =>
-            (window as unknown as { __rejections: string[] }).__rejections.push(String(e.reason)),
-        )
+        // MIT Stack protokollieren: `String(e.reason)` allein ergibt bei Netzfehlern nur
+        // "TypeError: Failed to fetch" — ohne Aufrufer ist ein solcher Treffer nicht
+        // diagnostizierbar (kostete Wochen). Der Stack nennt das Modul.
+        window.addEventListener('unhandledrejection', (e) => {
+            const stack = (e.reason as { stack?: string } | undefined)?.stack
+            ;(window as unknown as { __rejections: string[] }).__rejections.push(
+                `${String(e.reason)}${stack ? ` @@ ${stack.replace(/\n\s*/g, ' <- ')}` : ''}`,
+            )
+        })
         const realOpen = indexedDB.open.bind(indexedDB)
         indexedDB.open = ((name: string, ...rest: unknown[]) => {
             const req = realOpen(name, ...(rest as [number?]))

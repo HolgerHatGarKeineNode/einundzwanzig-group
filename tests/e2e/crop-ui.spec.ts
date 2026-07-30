@@ -340,7 +340,12 @@ test('C6b: Haupt-Composer-Anhang überlebt das Öffnen/Schließen eines Threads'
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ;(window as any).Alpine.$data(el).attachment = { url, imetaTag: ['imeta', `url ${url}`, 'm image/webp'] }
     }, imgUrl)
-    await expect(page.getByText('Bild angehängt').first()).toBeVisible() // Haupt-Composer-Vorschau (erste im DOM)
+    // Haupt-Composer-Vorschau, adressiert über `data-composer` statt über die
+    // DOM-Reihenfolge: seit der Desktop-Shell sitzt der Thread-Composer IM
+    // Thread-Panel und damit VOR dem Raum-Composer — `.first()` traf danach den
+    // falschen (und unsichtbaren) der beiden.
+    const roomAttachment = page.locator('[data-composer="room"]', { hasText: 'Bild angehängt' })
+    await expect(roomAttachment).toBeVisible()
 
     // Thread auf der Root-Nachricht öffnen (nur ansehen).
     const row = page.locator('div.group', { hasText: rootMarker })
@@ -359,5 +364,5 @@ test('C6b: Haupt-Composer-Anhang überlebt das Öffnen/Schließen eines Threads'
     await page.getByRole('banner').getByRole('button', { name: 'Zurück' }).click()
     await expect(thread).toBeHidden()
     expect(await islandState(page, 'attachment')).toBe(true)
-    await expect(page.getByText('Bild angehängt').first()).toBeVisible()
+    await expect(roomAttachment).toBeVisible()
 })

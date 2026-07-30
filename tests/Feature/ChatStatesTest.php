@@ -35,7 +35,12 @@ test('Raum: Inline-Fehler-Callout mit Retry + aria-busy am Verlauf', function ()
     $res->assertSee('retry()', false);
     $res->assertSee('Erneut laden');
     // Screenreader-Signal während des ersten Ladens.
-    $res->assertSee('::aria-busy="loading && messages.length === 0"', false);
+    // `x-bind:aria-busy`, NICHT `::aria-busy`: der `::`-Escape ist eine Blade-Regel für
+    // Komponenten-Tags. Auf diesem <div> reichte Blade ihn wörtlich durch, Alpine kannte
+    // ihn nicht — das Attribut war tot, und dieser Test hat genau die tote Form
+    // festgeschrieben. Korrigiert am 2026-07-30 (Desktop-Shell), zusammen mit zwei
+    // weiteren Fundstellen in ⚡directory und wallet.
+    $res->assertSee('x-bind:aria-busy="loading && messages.length === 0"', false);
     $res->assertSee('Verlauf wird geladen…');
 });
 
