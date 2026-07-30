@@ -53,6 +53,7 @@ rsync -az --delete \
     --exclude='/public/hot' \
     --exclude='/public/build/.vite/' \
     --exclude='/tests/' \
+    --exclude='/docs/' \
     --exclude='/deploy.sh' \
     --exclude='.claude/' \
     ./ "${REMOTE}:${APP_DIR}/"
