@@ -53,3 +53,4 @@ plans/
 # Arbeitsartefakte der design-lead-Passe (Screenshots der laufenden App).
 # Wie docs/plans/: sammelt mit der Zeit Infra-Details und gehoert nicht in die History.
 docs/screenshots/
+tests/e2e/support/buzz-compose/slot-*/

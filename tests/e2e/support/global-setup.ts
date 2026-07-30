@@ -43,14 +43,12 @@ export default function globalSetup(): void {
     // gerade laufenden Test mitreisst (Begruendung in zooid-testserver.sh, RUNMARK).
     // Zu Lauf-Beginn muessen sie weg, sonst wuerde der Bloat-Guard nie wieder greifen
     // und die Raeume wuechsen ueber Laeufe hinweg unbegrenzt.
-    execFileSync('bash', ['-c', 'rm -f /tmp/e2e-zooid-*.run'], { stdio: 'inherit' })
+    execFileSync('bash', ['-c', 'rm -f /tmp/e2e-zooid-*.run /tmp/e2e-buzz-*.run'], { stdio: 'inherit' })
 
     if (relayMode() === 'buzz') {
-        // Der Buzz-Stack ist EIN geteilter Docker-Compose-Stack (Postgres/Redis/MinIO),
-        // kein Pro-Worker-Prozess wie zooid — deshalb hier EINMAL aufsetzen/seeden/
-        // verifizieren (blockierend, wie zooid-testserver.sh), NICHT im workerBackend-
-        // Fixture. E2E_RELAY=buzz erzwingt außerdem workers:1 (playwright.config.ts).
-        execFileSync('bash', ['tests/e2e/support/buzz-testserver.sh'], { stdio: 'inherit' })
+        // Nichts zu tun: der Buzz-Stack entsteht seit der Parallelisierung PRO WORKER
+        // im `workerBackend`-Fixture (eigener Port, eigenes Compose-Projekt) — genau wie
+        // zooid. Hier einen gemeinsamen Stack hochzuziehen war der Grund für `workers: 1`.
     } else {
         execFileSync(
             'bash',

@@ -49,6 +49,36 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         await useBuzz(page)
     })
 
+    /**
+     * **Buzz kennt ZWEI Chat-Kinds — wir müssen beide lesen.**
+     *
+     * `buzz-core/src/kind.rs:421` definiert `KIND_STREAM_MESSAGE_V2 = 40002` neben dem
+     * klassischen NIP-29 `kind 9`. Buzz Desktop und Amethyst schreiben 40002, unser
+     * Client kannte nur die 9 — im selben Raum lagen damit zwei Zeitleisten
+     * nebeneinander, und keine Seite sah die andere vollständig. Am Prod-Relay
+     * nachgesehen: ein `9` von uns, zwei `40002` von den anderen; Buzz Desktop zeigte
+     * alle drei, unser Client nur eine.
+     *
+     * Geschrieben wird weiter `9`: Buzz Desktop stellt das nachweislich dar, ein
+     * reiner NIP-29-Client hingegen sähe ein 40002 nie.
+     */
+    test('Nachrichten im Buzz-eigenen Kind 40002 erscheinen im Verlauf', async ({ page }) => {
+        const marker = `V2-${Math.floor(Math.random() * 1e9)}`
+        spawnSync(
+            NAK,
+            ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '40002', '-t', `h=${BUZZ_ROOM_WELCOME}`, '-c', marker, WS()],
+            { encoding: 'utf8', timeout: 30_000 },
+        )
+
+        await loginNsec(page, BUZZ_USER_NSEC)
+        await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
+
+        // Gegenprobe im selben Blick: die kind-9-Seed-Nachricht muss weiter stehen —
+        // sonst könnte ein kaputter Filter „alles weg" als Erfolg durchgehen.
+        await expect(page.getByText('Hallo aus dem Testraum! 👋')).toBeVisible({ timeout: 20_000 })
+        await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 20_000 })
+    })
+
     test('Login + Raumliste + Chat lesen/schreiben gegen den Buzz-Test-Stack', async ({ page }) => {
         await loginNsec(page, BUZZ_USER_NSEC)
 

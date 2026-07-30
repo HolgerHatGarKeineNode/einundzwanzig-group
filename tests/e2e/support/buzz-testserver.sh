@@ -19,15 +19,66 @@ set -uo pipefail
 export PATH="$PATH:/home/user/go/bin"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_DIR="$SCRIPT_DIR/buzz-compose"
+COMPOSE_BASE="$SCRIPT_DIR/buzz-compose"
 BUZZ_REPO_COMPOSE=/home/user/Code/buzz/deploy/compose/compose.yml   # NUR gelesen, nie editiert.
-PROJECT=buzz-test
+# EIN Compose-Projekt JE PORT — so bekommt jeder Playwright-Worker seinen eigenen
+# Stack (eigene Volumes, eigenes Netz) und die Suite laeuft parallel statt seriell.
+# Nur der Relay veroeffentlicht einen Host-Port (compose.yml: BUZZ_HTTP_PORT), die
+# uebrigen Container bleiben im Projekt-Netz — deshalb kollidiert nichts.
+PROJECT="buzz-test-${BUZZ_TEST_PORT:-3001}"
 
 # shellcheck disable=SC1091
-source "$COMPOSE_DIR/test-keys.env"   # OWNER_SEC/OWNER_PUB/USER_SEC/USER_PUB (Wegwerf, s. dort)
+source "$COMPOSE_BASE/test-keys.env"   # OWNER_SEC/OWNER_PUB/USER_SEC/USER_PUB (Wegwerf, s. dort)
 
 BUZZ_PORT="${BUZZ_TEST_PORT:-3001}"
 R="ws://localhost:$BUZZ_PORT"
+# Der `php artisan serve` desselben Workers (fixtures.ts: 8137 + slot, buzz: 3001 + slot).
+SERVE_PORT=$(( 8137 + BUZZ_PORT - 3001 ))
+
+# EIGENE .env JE SLOT — nicht verhandelbar, und der Grund ist unsichtbar:
+# `compose.yml` reicht die Relay-Konfiguration ueber `env_file: - .env` in den
+# Container. Eine Shell-Variable erreicht davon NICHTS; sie wirkt nur auf die
+# Interpolation im Compose-File selbst (deshalb stimmte der veroeffentlichte Port,
+# waehrend `BUZZ_DOMAIN` weiter auf :3001 zeigte). Der Relay beantwortete dann NIP-11
+# ueber HTTP und verweigerte den WebSocket-Upgrade mit 404 — Stack sieht gesund aus,
+# liefert aber keine Raeume. Gemessen beim ersten Parallel-Versuch auf :3002.
+#
+# `env_file`-Pfade loest Compose gegen `--project-directory` auf ⇒ je Slot ein eigenes
+# Verzeichnis mit eigener .env. Die Basis-.env bleibt unveraendert.
+COMPOSE_DIR="$COMPOSE_BASE/slot-$BUZZ_PORT"
+mkdir -p "$COMPOSE_DIR"
+sed -E \
+    -e "s#^BUZZ_HTTP_PORT=.*#BUZZ_HTTP_PORT=$BUZZ_PORT#" \
+    -e "s#^BUZZ_DOMAIN=.*#BUZZ_DOMAIN=localhost:$BUZZ_PORT#" \
+    -e "s#^RELAY_URL=.*#RELAY_URL=ws://localhost:$BUZZ_PORT#" \
+    -e "s#^BUZZ_MEDIA_BASE_URL=.*#BUZZ_MEDIA_BASE_URL=http://localhost:$BUZZ_PORT/media#" \
+    -e "s#^BUZZ_MEDIA_SERVER_DOMAIN=.*#BUZZ_MEDIA_SERVER_DOMAIN=localhost:$BUZZ_PORT#" \
+    -e "s#^BUZZ_CORS_ORIGINS=.*#BUZZ_CORS_ORIGINS=http://127.0.0.1:$SERVE_PORT,http://localhost:$SERVE_PORT#" \
+    "$COMPOSE_BASE/.env" > "$COMPOSE_DIR/.env"
+
+# Lauf-Marker wie bei zooid (dort `RUNMARK`): Startet Playwright einen Worker nach einem
+# Test-Fehlschlag NEU, laeuft dieses Skript fuer denselben Slot ein zweites Mal. Ohne
+# Schutz reisst es dabei den eigenen, noch laufenden Stack ab und baut ihn neu — und
+# genau daran ist der erste Parallel-Versuch gescheitert: reihenweise
+# `Bind for 0.0.0.0:3001 failed: port is already allocated`, 53 rote Tests, darunter
+# reine Logik-Specs, die nie einen Relay anfassen (die Seite selbst kam nicht hoch).
+# global-setup.ts loescht die Marker zu Lauf-Beginn.
+RUNMARK="/tmp/e2e-buzz-$BUZZ_PORT.run"
+
+# AUFBAU SERIALISIEREN. Vier Worker starten ihre Stacks gleichzeitig — das sind vier
+# Postgres-Initialisierungen, vier MinIO-Buckets und vier Relay-Migrationen auf einmal.
+# Beim ersten Parallel-Lauf scheiterten daran 13 von 18 roten Tests mit
+# `Command failed: buzz-testserver.sh`; die Tests selbst waren nie das Problem, ihr
+# Worker kam nur nicht hoch. Der Lock haelt nur den AUFBAU auseinander — laeuft ein
+# Stack erst, arbeiten die Worker wieder voll parallel.
+#
+# `flock` ohne Zeitlimit ist hier richtig: Warten ist billig, ein halb aufgebauter
+# Stack ist teuer. Der Aufbau eines Slots dauert gemessen ~30 s.
+LOCK=/tmp/e2e-buzz-setup.lock
+if [ -z "${BUZZ_SETUP_LOCKED:-}" ]; then
+    export BUZZ_SETUP_LOCKED=1
+    exec flock "$LOCK" "$0" "$@"
+fi
 HTTP="http://localhost:$BUZZ_PORT"
 
 # Zwei feste Test-Räume (UUIDv5, Namespace + Ableitung wie Prod-Meetups: uuid5(NS,
@@ -46,6 +97,13 @@ compose() {
     # fehl und beendet den Relay mit Exit 0 — der Stack liesse sich danach nie wieder
     # aufsetzen, und der Grund stuende in einer Datei, die niemand sonst hat.
     # Git-Hosting wird in diesen Tests nicht benutzt.
+    #
+    # ALLE port-tragenden Werte muessen dem Slot folgen, nicht nur der veroeffentlichte
+    # Port. `BUZZ_DOMAIN` ist der gefaehrlichste: passt er nicht zeichengenau, beantwortet
+    # der Relay zwar NIP-11 ueber HTTP, verweigert aber den WebSocket-Upgrade mit 404 —
+    # der Stack sieht dann gesund aus und liefert trotzdem keine Raeume. Genau daran ist
+    # der erste Versuch mit Port 3002 gescheitert (Verifikation rot, Relay-Logs sauber).
+    # Shell-Env schlaegt --env-file, die .env bleibt unveraendert.
     BUZZ_GIT_CONFORMANCE_PROBE=false \
         docker compose -p "$PROJECT" -f "$BUZZ_REPO_COMPOSE" --project-directory "$COMPOSE_DIR" --env-file "$COMPOSE_DIR/.env" "$@"
 }
@@ -60,7 +118,14 @@ stack_seeded_and_clean() {
     [ "${n:-999}" -le "$WELCOME_SEED_CAP" ]
 }
 
+# Zweiter Aufruf INNERHALB desselben Laufs → nur pruefen, ob der Stack noch da ist.
+if [ -f "$RUNMARK" ] && timeout 5 curl -sf -H 'Accept: application/nostr+json' "$HTTP" >/dev/null 2>&1; then
+    echo "buzz-test:$BUZZ_PORT laeuft bereits in diesem Lauf → unangetastet (Kaskaden-Schutz)"
+    exit 0
+fi
+
 if stack_seeded_and_clean; then
+    touch "$RUNMARK"
     echo "buzz-test:$BUZZ_PORT bereits sauber geseedet → Wiederverwendung (kein Reset)"
     exit 0
 fi
@@ -80,7 +145,7 @@ fi
 
 # Volumen-Isolation ausdrücklich verifizieren (nicht nur behaupten): buzz-test-Volumes
 # müssen existieren UND dürfen mit KEINEM buzz-prod-Volume-Namen kollidieren.
-TEST_VOLS=$(docker volume ls --format '{{.Name}}' | grep '^buzz-test_' | sort)
+TEST_VOLS=$(docker volume ls --format '{{.Name}}' | grep "^${PROJECT}_" | sort)
 PROD_VOLS=$(docker volume ls --format '{{.Name}}' | grep '^buzz-prod_' | sort)
 if [ -z "$TEST_VOLS" ]; then
     echo "buzz-test: KEINE eigenen Volumes gefunden — Isolation nicht gegeben, Abbruch." >&2
@@ -92,7 +157,7 @@ echo "buzz-prod-Volumes (Mitschau, unberührt): $(echo "$PROD_VOLS" | tr '\n' ' 
 # sich daher nie als FULL NAME überschneiden — die eigentliche Probe ist, ob die
 # Postgres-Datenverzeichnisse (Mountpoints) physisch verschieden sind. Gleicher
 # Mountpoint würde bedeuten: derselbe Datenbestand trotz getrennter Compose-Projekte.
-TEST_MOUNT=$(docker volume inspect buzz-test_buzz-postgres-data --format '{{.Mountpoint}}' 2>/dev/null)
+TEST_MOUNT=$(docker volume inspect "${PROJECT}_buzz-postgres-data" --format '{{.Mountpoint}}' 2>/dev/null)
 PROD_MOUNT=$(docker volume inspect buzz-prod_buzz-postgres-data --format '{{.Mountpoint}}' 2>/dev/null)
 if [ -z "$TEST_MOUNT" ] || [ "$TEST_MOUNT" = "$PROD_MOUNT" ]; then
     echo "buzz-test: Postgres-Mountpoint identisch mit/fehlt gegenüber buzz-prod ($TEST_MOUNT vs $PROD_MOUNT) — Isolation verletzt, Abbruch." >&2
@@ -168,4 +233,5 @@ if [ "$OK" -ne 1 ]; then
     exit 1
 fi
 
+touch "$RUNMARK"
 echo "buzz-test:$BUZZ_PORT frisch aufgesetzt + geseedet + verifiziert (welcome=$WELCOME_H, general=$GENERAL_H)"

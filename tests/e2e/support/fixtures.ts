@@ -62,9 +62,17 @@ export const test = base.extend<object, { workerBackend: void }>({
                     env: { ...process.env, ZOOID_PORT: String(zooidPort) },
                     stdio: 'inherit',
                 })
+            } else {
+                // Buzz genauso pro Worker wie zooid: eigener Compose-Stack auf
+                // `3001 + slot`, eigenes Projekt, eigene Volumes. Vorher lief das
+                // einmalig in global-setup.ts, und die Suite war auf `workers: 1`
+                // festgenagelt — der einzige Grund für 13–15 min statt 2 (siehe
+                // support/buzz.ts für die Messung).
+                execFileSync('bash', ['tests/e2e/support/buzz-testserver.sh'], {
+                    env: { ...process.env, BUZZ_TEST_PORT: String(3001 + slot) },
+                    stdio: 'inherit',
+                })
             }
-            // buzz-Modus: der Stack ist schon in global-setup.ts geseedet+verifiziert —
-            // hier ist nichts pro Worker zu tun (siehe relayMode-Kommentar oben).
 
             const serve: ChildProcess = spawn(
                 'php',

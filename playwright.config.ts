@@ -15,18 +15,26 @@ process.loadEnvFile('.env')
  *
  * `E2E_RELAY=buzz|zooid` (Default zooid, siehe support/global-setup.ts + support/
  * fixtures.ts): schaltet die Suite wahlweise gegen den lokalen Buzz-TEST-Stack
- * (Docker-Compose-Projekt `buzz-test`, :3001) statt zooid. Buzz ist EIN geteilter
- * Docker-Stack, kein Pro-Worker-Prozess — deshalb erzwingt der Buzz-Modus workers:1
- * (keine parallelen Instanzen, keine Raum-/Session-Kollisionen). Der bestehende
- * zooid-Modus bleibt unverändert (Default, volle Parallelität).
+ * (Docker-Compose-Projekt `buzz-test-<port>`) statt zooid. Buzz bekommt einen eigenen
+ * Docker-Stack je Worker (Port 3001+slot, eigenes Compose-Projekt, eigene Volumes) —
+ * genau wie zooid. Vorher war es EIN geteilter Stack und der Modus auf workers:1
+ * festgenagelt; dieselbe Arbeit brauchte damit 13–15 min statt gut 2 (gemessen:
+ * 753 s Testzeit Buzz gegen 633 s zooid).
  */
 const isBuzz = process.env.E2E_RELAY === 'buzz'
 
 export default defineConfig({
     testDir: './tests/e2e',
-    fullyParallel: !isBuzz,
-    // 1 serve + 1 zooid + 1 Chromium je Worker. Auf CI knapper halten. Buzz: fix 1 (s.o.).
-    workers: isBuzz ? 1 : process.env.CI ? 4 : 6,
+    fullyParallel: true,
+    // 1 serve + 1 Relay + 1 Chromium je Worker. Auf CI knapper halten.
+    // Buzz zieht pro Worker einen eigenen Docker-Stack hoch (4 Container) — deshalb
+    // dort weniger Worker als bei zooid, aber eben nicht mehr nur einer.
+    // `E2E_BUZZ_WORKERS` überschreibt das, wenn die Maschine mehr oder weniger verträgt.
+    workers: isBuzz
+        ? Number(process.env.E2E_BUZZ_WORKERS ?? (process.env.CI ? '2' : '4'))
+        : process.env.CI
+          ? 4
+          : 6,
     reporter: [['list']],
     globalSetup: './tests/e2e/support/global-setup.ts',
     use: {

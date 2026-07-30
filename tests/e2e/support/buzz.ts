@@ -1,13 +1,22 @@
 import { type Page } from '@playwright/test'
 
-// Isolierter Buzz-TEST-Stack (Compose-Projekt `buzz-test`, siehe buzz-testserver.sh).
-// Bewusst EIN fester Port, kein Pro-Worker-Versatz wie bei zooid: der Buzz-Stack ist
-// ein geteilter Docker-Compose-Stack (Postgres/Redis/MinIO), keine leichte Go-Binary,
-// die man pro Worker beliebig oft hochfahren will. Der `buzz`-Modus fährt deshalb
-// bewusst mit EINEM Playwright-Worker (siehe playwright.config.ts, E2E_RELAY=buzz
-// erzwingt workers:1) — keine Kollisionsgefahr über Räume/Sessions.
-// Der Mitschau-Stack `buzz-prod` auf :3000 bleibt davon komplett unberührt.
-export const BUZZ_PORT = Number(process.env.BUZZ_TEST_PORT ?? '3001')
+// Isolierter Buzz-TEST-Stack — **ein eigener Stack je Worker**, wie es zooid längst hält.
+//
+// Hier stand vorher ein fester Port mit der Begründung, ein Docker-Stack sei zu schwer,
+// um ihn zu vervielfachen. Das hat die Buzz-Suite auf `workers: 1` festgenagelt und war
+// der einzige Grund, warum sie 13–15 min brauchte statt 2 — GEMESSEN: 753 s Testzeit im
+// Buzz-Modus gegen 633 s im zooid-Modus, also praktisch dieselbe Arbeit, nur einmal
+// serialisiert und einmal auf sechs Worker verteilt.
+//
+// Was die alte Begründung übersah: von den vier Containern veröffentlicht nur der Relay
+// einen Host-Port (`compose.yml:22`, `${BUZZ_HTTP_PORT:-3000}:3000`) — Postgres, Redis
+// und MinIO bleiben im Compose-Netz. Verschiedene Projektnamen kollidieren also nicht,
+// und Volumes/Netzwerke trennt Compose ohnehin je Projekt.
+//
+// `BUZZ_TEST_PORT` überschreibt den Versatz (Einzelaufruf des Skripts von Hand).
+// Der Mitschau-Stack `buzz-prod` auf :3000 bleibt unberührt.
+const SLOT = Number(process.env.TEST_PARALLEL_INDEX ?? '0') + Number(process.env.E2E_SLOT_OFFSET ?? '0')
+export const BUZZ_PORT = Number(process.env.BUZZ_TEST_PORT ?? String(3001 + SLOT))
 export const BUZZ_WS = `ws://localhost:${BUZZ_PORT}`
 export const BUZZ_URL = `${BUZZ_WS}/`
 
