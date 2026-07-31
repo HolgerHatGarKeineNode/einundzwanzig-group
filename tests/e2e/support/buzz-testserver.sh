@@ -56,6 +56,30 @@ sed -E \
     -e "s#^BUZZ_CORS_ORIGINS=.*#BUZZ_CORS_ORIGINS=http://127.0.0.1:$SERVE_PORT,http://localhost:$SERVE_PORT#" \
     "$COMPOSE_BASE/.env" > "$COMPOSE_DIR/.env"
 
+# Ratenbegrenzer aus dem Messpfad nehmen — und zwar HIER, nicht in der Basis-.env:
+# die ist per `.gitignore` (Regel `.env`) nicht versioniert, eine Aenderung dort waere
+# auf dem naechsten Rechner weg. Genau so ging der erste Versuch schief: die Werte
+# standen in der SLOT-.env, die dieses `sed` bei jedem Lauf neu erzeugt — sie erreichten
+# den Container nie, der Test blieb rot, und die Hypothese galt kurz als widerlegt.
+# `docker exec … env | grep RATE_LIMIT` war die Probe, die das aufdeckte.
+#
+# Warum ueberhaupt: Buzz deckelt WebSocket-Frames auf `human_ws_events_per_sec` x 5 s
+# (Default 10 => 50 Frames je 5 s je Pubkey, `admission.rs:9,40`) und Events zusaetzlich
+# auf `human_messages_per_min` (Default 60). Greift der Deckel, antwortet der Relay auf
+# ein EVENT mit einer nackten NOTICE statt mit einem OK (`connection.rs:632-650`,
+# `sub_id: None`) — der Client bekommt nie ein Verdikt. Genau das trug den
+# `buzz-moderation:95`-Flake (vorher ~1 von 4 rot, mit diesen Werten 6 von 6 gruen).
+#
+# Das ist eine Testfixture-Entscheidung, KEIN Freibrief: dass unser Client beim
+# Seitenaufbau Bursts ueber 50 Frames faehrt (eine REQ je Profil, Raum-Sub mehrfach neu
+# aufgesetzt), bleibt ein offener Client-Befund. Er wird hier nur aus dem Messpfad
+# genommen, nicht behoben — sonst maesse jede Buzz-Spec den Begrenzer statt ihres Themas.
+cat >> "$COMPOSE_DIR/.env" <<'RATELIMITS'
+
+BUZZ_RATE_LIMIT_HUMAN_WS_EVENTS_PER_SEC=500
+BUZZ_RATE_LIMIT_HUMAN_MESSAGES_PER_MIN=6000
+RATELIMITS
+
 # Lauf-Marker wie bei zooid (dort `RUNMARK`): Startet Playwright einen Worker nach einem
 # Test-Fehlschlag NEU, laeuft dieses Skript fuer denselben Slot ein zweites Mal. Ohne
 # Schutz reisst es dabei den eigenen, noch laufenden Stack ab und baut ihn neu — und
