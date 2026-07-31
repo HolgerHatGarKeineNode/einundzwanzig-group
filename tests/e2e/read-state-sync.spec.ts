@@ -2,6 +2,7 @@ import { test, expect, type Page } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
 import { useZooid, ZOOID_WS, ZOOID_URL } from './support/zooid'
 import { loginNsec } from './support/login'
+import { cleanupRooms, trackRoom } from './support/rooms'
 import { testKeys } from './support/keys'
 
 /**
@@ -124,7 +125,7 @@ type RelayEvent = { id: string; pubkey: string; kind: number; content: string; t
 /** Frischer Test-Raum + Beitritt des Test-Users (Muster: `updates.spec.ts makeRoom`). */
 function makeRoom(): { h: string; name: string } {
     const id = rnd()
-    const h = `sync${id}`
+    const h = trackRoom(`sync${id}`)
     const name = `Sync-${id}`
     nak(['event', '--auth', '--sec', ADMIN, '-k', '9007', '-t', `h=${h}`, ZOOID_WS])
     nak(['event', '--auth', '--sec', ADMIN, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, ZOOID_WS])
@@ -363,3 +364,13 @@ test('Sync 2: frisches Gerät seedet, darf aber kein all veröffentlichen — ec
         await contextB.close()
     }
 })
+
+/**
+ * Jeder hier angelegte Wegwerf-Raum wird wieder gelöscht (kind 9008).
+ *
+ * Der zooid der Suite überlebt den Lauf; ohne dieses `afterAll` blieb je Lauf eine
+ * Handvoll Räume liegen (gemessen 2026-07-31: 5–10 pro Vollauf, 16–25 statt 15 Räume je
+ * Instanz). Fehler beim Abräumen sind still — ein Aufräumer, der wirft, überschriebe den
+ * Befund des Tests mit einem Infrastruktur-Fehler.
+ */
+test.afterAll(() => cleanupRooms(ZOOID_WS, ADMIN))

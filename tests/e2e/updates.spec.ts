@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { neventEncode } from 'nostr-tools/nip19'
 import { useZooid, ZOOID_PORT, ZOOID_URL, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
+import { cleanupRooms, trackRoom } from './support/rooms'
 
 /**
  * P4 — die Benachrichtigungs-View `/updates` im echten Browser.
@@ -94,7 +95,7 @@ function nak(args: readonly string[], attempts = 3): string {
  */
 function makeRoom(): { h: string; name: string } {
     const id = rnd()
-    const h = `upd${id}`
+    const h = trackRoom(`upd${id}`)
     const name = `Meldeprobe-${id}`
     nak(['event', '--auth', '--sec', ADMIN, '-k', '9007', '-t', `h=${h}`, ZOOID_WS])
     nak(['event', '--auth', '--sec', ADMIN, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, ZOOID_WS])
@@ -1956,3 +1957,13 @@ test('Anker 21: Cap-Grenzen — 99+ an Raum-/Tab-Pille, 9+ an der Glocke, je an 
     await pinnedText(roomsTabPill, 100, 10, '99+', 'Tab-Pille über der Schwelle')
     await pinnedText(bellPill, 100, 10, '9+', 'Glocke über der Schwelle')
 })
+
+/**
+ * Jeder hier angelegte Wegwerf-Raum wird wieder gelöscht (kind 9008).
+ *
+ * Der zooid der Suite überlebt den Lauf; ohne dieses `afterAll` blieb je Lauf eine
+ * Handvoll Räume liegen (gemessen 2026-07-31: 5–10 pro Vollauf, 16–25 statt 15 Räume je
+ * Instanz). Fehler beim Abräumen sind still — ein Aufräumer, der wirft, überschriebe den
+ * Befund des Tests mit einem Infrastruktur-Fehler.
+ */
+test.afterAll(() => cleanupRooms(ZOOID_WS, ADMIN))

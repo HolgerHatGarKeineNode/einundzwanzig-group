@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { npubEncode } from 'nostr-tools/nip19'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
+import { cleanupRooms, trackRoom } from './support/rooms'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 // Relay-Owner-Secret (Pubkey = relay.self) — der einzige NIP-86/Raum-Admin des zooid.
@@ -18,6 +19,7 @@ function pubOf(sec: string): string {
 
 /** Legt einen Raum via nak an (kind 9007 + 9002), damit die Kachel in der Liste erscheint. */
 function createRoomNak(h: string, name: string, extraTags: string[] = []): void {
+    trackRoom(h)
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9007', '-t', `h=${h}`, ZOOID_WS])
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, ...extraTags, ZOOID_WS])
 }
@@ -654,3 +656,14 @@ test('P8: Suchfeld der Standardliste ab 10 Räumen — und nur unterhalb xl', as
         }
     }
 })
+
+/**
+ * Jeder hier angelegte Wegwerf-Raum wird wieder gelöscht (kind 9008).
+ *
+ * P8 räumte seine Räume schon selbst ab, P4/P4b/P4c/P7 nicht — und weil P7 fünf Stück
+ * je Lauf anlegt, war diese Datei der zweitgrößte Erzeuger. Das `afterAll` deckt jetzt
+ * ALLE ab, auch die des `finally`-Zweigs (dort steht 9022, das nimmt nur die
+ * Mitgliedschaft zurück und lässt den Raum stehen). Doppeltes Löschen schadet nicht:
+ * ein 9008 auf einen bereits gelöschten Raum ist am Relay ein No-op.
+ */
+test.afterAll(() => cleanupRooms(ZOOID_WS, ADMIN_HEX))

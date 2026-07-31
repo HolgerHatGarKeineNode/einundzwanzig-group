@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { useZooid, ZOOID_PORT, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
+import { cleanupRooms, trackRoom } from './support/rooms'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 // Relay-Owner-Secret (Pubkey = relay.self) — der einzige NIP-86-Admin des zooid.
@@ -302,6 +303,7 @@ const REJECT_APPLICANT = '777777777777777777777777777777777777777777777777777777
 
 /** Legt einen closed-Raum via nak an (kind 9007 + 9002 mit closed-Flag). */
 function seedClosedRoom(h: string, name: string): void {
+    trackRoom(h)
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9007', '-t', `h=${h}`, ZOOID_WS])
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, '-t', 'closed', ZOOID_WS])
 }
@@ -349,3 +351,13 @@ test('P4b: Admin lehnt eine Beitritts-Anfrage ab (banevent)', async ({ page }) =
 
     await expect(modal.getByText(name)).toHaveCount(0, { timeout: 15_000 })
 })
+
+/**
+ * Jeder hier angelegte Wegwerf-Raum wird wieder gelöscht (kind 9008).
+ *
+ * Der zooid der Suite überlebt den Lauf; ohne dieses `afterAll` blieb je Lauf eine
+ * Handvoll Räume liegen (gemessen 2026-07-31: 5–10 pro Vollauf, 16–25 statt 15 Räume je
+ * Instanz). Fehler beim Abräumen sind still — ein Aufräumer, der wirft, überschriebe den
+ * Befund des Tests mit einem Infrastruktur-Fehler.
+ */
+test.afterAll(() => cleanupRooms(ZOOID_WS, ADMIN_HEX))
