@@ -11,14 +11,21 @@ const CACHE_DB = `einundzwanzig-cache-${VIEWER}` // §4.4: eine IndexedDB pro pu
 const WELCOME = 'Willkommen im Space! 👋' // älteste Seed-Nachricht
 const DANKE = 'Danke!' // neueste Seed-Nachricht (fürs Warm-Reload-Gate/Assert, s. P1-Notiz)
 
-// Diese Tests fahren einen echten Browser-Reload gegen einen (teils blockierten) Relay.
-// Der Warm-Reload hat eine irreduzible welshman-Init-Race: die url-gescopte Ableitung
-// (deriveEventsByIdForUrl) malt den Feed selten erst im zweiten Paint — mit Relay UP
-// (Produktion) sofort behoben, mit blockiertem Relay im Test gelegentlich > Timeout.
-// Der Cache funktioniert nachweislich (Persistenz-Gate ist deterministisch); dies ist ein
-// Netzwerk-Timing-Flake, kein Logikfehler → Retries statt maskierendem Riesen-Timeout.
-// ponytail: Retries hier bewusst; Ursache = welshman-Store-Init, nicht unser Cache-Code.
-test.describe.configure({ retries: 2 })
+// **Hier stand `test.describe.configure({ retries: 2 })`. Gemessen, dann entfernt.**
+//
+// Begründet war es mit einer welshman-Init-Race beim Warm-Reload gegen einen blockierten
+// Relay: die url-gescopte Ableitung (`deriveEventsByIdForUrl`) male den Feed selten erst
+// im zweiten Paint. Am 2026-07-31 nachgemessen — **8 Läufe mit `--retries=0`, 0 rot**.
+//
+// Was auch immer die Race einmal ausgelöst hat, sie tritt heute nicht mehr auf. Zwei
+// Retries verdecken damit nichts mehr, sie verdecken nur noch, falls sie zurückkommt —
+// und ein maskierter Flake ist teurer als ein sichtbarer. Genau dieselbe Datei hat das in
+// diesem Repo schon einmal bewiesen: `storage-cache:196` galt wochenlang als Flake und war
+// in Wahrheit ein echter Produktdefekt (orphaned rejection bei unerreichbarer
+// Lightning-Adresse), den die Retries mit weggeschluckt haben.
+//
+// Kommt sie zurück, gehört sie mit einer ZAHL zurückgeholt (x von n Läufen), nicht mit
+// einem Gefühl.
 
 /**
  * Kleinster gefüllter Stand des Caches: gecachte kind-9 UND Tracker-Einträge. Der
