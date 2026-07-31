@@ -317,4 +317,46 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
         // Gegenprobe: der zooid-Seed-Raum ist auch wirklich da (nicht bloß die URL stimmt).
         await expect(page.getByRole('tabpanel').getByText('Willkommen', { exact: true })).toBeVisible({ timeout: 20_000 })
     })
+    /**
+     * **Ein Workspace-Raum sagt, wo er liegt — ein Vereins-Raum sagt nichts.**
+     *
+     * Der offene Punkt aus W4, jetzt eingegrenzt und geschlossen. Gemessen (1440 px, echter
+     * Weg über den Tab): der Raum-Feed hing korrekt am Buzz-Relay, aber der Kopf zeigte nur
+     * `# E2E-General`, und der Navigator trug oben weiter „Zooid Test Space". Es gab damit
+     * KEINE Stelle im Bild, aus der hervorging, in welchem Space man steht.
+     *
+     * Der Hinweis hängt an `spaceHint` und ist leer, solange der Raum im Vereins-Space liegt
+     * — für so gut wie jeden Raum ändert sich nichts. Genau deshalb steht die **Gegenprobe
+     * im selben Test**: ein Hinweis, der überall erschiene, wäre kein Hinweis, sondern Lärm.
+     */
+    test('Ein Workspace-Raum nennt seinen Space im Kopf — ein Vereins-Raum nicht', async ({ page }) => {
+        joinBuzzRelay()
+        await useZooid(page)
+        await page.addInitScript((url) => {
+            ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
+        }, BUZZ_URL)
+        await loginNsec(page, NSEC)
+
+        // Gegenprobe zuerst, im VEREINS-Raum: kein Hinweis. Zuerst, weil sie sonst auf einem
+        // Zustand stünde, den der Workspace-Besuch hinterlassen hat.
+        await page.goto('/rooms/welcome')
+        await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
+        await expect
+            .poll(async () => page.locator('[data-space-hint]:visible').count(), { timeout: 10_000 })
+            .toBe(0)
+
+        // Jetzt in den Workspace-Raum, über den echten Weg (Tab → Kachel).
+        await page.goto('/spaces')
+        await page.getByRole('tab', { name: 'Workspaces' }).click()
+        const panel = page.getByRole('tabpanel')
+        await expect.poll(async () => (await panel.locator('button').count()) > 0, { timeout: 30_000 }).toBe(true)
+        await panel.locator('button').first().click()
+        await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
+
+        const hint = page.locator('[data-space-hint]')
+        await expect(hint).toBeVisible({ timeout: 20_000 })
+        // Der Text kommt aus dem NIP-11 des BUZZ-Relays, nicht aus einer Konstanten im Test:
+        // stünde hier der zooid-Name, wäre die Zuordnung falsch herum.
+        await expect(hint).toHaveText('Buzz Relay')
+    })
 })
