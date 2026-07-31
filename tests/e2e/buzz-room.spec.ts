@@ -556,4 +556,37 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
             })
         }
     })
+    /**
+     * **Kein Testlauf spricht mit einem fremden Relay.**
+     *
+     * Bis 2026-07-31 tat er es: `partials/head.blade.php` injiziert
+     * `config('group.workspace_url')`, und die lokale `.env` trägt dort das
+     * **Produktions**-Buzz. Im Frame-Mitschnitt stand deshalb eine zweite Verbindung nach
+     * `wss://buzz.einundzwanzig.space/`, die der Prod-Relay mit
+     * `restricted: not a relay member` beantwortete. `useZooid` schaltet den zweiten Space
+     * seit dem 30.07. ab (dort kostete dieselbe Zeile 25 rote Tests), `useBuzz` nicht —
+     * die Lücke war unsichtbar, weil sie keinen Test rot machte, sondern nur Zeit kostete
+     * und nebenbei Produktion anfasste.
+     *
+     * Der Anker misst am Socket, nicht an der Konfiguration: was die App WIRKLICH öffnet.
+     */
+    test('Der Lauf öffnet nur Verbindungen zum Test-Stack — kein Prod-Relay', async ({ page }) => {
+        const urls: string[] = []
+        page.on('websocket', (ws) => urls.push(ws.url()))
+
+        // **Über `/spaces`, nicht direkt in den Raum.** Die Workspace-Sub-Bridge (zweiter
+        // Space) hängt in der Spaces-Insel — ein Direktaufruf von `/rooms/{h}` öffnet die
+        // fremde Verbindung gar nicht, und der Anker wäre grün, ohne etwas zu prüfen.
+        // Genau so ist er im ersten Entwurf durch die Mutationsprobe gefallen.
+        await loginNsec(page, BUZZ_OWNER_NSEC)
+        await page.goto('/spaces')
+        await page.waitForTimeout(4_000)
+        await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
+        await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 20_000 })
+        await page.waitForTimeout(3_000)
+
+        const fremd = urls.filter((u) => !u.includes(`localhost:${BUZZ_PORT}`) && !u.includes(`127.0.0.1:${BUZZ_PORT}`))
+        expect(fremd, `fremde Relay-Verbindungen: ${fremd.join(', ')}`).toEqual([])
+        expect(urls.length, 'mindestens eine Verbindung — sonst prüft der Test nichts').toBeGreaterThan(0)
+    })
 })

@@ -49,5 +49,14 @@ export async function useBuzz(page: Page): Promise<void> {
             signer: [url],
         }
         ;(window as unknown as { __nostrSpace: string }).__nostrSpace = url
+        // Zweiten Space abschalten — dieselbe Falle wie in `useZooid`, hier bis 2026-07-31
+        // unbemerkt: `partials/head.blade.php` injiziert `config('group.workspace_url')`,
+        // und die lokale `.env` trägt dort das **Produktions**-Buzz. Im Frame-Mitschnitt
+        // eines Buzz-Modus-Laufs stand deshalb eine zweite Verbindung nach
+        // `wss://buzz.einundzwanzig.space/`, die der Prod-Relay mit
+        // `restricted: not a relay member` beantwortete. Ein Testlauf, der nebenbei einen
+        // Produktions-Relay anspricht, ist nicht nur langsam — er misst auch etwas, das mit
+        // dem Test nichts zu tun hat.
+        ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = ''
     }, BUZZ_URL)
 }
