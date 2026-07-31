@@ -59,6 +59,22 @@ LOG=/tmp/e2e-zooid-$ZOOID_PORT.log
 # und prüfen DIESE (immer im Fenster). Ein Voll-Lauf schreibt in welcome → nächster Lauf
 # reseeded frisch; die Lese-Iteration eines einzelnen welcome-freien Tests bleibt schnell.
 WELCOME_SEED=3
+# Raum-Baseline: der frische Seed legt GENAU 15 Raeume an (gemessen 2026-07-31 auf zwei
+# frisch aufgesetzten Instanzen: `nak req -k 39000` = 15). Alles darueber ist Testmuell.
+#
+# **Warum der welcome-Guard darueber allein nicht wacht:** er zaehlt kind-9 in EINEM Raum.
+# Ein Test, der sich einen eigenen Raum anlegt und ihn nicht abraeumt, laesst `welcome`
+# unberuehrt — der Relay galt damit als „sauber" und wurde nie zurueckgesetzt. Am
+# 2026-07-31 nachgemessen: 16 bis 25 Raeume je Instanz statt 15, also bis zu 10 Leichen,
+# und das unbegrenzt wachsend ueber Wochen.
+#
+# Die Toleranz von 6 ist kein Sicherheitsabstand, sondern eine Kostenabwaegung: ein
+# einzelner Lauf legt typischerweise 2-4 Wegwerf-Raeume an (P4/P7/P8, buzz-Threading).
+# Bei 0 Toleranz setzte JEDER zweite Lauf neu auf und bezahlte den Seed; bei 6 traegt der
+# Relay etwa zwei Laeufe und raeumt dann. Ein zooid-Reset kostet wenige Sekunden — bei
+# Buzz waere dieselbe Zahl teurer, deshalb steht sie dort separat.
+ROOM_SEED=15
+ROOM_CAP=$((ROOM_SEED + 6))
 
 # Läuft schon ein sauberer, geseedeter, nicht aufgeblähter zooid? → wiederverwenden.
 seeded_and_clean() {
@@ -75,7 +91,15 @@ seeded_and_clean() {
     timeout 8 nak req -k 39002 -d punkt --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
     local n
     n=$(timeout 8 nak req -k 9 -t h=welcome --auth --sec "$USER" "$R" 2>/dev/null | grep -c '"kind":9')
-    [ "${n:-999}" -le "$WELCOME_SEED" ]
+    [ "${n:-999}" -le "$WELCOME_SEED" ] || return 1
+    # Zweiter Bloat-Wächter: die RAUM-Zahl. Siehe ROOM_CAP oben — ohne ihn wuchs der Relay
+    # ueber Wochen, weil der welcome-Guard Raeume nicht sieht.
+    local r
+    r=$(timeout 8 nak req -k 39000 --auth --sec "$USER" "$R" 2>/dev/null | grep -c '"kind":39000')
+    if [ "${r:-999}" -gt "$ROOM_CAP" ]; then
+        echo "zooid:$ZOOID_PORT hat $r Raeume (Seed=$ROOM_SEED, Grenze=$ROOM_CAP) → Reset"
+        return 1
+    fi
 }
 
 cd "$ZOOID_DIR" || exit 1

@@ -114,6 +114,26 @@ GENERAL_H=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.UUID('$NS'), 'mee
 
 # welcome-Seed-Baseline (wie zooid: WELCOME_SEED) — Bloat-Guard.
 WELCOME_SEED_CAP=10
+# Kanal-Baseline: der Seed legt GENAU 2 Kanaele an (welcome + general).
+#
+# **Der welcome-Guard darueber sieht Raeume nicht** — und genau daran ist der Stack ueber
+# Wochen gewachsen. Am 2026-07-31 in der Postgres nachgezaehlt, nach Alter sortiert:
+#
+#   25 min alt →  4 Kanaele,  62 Events
+#   25 min alt →  7 Kanaele,  92 Events
+#    8 h  alt →  9 Kanaele, 135 Events
+#    9 h  alt → 10 Kanaele, 215 Events
+#
+# Monoton steigend, ohne Obergrenze: jeder Test, der sich einen Raum anlegt und ihn nicht
+# per 9008 abraeumt, bleibt liegen, solange `welcome` sauber ist.
+#
+# Die Toleranz ist bei Buzz KLEINER als bei zooid (4 statt 6), obwohl der Reset hier
+# teurer ist (~40 s Docker-Neuaufbau gegen wenige Sekunden). Grund: Buzz deckelt Frames
+# (50 je 5 s je Pubkey, siehe relayNotices.ts im Package) — ein aufgeblaehter Kanalbestand
+# vergroessert die Raumliste, damit die `#h`-Filter und damit den Frame-Verbrauch. Hier
+# kostet Muell nicht nur Platz, sondern Messgenauigkeit.
+CHANNEL_SEED=2
+CHANNEL_CAP=$((CHANNEL_SEED + 4))
 
 compose() {
     # BUZZ_GIT_CONFORMANCE_PROBE=false gehoert hierher und nicht in die (gitignorierte)
@@ -139,7 +159,14 @@ stack_seeded_and_clean() {
     timeout 8 nak req -k 9 -t "h=$GENERAL_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-general' || return 1
     local n
     n=$(timeout 8 nak req -k 9 -t "h=$WELCOME_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -c '"kind":9')
-    [ "${n:-999}" -le "$WELCOME_SEED_CAP" ]
+    [ "${n:-999}" -le "$WELCOME_SEED_CAP" ] || return 1
+    # Zweiter Bloat-Waechter: die KANAL-Zahl. Siehe CHANNEL_CAP oben.
+    local c
+    c=$(timeout 8 nak req -k 39000 --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -c '"kind":39000')
+    if [ "${c:-999}" -gt "$CHANNEL_CAP" ]; then
+        echo "buzz-test:$BUZZ_PORT hat $c Kanaele (Seed=$CHANNEL_SEED, Grenze=$CHANNEL_CAP) → Reset"
+        return 1
+    fi
 }
 
 # Zweiter Aufruf INNERHALB desselben Laufs → nur pruefen, ob der Stack noch da ist.
