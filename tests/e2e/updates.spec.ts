@@ -1077,12 +1077,24 @@ test('Anker 12: geteilter Thread-Link im frischen Tab — zweimal Zurück landet
 test('Anker 13: verwaiste Zeile ist deaktiviert und navigiert auch programmatisch nicht', async ({ page }) => {
     test.setTimeout(120_000)
 
+    // **Jede Sichtbarkeits-Zusage trägt hier ihren Grund.** Der Fall fiel unter Volllast
+    // etwa in jedem siebten Lauf (7 gemessen, 1 rot) und ist isoliert nicht reproduzierbar
+    // — in sechs Versuchen hintereinander grün. Ohne Begründungen meldet er dann nur
+    // „expect(locator).toBeVisible() failed" und lässt offen, WELCHE der drei Zusagen es
+    // war: der Raum in der Liste, die Zeile in /updates oder die injizierte Attrappe.
+    // Der nächste Fehlschlag soll die Ursache benennen, nicht bloß seine Existenz.
     const room = makeRoom()
     await login(page)
-    await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
+    await expect(
+        page.getByRole('button', { name: new RegExp(room.name) }),
+        'Vorbedingung: der frisch angelegte Raum steht in der Liste (Relay-Seed + 39002 da)',
+    ).toBeVisible({ timeout: 25_000 })
     publishMessage(room.h, `Waise-${rnd()}`)
     await openUpdates(page)
-    await expect(roomRow(page, room.name)).toBeVisible({ timeout: 30_000 })
+    await expect(
+        roomRow(page, room.name),
+        'Vorbedingung: die ECHTE Zeile steht in /updates — erst danach sagt die Attrappe etwas aus',
+    ).toBeVisible({ timeout: 30_000 })
 
     const ORPHAN_LABEL = 'Unbekannter Raum. Nachricht nicht mehr verfügbar. verwaister Inhalt. gerade eben'
     const inject = () =>
@@ -1124,7 +1136,7 @@ test('Anker 13: verwaiste Zeile ist deaktiviert und navigiert auch programmatisc
     const orphanRow = page.getByRole('button', { name: ORPHAN_LABEL, exact: true })
     await expect(async () => {
         await inject()
-        await expect(orphanRow).toBeVisible()
+        await expect(orphanRow, 'die injizierte Waisen-Zeile rendert nicht — Insel weg oder Label geändert').toBeVisible()
     }).toPass({ timeout: 30_000 })
 
     // Zusage 1: die Zeile bleibt STEHEN (sie verschwindet nicht) …
