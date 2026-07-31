@@ -72,6 +72,23 @@ async function stubMeetupApi(page: Page): Promise<void> {
  * Portal-Join (keine echten Remote-Fetches, deterministische Länder/Flaggen).
  */
 export async function useZooid(page: Page): Promise<void> {
+    // **Laut scheitern statt still falsch messen.** Im Buzz-Modus setzt `workerBackend`
+    // KEINEN zooid auf — `zooid-testserver.sh` läuft dort nicht. Ein Test, der trotzdem
+    // hierher kommt, misst gegen eine übriggebliebene Instanz des letzten Normal-Laufs:
+    // ungeseedet für diesen Lauf, mit dem Zustand von vorhin, manchmal aus einer viel
+    // älteren Sitzung. Das war jahrelang unsichtbar, weil es meistens grün war — es
+    // kostete pro Abnahme 2–3 rote Tests, jedes Mal andere, isoliert immer grün.
+    //
+    // `playwright.config.ts` schließt die zooid-Specs im Buzz-Modus inzwischen aus. Diese
+    // Zeile ist der Wächter darunter: fällt der Filter, wird der Lauf rot mit Begründung,
+    // statt wieder gegen einen Zustand zu messen, den niemand hergestellt hat.
+    if (process.env.E2E_RELAY === 'buzz') {
+        throw new Error(
+            'useZooid() im Buzz-Modus: dieser Modus startet keinen zooid. Der Test liefe gegen ' +
+                'eine übriggebliebene Instanz. Entweder gehört die Spec nicht in den Buzz-Modus ' +
+                '(playwright.config.ts BUZZ_SPECS), oder der Modus muss zooid mit aufsetzen.',
+        )
+    }
     await stubImages(page)
     await stubMeetupApi(page)
     await page.addInitScript((url) => {

@@ -23,6 +23,27 @@ process.loadEnvFile('.env')
  */
 const isBuzz = process.env.E2E_RELAY === 'buzz'
 
+/**
+ * **Der Buzz-Modus fährt NUR die Buzz-Specs.**
+ *
+ * Vorher fuhr er die ganze Suite — und die zooid-Specs liefen dort gegen einen Relay,
+ * den dieser Modus **nie aufsetzt**: `fixtures.ts workerBackend` startet bei
+ * `E2E_RELAY=buzz` ausschließlich den Docker-Stack, `zooid-testserver.sh` läuft nicht.
+ * Dass sie trotzdem meist grün waren, lag an Übriggebliebenem: die zooid-Instanzen des
+ * letzten Normal-Laufs bleiben absichtlich stehen (RUNMARK-Wiederverwendung) und werden
+ * im Buzz-Modus weder geseedet noch geprüft. Am 2026-07-31 nachgesehen: sechs `bin/zooid`
+ * lauschten auf 3335–3340, eine davon aus einem deutlich älteren Lauf.
+ *
+ * Das erklärt das Muster, das mehrere Abnahmen gekostet hat: **jedes Mal 2–3 rot, jedes
+ * Mal andere** (`room.spec:341`, `:1221`, `updates:1077`, `spaces:200`), isoliert immer
+ * grün. Das war kein Flake im Produkt, sondern eine Messung gegen einen Zustand, den
+ * niemand hergestellt hat.
+ *
+ * `workspaces.spec.ts` bleibt AUSSEN VOR, obwohl es Buzz berührt: es fährt im
+ * zooid-Modus und braucht beide Stacks gleichzeitig — genau das ist seine Aussage.
+ */
+const BUZZ_SPECS = /buzz-.*\.spec\.ts$/
+
 /** Host-Chromium, kein von Playwright heruntergeladenes Binary — gilt für JEDES Projekt. */
 const hostChromium = {
     browserName: 'chromium' as const,
@@ -75,6 +96,7 @@ export default defineConfig({
             // sonst liefe eine `desktop-*.spec.ts` auch bei 1279 px, also genau unter
             // dem Breakpoint, den sie prüfen soll. Heute ein No-op (keine solche Datei).
             testIgnore: /desktop-.*\.spec\.ts$/,
+            ...(isBuzz ? { testMatch: BUZZ_SPECS } : {}),
             use: {
                 ...hostChromium,
                 viewport: { width: 1279, height: 720 },
@@ -87,7 +109,8 @@ export default defineConfig({
          */
         {
             name: 'desktop',
-            testMatch: /desktop-.*\.spec\.ts$/,
+            // Im Buzz-Modus hat das Desktop-Projekt nichts zu tun: es fährt zooid-Specs.
+            testMatch: isBuzz ? /$^/ : /desktop-.*\.spec\.ts$/,
             use: {
                 ...hostChromium,
                 viewport: { width: 1440, height: 900 },
