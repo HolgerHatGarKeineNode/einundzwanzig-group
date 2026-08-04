@@ -37,6 +37,26 @@ it('ignores malformed pubkeys (no fetch, no crash)', function () {
     expect((new ProfileCache)->get(['nothex', 'ABC', str_repeat('z', 64)]))->toBe([]);
 });
 
+it('rejects a non-canonical uppercase pubkey (NIP-01 requires lowercase hex)', function () {
+    // Eigener Block statt Erweiterung der malformed-Liste oben: die Absicht ist eine
+    // andere ("kanonische Kleinschreibung erzwungen" statt "Muell wird ignoriert") und
+    // war bislang ungetestet — die vorhandenen Negativfaelle scheitern alle aus einem
+    // ANDEREN Grund (zu kurz / kein Hex-Zeichen), keiner davon ist 64-stellig UND nur
+    // groszgeschrieben. Ohne diese Bedingung im Regex entstuenden fuer denselben
+    // Schluessel zwei Cache-Eintraege (Grosz-/Kleinschreibung) und Relay-Anfragen fuer
+    // nicht-kanonische Keys.
+    //
+    // Ein Event unter dem GROSZGESCHRIEBENEN Schluessel vorzucachen ist Absicht, nicht
+    // Zufall: nur so unterscheidet die Assertion "Filter laesst durch" von "Filter
+    // blockiert" — ohne Vorbelegung waere das Ergebnis in BEIDEN Faellen [], weil der
+    // Fetch-Pfad fuer einen unbekannten Pubkey ohnehin nichts liefert (kein Relay kennt
+    // ihn) und die Assertion nie sensitiv fuer die Mutation waere.
+    $upper = str_repeat('A', 64);
+    Cache::put(ProfileCache::cacheKey($upper), fakeProfileEvent($upper), 60);
+
+    expect((new ProfileCache)->get([$upper]))->toBe([]);
+});
+
 it('endpoint returns cached events as json', function () {
     $pk = str_repeat('3', 64);
     Cache::put(ProfileCache::cacheKey($pk), fakeProfileEvent($pk), 60);

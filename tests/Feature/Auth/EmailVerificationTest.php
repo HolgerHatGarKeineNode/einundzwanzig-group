@@ -36,7 +36,7 @@ test('email can be verified', function () {
 
     Event::assertDispatched(Verified::class);
 
-    $this->assertTrue($user->fresh()->hasVerifiedEmail());
+    expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
     $response->assertRedirect('/?verified=1');
 });
 
@@ -51,7 +51,7 @@ test('email is not verified with invalid hash', function () {
 
     $this->actingAs($user)->get($verificationUrl);
 
-    $this->assertFalse($user->fresh()->hasVerifiedEmail());
+    expect($user->fresh()->hasVerifiedEmail())->toBeFalse();
 });
 
 test('already verified user visiting verification link is redirected without firing event again', function () {
@@ -70,6 +70,6 @@ test('already verified user visiting verification link is redirected without fir
     $this->actingAs($user)->get($verificationUrl)
         ->assertRedirect('/?verified=1');
 
-    $this->assertTrue($user->fresh()->hasVerifiedEmail());
+    expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
     Event::assertNotDispatched(Verified::class);
 });
