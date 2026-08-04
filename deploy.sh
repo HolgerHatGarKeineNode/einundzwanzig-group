@@ -15,7 +15,26 @@ set -euo pipefail
 REMOTE="21-dedicated-prod-web-zooid"
 APP_DIR="webclient"
 
-echo "▸ 1/3  Production-Build (lokal)"
+# Test-Gate VOR dem Deploy: rsync (Schritt 2) überträgt den Arbeitsbaum, nicht
+# origin/master und nicht HEAD — eine GitHub-CI würde also etwas anderes prüfen,
+# als hier tatsächlich auf Prod landet. Deshalb steht das Gate hier statt in CI.
+# Alle drei Flags sind Pflicht, keines darf gestrichen werden:
+#   --no-tia                    einzige UNBEDINGTE Sperre gegen TIA (tests/Pest.
+#                                php: pest()->tia()->always()->locally()). `--ci`
+#                                allein reicht NICHT — steht `PEST_TIA=1` in der
+#                                Umgebung, aktiviert das TIA an `--ci` vorbei
+#                                (Tia.php:339 prüft `$cliEnabled` unabhängig vom
+#                                Environment-Zweig) und ein Replay-Treffer würde
+#                                als „No affected tests found." exit 0 melden —
+#                                ein grünes Gate, das nichts geprüft hat.
+#   --fail-on-empty-test-suite   ohne dieses Flag ist eine leer eingesammelte
+#                                Suite (z. B. eine Testdatei, die versehentlich
+#                                nicht mehr auf `Test.php` endet) ebenfalls exit 0.
+# `set -euo pipefail` (oben) bricht den Deploy bei jedem Exit-Code ≠ 0 ab.
+echo "▸ 1/5  Test-Gate (php artisan test --ci --no-tia --fail-on-empty-test-suite)"
+php artisan test --ci --no-tia --fail-on-empty-test-suite
+
+echo "▸ 2/5  Production-Build (lokal)"
 npm run build
 
 # Assets vorkomprimieren: die hash-benannten Bundles sind unveränderlich, also
@@ -32,7 +51,7 @@ if command -v brotli >/dev/null 2>&1; then
     for f in $GZ_ASSETS; do brotli -q 11 -k -f "$f"; done
 fi
 
-echo "▸ 2/3  rsync → ${REMOTE}:~/${APP_DIR}"
+echo "▸ 3/5  rsync → ${REMOTE}:~/${APP_DIR}"
 # --delete räumt entfernte Dateien auf; excluded Pfade (.env, DB, Logs) bleiben
 # am Ziel erhalten (kein --delete-excluded). vendor/ baut Composer auf dem Server.
 rsync -az --delete \
@@ -58,14 +77,14 @@ rsync -az --delete \
     --exclude='.claude/' \
     ./ "${REMOTE}:${APP_DIR}/"
 
-echo "▸ 3/4  Remote: Composer + Migrationen + Cache"
+echo "▸ 4/5  Remote: Composer + Migrationen + Cache"
 ssh "$REMOTE" "cd ${APP_DIR} && \
     composer install --no-dev --optimize-autoloader --no-interaction && \
     php artisan migrate --force && \
     php artisan optimize && \
     php artisan storage:link 2>/dev/null || true"
 
-echo "▸ 4/4  FPM-Opcache leeren (Forge-API php-reload)"
+echo "▸ 5/5  FPM-Opcache leeren (Forge-API php-reload)"
 # Prod-FPM läuft mit opcache.validate_timestamps=0 → neue Blades/Klassen greifen
 # NICHT ohne Reload. Der Site-User hat kein sudo; Forge reloadet FPM als root.
 # (Graceful — betrifft nur PHP-Pools, nicht den zooid-Go-Prozess.)
