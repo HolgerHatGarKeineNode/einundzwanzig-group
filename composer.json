@@ -101,7 +101,7 @@
         ]
     },
     "scripts-descriptions": {
-        "test": "Vollstaendig: config:clear, Pint, PHPStan, dann alle Tests. ACHTUNG: bricht derzeit an types:check ab — PHPStan meldet 5 bewusst offene Fehler in app/ (4x env() ausserhalb config/, 1x Vite::useHotFile()). Solange die bestehen, erreicht dieses Script die Tests nie. Fix waere, die env()-Werte nach config/ zu ziehen. Bis dahin: 'php artisan test --ci' direkt.",
+        "test": "Vollstaendig: config:clear, Pint, PHPStan, dann alle Tests.",
         "test:tia": "Nur die von Aenderungen betroffenen Tests (Pest TIA), mit PCOV pro Lauf. Schneller Alltagsbefehl.",
         "types:check": "PHPStan level 7 (larastan + Pest-Plugin), analysiert auch tests/."
     },

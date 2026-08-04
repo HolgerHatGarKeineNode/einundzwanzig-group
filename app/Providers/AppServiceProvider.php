@@ -30,7 +30,7 @@ class AppServiceProvider extends ServiceProvider
         // einen nicht existierenden Pfad → immer Build-Assets, unabhängig von der
         // globalen `public/hot`, die ein parallel laufendes `composer run dev`
         // schreibt. So können HMR-Dev (8000) und E2E (8137) gleichzeitig laufen.
-        if ($hotFile = env('VITE_HOT_FILE')) {
+        if ($hotFile = config('vite.hot_file')) {
             Vite::useHotFile($hotFile);
         }
     }

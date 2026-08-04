@@ -35,4 +35,16 @@ return [
         ],
     ],
 
+    /*
+     * Autobot-Zugangsdaten fürs `bot:announce`-Command (rein lokal, siehe
+     * App\Console\Commands\BotAnnounce). `nsec`/`relay` sind Pflicht-Strings
+     * (leerer String = "fehlt", das Command prüft das selbst); `nak_bin` ist
+     * ein optionaler Pfad-Override zum `nak`-Binary.
+     */
+    'nostr_bot' => [
+        'nsec' => (string) env('NOSTR_BOT_NSEC', ''),
+        'relay' => (string) env('NOSTR_BOT_RELAY', ''),
+        'nak_bin' => is_string($nakBin = env('NAK_BIN')) ? $nakBin : null,
+    ],
+
 ];

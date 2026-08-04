@@ -26,8 +26,7 @@ function assertedPendingCommand(mixed $command): PendingCommand
 }
 
 test('bot:announce --dry baut den Aufruf, sendet aber nichts', function () {
-    putenv('NOSTR_BOT_NSEC=nsec1dummykeyfortestonly');
-    $_ENV['NOSTR_BOT_NSEC'] = 'nsec1dummykeyfortestonly';
+    config(['services.nostr_bot.nsec' => 'nsec1dummykeyfortestonly']);
 
     assertedPendingCommand($this->artisan('bot:announce', [
         'room' => 'welcome',
@@ -40,12 +39,20 @@ test('bot:announce --dry baut den Aufruf, sendet aber nichts', function () {
 });
 
 test('bot:announce ohne NOSTR_BOT_NSEC schlägt sauber fehl', function () {
-    putenv('NOSTR_BOT_NSEC');
-    unset($_ENV['NOSTR_BOT_NSEC'], $_SERVER['NOSTR_BOT_NSEC']);
+    // Explizit leer setzen statt nur "nicht setzen": die lokale .env trägt
+    // i.d.R. einen echten NOSTR_BOT_NSEC — ohne diese Zeile würde der Test
+    // den Fehlerpfad gar nicht treffen und nur zufällig grün sein.
+    config(['services.nostr_bot.nsec' => '']);
 
+    // Konkrete Fehlermeldung mitprüfen, nicht nur den Exit-Code: der nachgelagerte
+    // `nak`-Aufruf würde bei einem unerreichbaren Relay ebenfalls mit 1 abbrechen —
+    // ohne die Meldung wäre der Guard selbst gar nicht verifiziert (Mutationsprobe
+    // 2026-08-05 belegt das: Guard deaktiviert, Test blieb trotzdem grün).
     assertedPendingCommand($this->artisan('bot:announce', [
         'room' => 'welcome',
         'message' => 'x',
         '--relay' => 'ws://localhost:3334/',
-    ]))->assertExitCode(1);
+    ]))
+        ->expectsOutputToContain('NOSTR_BOT_NSEC fehlt in der .env — der Bot hat keinen Schlüssel.')
+        ->assertExitCode(1);
 });

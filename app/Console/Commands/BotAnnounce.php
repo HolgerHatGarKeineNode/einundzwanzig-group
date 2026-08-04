@@ -19,14 +19,14 @@ class BotAnnounce extends Command
 {
     public function handle(): int
     {
-        $nsec = (string) env('NOSTR_BOT_NSEC', '');
+        $nsec = (string) config('services.nostr_bot.nsec');
         if ($nsec === '') {
             $this->error('NOSTR_BOT_NSEC fehlt in der .env — der Bot hat keinen Schlüssel.');
 
             return self::FAILURE;
         }
 
-        $relay = (string) ($this->option('relay') ?: env('NOSTR_BOT_RELAY', ''));
+        $relay = (string) ($this->option('relay') ?: config('services.nostr_bot.relay'));
         if ($relay === '') {
             $this->error('Kein Relay: --relay setzen oder NOSTR_BOT_RELAY in der .env.');
 
@@ -78,8 +78,8 @@ class BotAnnounce extends Command
     /** nak-Binary finden: NAK_BIN, dann PATH, dann ~/go/bin/nak. */
     private function resolveNak(): string
     {
-        if ($bin = env('NAK_BIN')) {
-            return (string) $bin;
+        if ($bin = config('services.nostr_bot.nak_bin')) {
+            return $bin;
         }
         $home = (string) (getenv('HOME') ?: '');
         if ($home !== '' && is_executable("{$home}/go/bin/nak")) {
