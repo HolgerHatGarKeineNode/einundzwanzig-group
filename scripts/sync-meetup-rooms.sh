@@ -60,7 +60,7 @@ case "$RELAY_MODE" in
 esac
 
 # Der Namespace ist die gemeinsame Wahrheit von diesem Skript UND dem Vereins-Portal
-# (einundzwanzig-nostr, ProjectProposal::nostrGroupId). Weichen die beiden ab, zeigen
+# (einundzwanzig-verein, ProjectProposal::nostrGroupId). Weichen die beiden ab, zeigen
 # Portal und Client auf verschiedene Raeume — und der Fehler ist still, weil beide
 # Seiten fuer sich funktionieren. Deshalb hier hart abbrechen statt auf einen Default
 # auszuweichen.
