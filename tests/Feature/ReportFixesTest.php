@@ -11,7 +11,11 @@ declare(strict_types=1);
 // Locale-umschaltende Tests danach zurücksetzen (Web-Host ist deutsch).
 afterEach(fn () => app()->setLocale('de'));
 
-/** Session eines eingeloggten Nostr-Nutzers (nostr.auth-Gate der Package-Routen). */
+/**
+ * Session eines eingeloggten Nostr-Nutzers (nostr.auth-Gate der Package-Routen).
+ *
+ * @return array{nostr_pubkey: string}
+ */
 function authedSession(): array
 {
     return ['nostr_pubkey' => str_repeat('a', 64)];

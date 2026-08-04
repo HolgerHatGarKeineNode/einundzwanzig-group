@@ -11,25 +11,40 @@ use swentel\nostr\Sign\Sign;
  * Testen der server-seitigen Verifikation. `$createdAtOffset` datiert das Event
  * zurück (Sekunden), um das EVENT_MAX_AGE-Fenster zu prüfen (langsames Amber).
  *
+ * Baut die Rückgabe bewusst über die getypten Getter statt über `Event::toArray()`
+ * (dessen Signatur nur `array` ohne Shape deklariert). `tags` kommt aus derselben
+ * Variable, die auch an `setTags()` ging — `Event::getTags()` gibt sie unverändert
+ * zurück, PHPStan kennt die Shape damit ohne Umweg über die vendor-Getter-Signatur.
+ *
  * @return array{id: string, pubkey: string, created_at: int, kind: int, tags: array<int, array<int, string>>, content: string, sig: string}
  */
 function signHttpAuth(string $url, string $method, string $challenge, int $createdAtOffset = 0): array
 {
     $key = (new Key)->generatePrivateKey();
 
-    $event = new Event;
-    $event->setKind(27235);
-    $event->setContent('');
-    $event->setCreatedAt(now()->timestamp - $createdAtOffset);
-    $event->setTags([
+    $tags = [
         ['u', $url],
         ['method', $method],
         ['challenge', $challenge],
-    ]);
+    ];
+
+    $event = new Event;
+    $event->setKind(27235);
+    $event->setContent('');
+    $event->setCreatedAt(now()->getTimestamp() - $createdAtOffset);
+    $event->setTags($tags);
 
     (new Sign)->signEvent($event, $key);
 
-    return $event->toArray();
+    return [
+        'id' => $event->getId(),
+        'pubkey' => $event->getPublicKey(),
+        'created_at' => $event->getCreatedAt(),
+        'kind' => $event->getKind(),
+        'tags' => $tags,
+        'content' => $event->getContent(),
+        'sig' => $event->getSignature(),
+    ];
 }
 
 /** Nonce so ablegen, wie es der challenge-Endpoint tut (Cache, gekeyt auf den Wert). */

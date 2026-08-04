@@ -2,33 +2,41 @@
 
 declare(strict_types=1);
 
+use Tests\TestCase;
+
 /**
  * P7 (UX-Politur/AAA): die Blade-tragenden Marker der vier DoD-Kriterien —
  * Reduced-Motion, keine Layout-Shifts (Skeleton deckt ChatStatesTest), Tap ≥44px,
  * Kontrast. Reines Motion-/Contrast-Verhalten (CSS) deckt der Build; hier wird
  * geprüft, dass die Guards/Utilities im gerenderten Markup ankommen.
+ *
+ * Nimmt `$this` explizit entgegen statt über `test()` zu gehen: `test()` liefert
+ * ohne Argument `HigherOrderTapProxy|TestCall` zurück — beide kennen `withSession()`
+ * nur dynamisch (per `__call`), PHPStan kann das nicht auflösen. `$this` ist
+ * innerhalb der Test-Closures dank Pests `TestClosureThisTypeExtension` sauber als
+ * `TestCase` getypt.
  */
-function authed()
+function authed(TestCase $test): TestCase
 {
-    return test()->withSession(['nostr_pubkey' => str_repeat('a', 64)]);
+    return $test->withSession(['nostr_pubkey' => str_repeat('a', 64)]);
 }
 
 test('Login-Sheet: Slide/Scale sind reduced-motion-gegated (Fade bleibt)', function () {
     // Global im Layout gemountet → auf jeder Chrome-Seite im DOM.
-    $res = authed()->get(route('group.spaces'))->assertOk();
+    $res = authed($this)->get(route('group.spaces'))->assertOk();
 
     $res->assertSee('motion-reduce:!translate-y-0', false);
     $res->assertSee('motion-reduce:!scale-100', false);
 });
 
 test('Raum: Poll-Balken-Breite ist reduced-motion-gegated (Zwilling zu :235)', function () {
-    $res = authed()->get(route('group.room', ['h' => 'welcome']))->assertOk();
+    $res = authed($this)->get(route('group.room', ['h' => 'welcome']))->assertOk();
 
     $res->assertSee('transition-[width] duration-300 motion-reduce:transition-none', false);
 });
 
 test('Wallet-Hero: Count-Up + grüner Farb-Flash bei Zuwachs', function () {
-    $res = authed()->get(route('group.wallet'))->assertOk();
+    $res = authed($this)->get(route('group.wallet'))->assertOk();
 
     // $watch statt x-effect (keine Selbst-Retrigger-Schleife) + rAF-Tween-Signatur.
     $res->assertSee("\$watch('balanceSats'", false);
@@ -38,7 +46,7 @@ test('Wallet-Hero: Count-Up + grüner Farb-Flash bei Zuwachs', function () {
 });
 
 test('Kontrast: Reconnect-Banner trägt dunklen Text auf Orange (kein Weiß-auf-Orange)', function () {
-    $res = authed()->get(route('group.spaces'))->assertOk();
+    $res = authed($this)->get(route('group.spaces'))->assertOk();
 
     $res->assertSee('text-brand-950', false);
     $res->assertSee('bg-brand-950 px-2 py-0.5 font-semibold text-brand-50', false);
@@ -59,8 +67,8 @@ test('Kontrast: Landing-Meta über text-muted', function () {
 });
 
 test('Tap-Targets: primäre Buttons (Wallet/Directory/Chat-Composer) tragen icon-btn-touch', function () {
-    authed()->get(route('group.wallet'))->assertOk()->assertSee('icon-btn-touch', false);
-    authed()->get(route('group.directory'))->assertOk()->assertSee('icon-btn-touch', false);
+    authed($this)->get(route('group.wallet'))->assertOk()->assertSee('icon-btn-touch', false);
+    authed($this)->get(route('group.directory'))->assertOk()->assertSee('icon-btn-touch', false);
     // Chat-Kernpfad: Senden/Anhängen/Beitreten (Review-Fund plan/medium).
-    authed()->get(route('group.room', ['h' => 'welcome']))->assertOk()->assertSee('icon-btn-touch', false);
+    authed($this)->get(route('group.room', ['h' => 'welcome']))->assertOk()->assertSee('icon-btn-touch', false);
 });

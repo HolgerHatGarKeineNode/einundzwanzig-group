@@ -73,7 +73,13 @@ it('keeps a gif as gif (animation), not webp', function () {
     $response = $this->get('/img/msg?src='.urlencode($src));
 
     $response->assertOk()->assertHeader('Content-Type', 'image/gif');
-    expect(str_starts_with($response->getContent(), 'GIF8'))->toBeTrue();
+    // getContent() ist laut Symfony-Signatur string|false; false träte nur bei
+    // einer ungepufferten StreamedResponse auf, die es hier nicht gibt.
+    $content = $response->getContent();
+    if (! is_string($content)) {
+        throw new RuntimeException('getContent() returned false unexpectedly.');
+    }
+    expect(str_starts_with($content, 'GIF8'))->toBeTrue();
     Storage::disk('local')->assertExists('img-cache/msg/'.sha1($src).'.gif');
 });
 

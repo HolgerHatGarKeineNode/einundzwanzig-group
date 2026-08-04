@@ -35,6 +35,7 @@
         "nunomaduro/collision": "^8.9.3",
         "pestphp/pest": "^5.0",
         "pestphp/pest-plugin-browser": "^5.0",
+        "pestphp/pest-plugin-phpstan": "^5.0",
         "phpunit/phpunit": "^13.0"
     },
     "autoload": {
@@ -68,18 +69,17 @@
         "lint:check": [
             "pint --parallel --test"
         ],
-        "ci:check": [
-            "Composer\\Config::disableProcessTimeout",
-            "@test"
-        ],
         "types:check": [
-            "phpstan analyse"
+            "phpstan analyse --memory-limit=1G"
+        ],
+        "test:tia": [
+            "@php -d pcov.enabled=1 -d pcov.directory=$(pwd) vendor/bin/pest --tia"
         ],
         "test": [
             "@php artisan config:clear --ansi",
             "@lint:check",
             "@types:check",
-            "@php artisan test"
+            "@php artisan test --ci"
         ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",

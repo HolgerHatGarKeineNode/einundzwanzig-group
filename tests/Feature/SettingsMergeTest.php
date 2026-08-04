@@ -2,23 +2,49 @@
 
 declare(strict_types=1);
 
+use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpFoundation\Response;
+use Tests\TestCase;
+
 /**
  * P5 (App-Shell-Verschmelzung §6): der verschmolzene Einstellungen-Screen
  * (group.settings) bündelt Konto/Identität · Space & Räume · Wallet · Darstellung ·
  * Abmelden an EINEM Ort. Web-Umfang: kein Portal-Konto/Meine-Inhalte/Sprache.
  */
-function settings()
+
+/**
+ * `config()` ist ohne larastans `configDirectories`-Opt-in generisch `mixed`
+ * getypt — `collect()` kann daraus keine Template-Typen auflösen. Die Shape
+ * hier spiegelt `config/group.php` 1:1 (siehe dort).
+ *
+ * @return list<array{key: string, route: string, icon: string, label: string, gate: string}>
+ */
+function navConfig(): array
 {
-    return test()->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
+    return config('group.nav');
+}
+
+/**
+ * Nimmt `$this` explizit entgegen statt über `test()` zu gehen: `test()` liefert
+ * ohne Argument `HigherOrderTapProxy|TestCall` zurück — beide kennen `withSession()`
+ * nur dynamisch (per `__call`), PHPStan kann das nicht auflösen. `$this` ist
+ * innerhalb der Test-Closures dank Pests `TestClosureThisTypeExtension` sauber als
+ * `TestCase` getypt.
+ *
+ * @return TestResponse<Response>
+ */
+function settings(TestCase $test): TestResponse
+{
+    return $test->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
 }
 
 test('Web-Nav: der Einstellungen-Tab zeigt auf den verschmolzenen group.settings-Screen', function () {
-    expect(collect(config('group.nav'))->firstWhere('key', 'settings')['route'])
+    expect(collect(navConfig())->firstWhere('key', 'settings')['route'])
         ->toBe('group.settings');
 });
 
 test('Konto & Identität: npub kopierbar + Signer-Typ + Neu verbinden', function () {
-    $res = settings();
+    $res = settings($this);
 
     $res->assertSee('Konto &amp; Identität', false);
     $res->assertSee('x-data="nostrAuth"', false);
@@ -30,7 +56,7 @@ test('Konto & Identität: npub kopierbar + Signer-Typ + Neu verbinden', function
 });
 
 test('Space & Räume: der einzige Space-Wechsel-Ort (Single-Space) mit ready-Guard', function () {
-    $res = settings();
+    $res = settings($this);
 
     $res->assertSee('Space &amp; Räume', false);
     $res->assertSee('x-data="nostrSpaceSettings"', false);
@@ -43,20 +69,20 @@ test('Wallet: KEIN Hub-Eintrag auf Web (eigener Peer-Tab); Sektion nur wenn Regi
     // Sektions-spezifischer Marker (NICHT die Wallet-Route — die steht ohnehin im
     // Bottom-Nav-Peer-Tab; genau das ist der Punkt: doppelter Einstieg vermieden).
     // Web-Registry ohne 'wallet' → keine Wallet-Sektion im Hub.
-    settings()->assertDontSee('id="settings-wallet"', false);
+    settings($this)->assertDontSee('id="settings-wallet"', false);
 
     // Ein Host, der 'wallet' listet (z.B. Package-Default ohne Wallet-Tab) → Sektion da.
     config(['group.settings' => ['account', 'wallet']]);
-    settings()->assertSee('id="settings-wallet"', false);
+    settings($this)->assertSee('id="settings-wallet"', false);
 });
 
 test('Netzwerk & Relays: read-only, Sichtbarkeit über die Registry (nicht mehr show_relays)', function () {
     // Web-Registry ohne 'relays' → Sektion aus (Web-Umfang ohne Relay-Editor).
-    settings()->assertDontSee('Netzwerk &amp; Relays', false);
+    settings($this)->assertDontSee('Netzwerk &amp; Relays', false);
 
     // Host listet 'relays' (Mobile) → read-only Relay-Insel erscheint.
     config(['group.settings' => ['account', 'relays']]);
-    $res = settings();
+    $res = settings($this);
     $res->assertSee('Netzwerk &amp; Relays', false);
     $res->assertSee('x-data="nostrRelays"', false);
 });
@@ -64,15 +90,23 @@ test('Netzwerk & Relays: read-only, Sichtbarkeit über die Registry (nicht mehr 
 test('Registry steuert Präsenz UND Reihenfolge der Sektionen', function () {
     // Umgedrehte Registry → Sektions-Markup erscheint in genau dieser Reihenfolge.
     config(['group.settings' => ['session', 'account']]);
-    $h = settings()->getContent();
+    $h = settings($this)->getContent();
+    if (! is_string($h)) {
+        throw new RuntimeException('getContent() returned false unexpectedly.');
+    }
 
-    expect(strpos($h, 'settings-logout'))->toBeLessThan(strpos($h, 'settings-account'));
+    $posLogout = strpos($h, 'settings-logout');
+    $posAccount = strpos($h, 'settings-account');
+    if ($posLogout === false || $posAccount === false) {
+        throw new RuntimeException('Marke "settings-logout" oder "settings-account" fehlt im Markup.');
+    }
+    expect($posLogout)->toBeLessThan($posAccount);
     // Nicht gelistete Sektion (space) fehlt komplett.
     expect($h)->not->toContain('settings-space');
 });
 
 test('Darstellung: EIN Theme-Regler über $flux.appearance, kein hartes class="dark"', function () {
-    $res = settings();
+    $res = settings($this);
 
     $res->assertSee('x-model="$flux.appearance"', false);
     $res->assertSee('value="light"', false);
@@ -84,7 +118,7 @@ test('Darstellung: EIN Theme-Regler über $flux.appearance, kein hartes class="d
 });
 
 test('A11y: echte Heading-Hierarchie (h1-Titel + h2-Sektionen) und angesagter aktiver Space', function () {
-    $res = settings();
+    $res = settings($this);
 
     // app-header rendert den Titel als h1 (nicht als div), Sektionen als h2.
     $res->assertSee('<h1', false);
@@ -98,7 +132,7 @@ test('A11y: echte Heading-Hierarchie (h1-Titel + h2-Sektionen) und angesagter ak
 });
 
 test('Abmelden lebt an EINEM Ort ganz unten (nostrAuth-Teardown)', function () {
-    $res = settings();
+    $res = settings($this);
 
     $res->assertSee('doLogout()', false);
     $res->assertSee('Abmelden');
@@ -108,7 +142,16 @@ test('Abmelden lebt an EINEM Ort ganz unten (nostrAuth-Teardown)', function () {
     // drei) — nicht, dass die App insgesamt nur einen kennt. Seit der Desktop-Shell
     // trägt das Profil-Popover im Navigator ebenfalls einen; er steht in der
     // `desktop-rail`, also VOR dem `<main>`, und ist damit sauber abgrenzbar.
-    $main = mb_strstr($res->getContent(), '<main');
+    $content = $res->getContent();
+    if (! is_string($content)) {
+        throw new RuntimeException('getContent() returned false unexpectedly.');
+    }
+    $main = mb_strstr($content, '<main');
     expect($main)->not->toBeFalse('Marke <main> fehlt — die Zählung wäre sonst wieder dokumentweit');
+    // Reiner Typ-Guard für PHPStan: die Assertion oben hat den false-Fall bereits
+    // zur Laufzeit ausgeschlossen, `substr_count()` verlangt aber `string`.
+    if (! is_string($main)) {
+        throw new RuntimeException('unreachable — bereits oben durch die Expectation ausgeschlossen');
+    }
     expect(substr_count($main, 'doLogout()'))->toBe(1);
 });

@@ -37,6 +37,73 @@ pest()->extend(TestCase::class)
 
 /*
 |--------------------------------------------------------------------------
+| Test Impact Analysis (TIA) — nur betroffene Tests wirklich ausführen
+|--------------------------------------------------------------------------
+|
+| TIA zeichnet coverage-basiert auf, welche Datei welchen Test berührt, und
+| spielt bei unveränderten Abhängigkeiten das zwischengespeicherte Ergebnis
+| zurück statt den Test erneut laufen zu lassen. `always()` schaltet TIA
+| grundsätzlich zu; `locally()` erzwingt zusätzlich, dass reine `--ci`-Läufe
+| TIA ignorieren (kein Baseline-Sharing nötig). `baselined()` bleibt bewusst
+| weg — es gibt keine CI-Baseline (`.github/workflows/` existiert nicht),
+| das ist offene Frage einer späteren Phase. `filtered()` ist HIER unbedingt
+| gesetzt (nicht nur bei `--filtered` auf der CLI) — jeder TIA-Lauf sammelt
+| dadurch von vornherein nur die betroffenen Testdateien ein, statt alle zu
+| sammeln und den Rest laufen zu lassen, aber übersprungen zu melden. Ohne
+| jede Änderung heißt das: „INFO No affected tests found." und 0 Tests laufen
+| (verifiziert, exit 0 — kein Fehlerfall).
+|
+| Zusätzliche `watch()`-Muster nur für das, was `useDefaults()` NICHT bereits
+| abdeckt (siehe vendor/pestphp/pest/src/Plugins/Tia/WatchDefaults/{Php,
+| Laravel,Livewire}.php): `config/**` ist dort nur für Symfony-Apps hinterlegt
+| und schließt dort ohnehin `*.php` aus — unsere `config/group.php` fällt
+| komplett durch (verifiziert: eine echte Änderung an `config/group.php`
+| markiert genau die 25 Tests unter `tests/Feature` als betroffen, die beim
+| Aufzeichnen der Baseline liefen). `resources/views/**` ist dagegen bereits
+| durch die Laravel-Defaults auf das gesamte `tests`-Verzeichnis gemappt
+| (breiter als `tests/Browser` allein) — ein eigenes `watch()` dafür wäre
+| wirkungslose Doppelung und bleibt deshalb weg.
+|
+| ABSICHTLICH NICHT gewatcht: `packages/einundzwanzig-group/src` (rekursiv,
+| alle `*.php`-Dateien darin). Das Package ist eigenes Git-Repo und in
+| `.gitignore` ausgeschlossen
+| (`/packages/einundzwanzig-group`, s. dort). TIAs Änderungserkennung läuft
+| komplett über `git status`/`git diff` des äußeren Repos — eine geänderte
+| Datei dort taucht in `git status --porcelain` nie auf (verifiziert via
+| `git check-ignore`), und würde daher JEDES `watch()`-Muster dafür wirkungslos
+| machen, unabhängig vom Glob. Änderungen am Package-Code bleiben TIA also
+| unsichtbar; wer dort etwas ändert, muss die betroffenen Feature-Tests von
+| Hand laufen lassen oder TIA für den Lauf mit `--no-tia` umgehen.
+|
+| FALLE — `always()->locally()` greift bei JEDEM lokalen Pest-Aufruf, nicht
+| nur bei explizitem `--tia`: auch ein nackter `php artisan test` oder
+| `vendor/bin/pest` ohne jedes Flag läuft lokal automatisch im TIA-Modus
+| (verifiziert: `php artisan test --compact` meldete auf einem zum Graph
+| passenden Baum „No affected tests found." statt die Suite zu fahren — 0
+| Tests, exit 0, sieht wie ein bestandener Lauf aus). Der einzige Ausweg aus
+| `locally()` ist ein explizites `--ci` auf der Kommandozeile (Umgebung wird
+| dann `Environment::CI`, s. `Plugins/Tia.php::handleArguments()` — dort der
+| `$alwaysEnabled`-Ausdruck mit `Environment::name() === Environment::LOCAL`;
+| das gleichnamig aussehende `isEnabledForRun()` bedient die Coverage-
+| Restarter und ist NICHT die Stelle für diesen Split); `--no-tia`
+| schaltet TIA unabhängig davon komplett ab. Deshalb trägt `composer test`
+| das `--ci`-Flag explizit an `php artisan test` — die volle Suite soll
+| laufen, kein TIA. `composer ci:check` gab es einmal (delegierte an `test`),
+| wurde aber von nichts aufgerufen — kein `.github/workflows/`, keine andere
+| Stelle im Repo; ausschließlich lokale Läufe. Entfernt, kein CI-Ersatz nötig.
+| Wer absichtlich nur die betroffenen Tests will, nutzt `composer test:tia`.
+|
+*/
+pest()->tia()
+    ->always()
+    ->locally()
+    ->filtered()
+    ->watch([
+        'config/group.php' => 'tests/Feature',
+    ]);
+
+/*
+|--------------------------------------------------------------------------
 | Expectations
 |--------------------------------------------------------------------------
 |
@@ -61,9 +128,20 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * Liest die von playwright-core mitgelieferte Browser-Registry typisiert ein.
+ * `json_decode(..., true)` ist generisch `mixed` getypt — `collect()` kann daraus
+ * keine Template-Typen auflösen. Die Shape spiegelt nur die Felder, die
+ * `ensureHostChromium()` tatsächlich braucht (name, revision); die Datei trägt
+ * daneben noch installByDefault/browserVersion/title, die hier ungenutzt bleiben.
+ *
+ * @return list<array{name: string, revision: string}>
+ */
+function playwrightManifestBrowsers(): array
 {
-    // ..
+    $manifest = json_decode((string) file_get_contents(__DIR__.'/../node_modules/playwright-core/browsers.json'), true);
+
+    return $manifest['browsers'];
 }
 
 /**
@@ -90,8 +168,8 @@ function ensureHostChromium(): void
     $_SERVER['PLAYWRIGHT_BROWSERS_PATH'] = $browsersPath;
 
     // Chromium-Revisionen aus dem installierten playwright-core lesen (versionsfest).
-    $manifest = json_decode((string) file_get_contents(__DIR__.'/../node_modules/playwright-core/browsers.json'), true);
-    $revision = static fn (string $name): string => (string) collect($manifest['browsers'])
+    $manifestBrowsers = playwrightManifestBrowsers();
+    $revision = static fn (string $name): string => (string) collect($manifestBrowsers)
         ->firstWhere('name', $name)['revision'];
 
     // Von Playwright erwartete Browser (Linux-x64-Layout): Verzeichnis je Revision
