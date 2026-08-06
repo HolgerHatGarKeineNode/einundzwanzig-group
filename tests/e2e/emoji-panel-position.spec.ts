@@ -77,3 +77,60 @@ test('C1: das Emoji-Panel steht beim ersten Öffnen vollständig im Viewport', a
     ).toBeLessThanOrEqual(14)
     expect(gefiltert!.ueberlaufUnten, 'auch nach dem Filtern kein Überlauf').toBeLessThanOrEqual(0)
 })
+
+/**
+ * Regression: derselbe Fehler, zweiter Trigger — der Reaktions-Popover einer
+ * Nachrichtenzeile (`chat-row.blade.php`, Knopf „Reagieren"). Er hängt an
+ * DERSELBEN `reactionPopover`-Komponente (bridge.ts) wie der Composer-Emoji-Knopf
+ * oben — der Name ist trotz seiner Herkunft der generische Panel-Positionierer,
+ * siehe Kommentar dort. Gefunden vom `design-lead` nach einem ACCEPT (Teambesprechung
+ * 2026-08-06): **9 px Überlauf** unten beim ERSTEN Öffnen, gemessen an genau dieser
+ * Stelle — kleiner als beim Composer-Knopf (98 px), weil der Trigger einer
+ * Nachrichtenzeile näher am unteren Bildrand sitzt, aber dieselbe Ursache: die alte
+ * Rechnung las die Panelhöhe („Emojis laden…", 132 px) VOR dem vollen Grid (292 px).
+ *
+ * Bis zu diesem Test war dieser Pfad ungetestet — `emoji-panel-position.spec.ts` deckte
+ * nur den Composer-Picker ab, der Reaktions-Popover keinen. Ein behobener Bug ohne
+ * Test kommt zurück; dieser Test hält ihn fest.
+ *
+ * Kalibriert: mit der alten Rechnung (`top = trigger.top - 132 - gap`, ohne
+ * Unterkanten-Ankerung) meldet die erste Assertion in DIESEM Test `ueberlaufUnten: 27`
+ * und wird rot — abweichend von den am Bildschirm gemeldeten 9 px, weil Trigger-Position
+ * und Fensterhöhe hier anders liegen als in der Original-Meldung; dieselbe Ursache,
+ * derselbe Fehlerpfad.
+ */
+test('C2: der Reaktions-Popover einer Nachrichtenzeile steht beim ersten Öffnen vollständig im Viewport', async ({
+    page,
+}) => {
+    await useZooid(page)
+    await loginNsec(page, NSEC)
+    // Dedizierter „react"-Raum wie in room.spec.ts (C1): schreibende Tests bloaten
+    // nicht „welcome"; eigene frische Nachricht macht die Zeile eindeutig auffindbar.
+    await page.goto('/rooms/react')
+
+    const marker = `RXPOS-${Math.floor(Math.random() * 1e9)}`
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    await composer.fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    const row = page.locator('div.group', { hasText: marker })
+    await row.hover()
+    const trigger = row.getByRole('button', { name: 'Reagieren', exact: true })
+    await expect(trigger).toBeVisible({ timeout: 10_000 })
+
+    // ERSTES Öffnen dieser Sitzung — genau der Fall, den der `design-lead` fand.
+    await trigger.click()
+    await expect(page.getByLabel('Emoji suchen')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('tablist', { name: 'Emoji-Kategorien' })).toBeVisible({ timeout: 15_000 })
+
+    await expect
+        .poll(async () => (await panelGeometry(page))?.ueberlaufUnten, {
+            message: 'Reaktions-Popover darf unten nicht aus dem Viewport ragen',
+            timeout: 5_000,
+        })
+        .toBeLessThanOrEqual(0)
+    const geladen = await panelGeometry(page)
+    expect(geladen!.ueberlaufOben, 'Reaktions-Popover darf oben nicht aus dem Viewport ragen').toBeLessThanOrEqual(0)
+})

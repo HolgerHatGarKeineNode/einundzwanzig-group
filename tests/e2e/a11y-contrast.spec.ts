@@ -2,7 +2,7 @@ import { test, expect, type Page } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
-import { measure, type Measured, type Extra } from './support/contrast'
+import { measure, type Measured } from './support/contrast'
 
 /**
  * A11y-Anker: misst den TATSÄCHLICH gerenderten Kontrast aller Brand-Textfarben
@@ -350,6 +350,40 @@ async function measureRoomFormControls(page: Page): Promise<Measured[]> {
     return [...textarea, ...select]
 }
 
+/**
+ * Phase 6 — der Mitgliederfilter im Verzeichnis (`/directory`).
+ *
+ * Anlass (Teambesprechung 2026-08-06): bei der systemweiten Feldkante nannte der
+ * `design-lead` genau dieses Feld als DEUTLICHSTES Beispiel — es stand vorher OHNE
+ * jede Grenze über der Mitgliederliste. Die Kante ist seither systemweit über
+ * `--color-control-edge` gezogen (siehe `theme.css`), aber `/directory` stand in
+ * keiner Phase dieses Ankers. Ungemessen sieht aus wie grün, obwohl gerade dieses
+ * Feld der Ausgangsbefund war.
+ *
+ * Derselbe Selektor-Vertrag wie „Kante Textfeld (Anmeldung)": ein `flux:input`
+ * rendert `<input data-flux-control>`, die System-Regel greift also unverändert.
+ * Auf den PLATZHALTER geankert (nicht auf Reihenfolge/Rolle) — dasselbe Argument wie
+ * beim Composer-Feld: ein Selektor, der nur „irgendein Textfeld" trifft, könnte ein
+ * anderes, verstecktes Feld derselben Sorte fangen.
+ */
+async function measureDirectoryFilter(page: Page): Promise<Measured[]> {
+    await page.goto('/directory')
+    // Warten bis das Member-Grid tatsächlich steht (Fix A, siehe directory.spec.ts) —
+    // sonst existiert die Seite zwar, aber der Filter stünde über einem Skeleton statt
+    // über der Liste, die er auch am Bildschirm einrahmt.
+    await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
+    return (
+        await measure(page, [
+            {
+                selector: 'input[data-flux-control][placeholder="Mitglied suchen…"]:not([disabled])',
+                label: 'Kante Mitgliederfilter (Verzeichnis)',
+                kind: 'graphic',
+                prop: 'borderTopColor',
+            },
+        ])
+    ).filter((m) => m.label.startsWith('Kante '))
+}
+
 for (const theme of ['light', 'dark'] as const) {
     test(`A11y: gerenderter Kontrast der Brand-Farben erfüllt WCAG (${theme})`, async ({ page }) => {
         await useZooid(page)
@@ -392,7 +426,7 @@ for (const theme of ['light', 'dark'] as const) {
         // Emoji-Panel hängt am Composer und wird deshalb im selben Raum aufgeklappt.
         const spacesUndRaum = [...(await measureAllSurfaces(page)), ...(await measureRoomDivider(page))]
         const picker = await measureEmojiPicker(page)
-        const formulare = [...anmeldung, ...(await measureRoomFormControls(page))]
+        const formulare = [...anmeldung, ...(await measureRoomFormControls(page)), ...(await measureDirectoryFilter(page))]
         const measured = [...spacesUndRaum, ...picker.measured, ...formulare]
         console.log(`KONTRAST[${theme}] ` + JSON.stringify(measured, null, 1))
         console.log(`DECKKRAFT[${theme}] inaktiver Emoji-Kategorie-Tab: ${picker.tabDeckkraft}`)
@@ -451,6 +485,7 @@ for (const theme of ['light', 'dark'] as const) {
             'Kante Ankreuzfeld (Anmeldung)',
             'Kante Mehrzeiliges Feld (Composer)',
             'Kante Auswahlfeld (Umfrage)',
+            'Kante Mitgliederfilter (Verzeichnis)',
         ]) {
             expect(
                 measured.some((m) => m.label === sorte),
