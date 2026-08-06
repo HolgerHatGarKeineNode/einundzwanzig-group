@@ -154,9 +154,23 @@ type Measured = { label: string; kind: 'text' | 'icon' | 'graphic'; fg: string; 
  *
  * `pseudo` misst ein Pseudo-Element statt des Elements selbst (`::placeholder`).
  * Nötig, weil Platzhaltertext eine EIGENE Farbe trägt: im Emoji-Suchfeld stand sie
- * dark auf zinc-600 (1,84:1), während der Eingabetext daneben sauber war.
+ * dark auf zinc-600 (1,74:1), während der Eingabetext daneben sauber war.
+ *
+ * `prop` misst eine andere Farbeigenschaft als `color` — für KANTEN
+ * (`borderTopColor`). Die Grenze eines Bedienelements fällt unter 1.4.11 und ist
+ * damit ein eigener Prüfgegenstand: sie kann reißen, während Text und Fläche
+ * desselben Feldes sauber sind. Absichtlich `borderTopColor` und nicht
+ * `borderColor` — die Kurzform liefert vier Werte, sobald sich eine Seite
+ * unterscheidet, und daraus wäre keine Zahl mehr zu lesen (an der Flux-Textarea
+ * dieser App tritt genau das auf).
  */
-type Extra = { selector: string; label: string; kind: 'text' | 'icon' | 'graphic'; pseudo?: string }
+type Extra = {
+    selector: string
+    label: string
+    kind: 'text' | 'icon' | 'graphic'
+    pseudo?: string
+    prop?: 'borderTopColor'
+}
 
 /** Misst alle sichtbaren Brand-Farbträger im aktuellen Theme. */
 const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
@@ -167,6 +181,7 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 label: string
                 kind: 'text' | 'icon' | 'graphic'
                 pseudo?: string
+                prop?: 'borderTopColor'
             }[]
             const { parse, lum } = eval(colorSrc) as {
                 parse: (css: string) => { r: number; g: number; b: number; a: number }
@@ -306,7 +321,11 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 }
                 // `pseudo` (z.B. '::placeholder') hat eine eigene Farbe, aber denselben
                 // Untergrund wie sein Element — `effectiveBg` bleibt deshalb unverändert.
-                const fg = getComputedStyle(el, spec.pseudo ?? null).color
+                // Bei einer KANTE ist der so ermittelte Untergrund die Fläche IM Feld;
+                // das ist die strengere der beiden Nachbarfarben (außen liegt die
+                // hellere Karte), also die richtige Prüfung.
+                const stil = getComputedStyle(el, spec.pseudo ?? null)
+                const fg = spec.prop ? stil[spec.prop] : stil.color
                 const bg = effectiveBg(el)
                 const lf = lum(fg)
                 const lb = lum(bg)
@@ -443,12 +462,21 @@ async function measureEmojiPicker(page: Page): Promise<{ measured: Measured[]; t
     // die Phase den Ladezustand: kein Unterstrich, kein Tab — und meldet „nicht
     // gefunden" für etwas, das nur noch nicht da ist.
     await expect(page.getByRole('tab').first()).toBeVisible({ timeout: 20_000 })
+    // Fokus aus dem Suchfeld nehmen: das Panel fokussiert es beim Öffnen selbst, und
+    // `focus:border-brand-500` überschriebe die zu prüfende Kantenfarbe. Gemessen wird
+    // der Zustand, in dem das Feld die meiste Zeit steht.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
-    // Unterphase A — Ruhezustand: Eingabefarbe, Platzhalter, Aktiv-Unterstrich.
+    // Unterphase A — Ruhezustand: Eingabefarbe, Platzhalter, Kante, Aktiv-Unterstrich.
     const offen = (
         await measure(page, [
             { selector: SEARCH, label: 'Emoji-Suchfeld (Eingabe)', kind: 'text' },
             { selector: SEARCH, label: 'Emoji-Suchfeld (Platzhalter)', kind: 'text', pseudo: '::placeholder' },
+            // Die Kante trägt die Erkennbarkeit des Feldes (1.4.11, ≥ 3:1). Sie wird im
+            // RUHEZUSTAND gemessen: `focus:border-brand-500` würde sonst die geprüfte
+            // Farbe überschreiben, und der Autofokus des Panels legt den Fokus genau
+            // dorthin. Deshalb steht vor dieser Messung ein `blur()`.
+            { selector: SEARCH, label: 'Emoji-Suchfeld (Kante)', kind: 'graphic', prop: 'borderTopColor' },
         ])
     ).filter((m) => m.label.startsWith('Emoji-'))
 
@@ -553,6 +581,7 @@ for (const theme of ['light', 'dark'] as const) {
         for (const stelle of [
             'Emoji-Suchfeld (Eingabe)',
             'Emoji-Suchfeld (Platzhalter)',
+            'Emoji-Suchfeld (Kante)',
             'Emoji-Kategorie aktiv (Unterstrich)',
             'Emoji-Leerzustand',
         ]) {
