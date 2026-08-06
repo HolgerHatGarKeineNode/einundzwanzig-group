@@ -214,6 +214,26 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`
             }
             /**
+             * Vordergrund über seinen eigenen Untergrund komponieren.
+             *
+             * `getComputedStyle` liefert Farben MIT Alpha, und ein Verhältnis aus dem
+             * rohen Wert ist frei erfunden: Flux zeichnet seine Kanten im dunklen Theme
+             * als `white/10`. Roh gelesen ist das reines Weiß und ergibt 13,58:1 —
+             * tatsächlich komponiert es auf der Feldfläche zu exakt deren Farbe, also
+             * 1,00:1. Ohne diese Zeile war der Kanten-Eintrag dieses Ankers im Dunklen
+             * NICHT kalibriert: die Gegenprobe (Regel abgeschaltet) blieb grün, obwohl
+             * die Kante verschwunden war. Gefunden genau dadurch, dass die Gegenprobe
+             * gefahren wurde.
+             */
+            const compose = (fgCss: string, bgCss: string): string => {
+                const f = parse(fgCss)
+                if (f.a === 1) {
+                    return fgCss
+                }
+                const b = parse(bgCss)
+                return `rgb(${Math.round(f.a * f.r + (1 - f.a) * b.r)}, ${Math.round(f.a * f.g + (1 - f.a) * b.g)}, ${Math.round(f.a * f.b + (1 - f.a) * b.b)})`
+            }
+            /**
              * Wirksame Deckkraft: Produkt aller `opacity` von hier bis zur Wurzel.
              * `opacity` steht NICHT in `color` — ein Element mit `opacity-70` meldet
              * seine volle Textfarbe, und ein daraus gerechnetes Verhältnis wäre zu
@@ -236,13 +256,14 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 if (!(el as HTMLElement).offsetParent) continue
                 const fg = getComputedStyle(el).color
                 const bg = effectiveBg(el)
-                const lf = lum(fg)
+                const fgc = compose(fg, bg)
+                const lf = lum(fgc)
                 const lb = lum(bg)
                 const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
                 out.push({
                     label: (el.textContent ?? '').trim().slice(0, 24),
                     kind: /text-brand-700/.test(el.className) ? 'icon' : 'text',
-                    fg,
+                    fg: fgc,
                     bg,
                     ratio: Math.round(ratio * 100) / 100,
                     opacity: effectiveOpacity(el),
@@ -258,7 +279,8 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 if (!(el as HTMLElement).offsetParent) continue
                 const fg = getComputedStyle(el).backgroundColor
                 const bg = effectiveBg(el.parentElement)
-                const lf = lum(fg)
+                const fgc = compose(fg, bg)
+                const lf = lum(fgc)
                 const lb = lum(bg)
                 const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
                 out.push({
@@ -271,7 +293,7 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                           ? 'Emoji-Kategorie aktiv (Unterstrich)'
                           : 'Nav-Indikator',
                     kind: 'graphic',
-                    fg,
+                    fg: fgc,
                     bg,
                     ratio: Math.round(ratio * 100) / 100,
                     opacity: effectiveOpacity(el),
@@ -290,7 +312,8 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 if (!(el as HTMLElement).offsetParent) continue
                 const fg = getComputedStyle(el).color
                 const bg = effectiveBg(el)
-                const lf = lum(fg)
+                const fgc = compose(fg, bg)
+                const lf = lum(fgc)
                 const lb = lum(bg)
                 const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
                 out.push({
@@ -303,7 +326,7 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                           ? 'Zähler-Pille Tab'
                           : 'Zähler-Pille Zeile',
                     kind: 'text',
-                    fg,
+                    fg: fgc,
                     bg,
                     ratio: Math.round(ratio * 100) / 100,
                     opacity: effectiveOpacity(el),
@@ -327,13 +350,14 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 const stil = getComputedStyle(el, spec.pseudo ?? null)
                 const fg = spec.prop ? stil[spec.prop] : stil.color
                 const bg = effectiveBg(el)
-                const lf = lum(fg)
+                const fgc = compose(fg, bg)
+                const lf = lum(fgc)
                 const lb = lum(bg)
                 const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
                 out.push({
                     label: spec.label,
                     kind: spec.kind,
-                    fg,
+                    fg: fgc,
                     bg,
                     ratio: Math.round(ratio * 100) / 100,
                     opacity: effectiveOpacity(el),
@@ -417,6 +441,46 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
  * `font-semibold` trennt ihn vom Tages-Divider derselben Zeile (`text-muted`).
  */
 const DIVIDER_SELECTOR = 'span.font-mono.font-semibold.tracking-wide'
+
+/**
+ * Phase 0 — die KANTEN der Bedienelemente im Anmeldeformular (vor dem Login).
+ *
+ * Die Grenze eines Bedienelements fällt unter 1.4.11 (≥ 3:1) und ist ein eigener
+ * Prüfgegenstand: sie kann reißen, während Beschriftung und Fläche desselben Feldes
+ * sauber sind. Gemessen wird je SORTE eine Stelle, weil die Sorten verschiedene
+ * DOM-Verträge haben — Feld und Auswahl tragen `data-flux-control`, das Ankreuzfeld
+ * dagegen ein eigenes Element mit eigenem Indikator. Fällt der Override an einer
+ * Sorte aus, sagt ausschließlich diese eine Zeile es; eine Sammelmessung („irgendeine
+ * Kante war in Ordnung") wäre wertlos, das steht für die Zähler-Pillen weiter oben
+ * schon so.
+ *
+ * `:not([disabled])` ist keine Bequemlichkeit: 1.4.11 nimmt INAKTIVE Bedienelemente
+ * ausdrücklich aus, und Flux zeichnet sie bewusst schwächer. Das nsec-Feld dieser
+ * Seite ist bis zum Häkchen gesperrt und läge dunkel bei 1,16:1 — normkonform, aber
+ * es würde diese Messung ohne den Zusatz zufällig treffen und wäre dann ein
+ * Falsch-Positiv, das man irgendwann wegklickt.
+ */
+async function measureLoginControls(page: Page): Promise<Measured[]> {
+    await page.goto('/nostr-login')
+    await page.getByRole('button', { name: 'Andere Optionen' }).click()
+    await expect(page.getByLabel('Ich verstehe das Risiko')).toBeVisible({ timeout: 15_000 })
+    return (
+        await measure(page, [
+            {
+                selector: 'input[data-flux-control]:not([disabled])',
+                label: 'Kante Textfeld (Anmeldung)',
+                kind: 'graphic',
+                prop: 'borderTopColor',
+            },
+            {
+                selector: 'ui-checkbox [data-flux-checkbox-indicator]',
+                label: 'Kante Ankreuzfeld (Anmeldung)',
+                kind: 'graphic',
+                prop: 'borderTopColor',
+            },
+        ])
+    ).filter((m) => m.label.startsWith('Kante '))
+}
 
 async function measureRoomDivider(page: Page): Promise<Measured[]> {
     await page.goto('/rooms/punkt')
@@ -509,6 +573,72 @@ async function measureEmojiPicker(page: Page): Promise<{ measured: Measured[]; t
     return { measured: [...offen, ...leer], tabDeckkraft }
 }
 
+/**
+ * Phase 5 — die restlichen beiden Sorten im Raum: mehrzeiliges Feld und Auswahlfeld.
+ *
+ * Das mehrzeilige Feld ist der Composer, es steht ohnehin auf der Seite. Das
+ * Auswahlfeld gibt es in dieser App NUR in Dialogen (Umfrage anlegen, Melden) —
+ * ohne diesen Klickweg bliebe die Sorte ungemessen, und ungemessen sieht aus wie
+ * grün. Der Weg über das „+"-Menü ist derselbe, den ein Nutzer geht.
+ */
+async function measureRoomFormControls(page: Page): Promise<Measured[]> {
+    // Das Emoji-Panel aus der vorigen Phase schließen, sonst fängt es den Klick ab.
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+    // Auf den PLATZHALTER ankern, nicht auf die DOM-Reihenfolge: der Thread-Composer
+    // rendert aus demselben Partial und steht seit dem Panel-Umbau VOR dem
+    // Raum-Composer. `textarea[data-flux-control]` allein träfe also den versteckten
+    // Thread-Composer, und die Messung meldete „nicht gefunden" für ein Feld, das
+    // sichtbar auf dem Schirm steht. Eine Reihenfolge ist kein Vertrag, ein
+    // Platzhalter schon.
+    const textarea = (
+        await measure(page, [
+            {
+                selector: 'textarea[data-flux-control][placeholder="Nachricht schreiben…"]:not([disabled])',
+                label: 'Kante Mehrzeiliges Feld (Composer)',
+                kind: 'graphic',
+                prop: 'borderTopColor',
+            },
+        ])
+    ).filter((m) => m.label.startsWith('Kante '))
+
+    await page.getByRole('button', { name: 'Anhängen' }).click()
+    await page.getByRole('menuitem', { name: 'Umfrage' }).click()
+    // Auf das Auswahlfeld DIESES Dialogs ankern (`x-model` bleibt im DOM stehen):
+    // `select[data-flux-control]` allein trifft zwei Knoten, weil der Melde-Dialog
+    // sein eigenes — unsichtbares — Auswahlfeld im DOM hält. `measure()` nimmt den
+    // ERSTEN Treffer, und das wäre der unsichtbare gewesen: die Messung hätte
+    // „nicht gefunden" gemeldet, obwohl das geprüfte Feld tadellos dasteht.
+    const POLL_SELECT = 'select[x-model="pollTypeSel"]:not([disabled])'
+    await expect(page.locator(POLL_SELECT)).toBeVisible({ timeout: 15_000 })
+    // Auf das ENDE der Einblendung warten, nicht auf eine Wartezahl: der Dialog fährt
+    // mit einer Opazitäts-Transition auf, und mitten darin gemessen ist jedes
+    // Verhältnis erfunden. Der Deckkraft-Guard weiter unten hat genau das gefangen
+    // (gemessene 0,113) — hier steht die Bedingung, die er verlangt.
+    await expect
+        .poll(
+            () =>
+                page.evaluate((s) => {
+                    let el = document.querySelector(s) as HTMLElement | null
+                    let o = 1
+                    while (el) {
+                        o *= Number(getComputedStyle(el).opacity)
+                        el = el.parentElement
+                    }
+                    return Math.round(o * 1000) / 1000
+                }, POLL_SELECT),
+            { timeout: 10_000 },
+        )
+        .toBe(1)
+    const select = (
+        await measure(page, [
+            { selector: POLL_SELECT, label: 'Kante Auswahlfeld (Umfrage)', kind: 'graphic', prop: 'borderTopColor' },
+        ])
+    ).filter((m) => m.label.startsWith('Kante '))
+
+    return [...textarea, ...select]
+}
+
 for (const theme of ['light', 'dark'] as const) {
     test(`A11y: gerenderter Kontrast der Brand-Farben erfüllt WCAG (${theme})`, async ({ page }) => {
         await useZooid(page)
@@ -520,6 +650,9 @@ for (const theme of ['light', 'dark'] as const) {
                 /* kein localStorage → Test misst dann das Default-Theme */
             }
         }, theme)
+        // Phase 0 VOR dem Login: das Anmeldeformular ist die einzige Oberfläche mit
+        // einem Ankreuzfeld, und nach dem Login ist sie nicht mehr erreichbar.
+        const anmeldung = await measureLoginControls(page)
         await loginNsec(page, NSEC)
         if (theme === 'dark') {
             await expect(page.locator('html')).toHaveClass(/dark/, { timeout: 15_000 })
@@ -548,7 +681,8 @@ for (const theme of ['light', 'dark'] as const) {
         // Emoji-Panel hängt am Composer und wird deshalb im selben Raum aufgeklappt.
         const spacesUndRaum = [...(await measureAllSurfaces(page)), ...(await measureRoomDivider(page))]
         const picker = await measureEmojiPicker(page)
-        const measured = [...spacesUndRaum, ...picker.measured]
+        const formulare = [...anmeldung, ...(await measureRoomFormControls(page))]
+        const measured = [...spacesUndRaum, ...picker.measured, ...formulare]
         console.log(`KONTRAST[${theme}] ` + JSON.stringify(measured, null, 1))
         console.log(`DECKKRAFT[${theme}] inaktiver Emoji-Kategorie-Tab: ${picker.tabDeckkraft}`)
 
@@ -597,6 +731,22 @@ for (const theme of ['light', 'dark'] as const) {
                 `${stelle} nicht gemessen — entweder rendert das Emoji-Panel nicht (Zeigegerät? emojibase geladen?) oder der Träger trägt die erwartete Farbklasse nicht mehr`,
             ).toBe(true)
         }
+        // Je SORTE eine Kante. Vier Einträge, weil vier verschiedene DOM-Verträge
+        // dahinterstehen: Feld, Auswahl und mehrzeiliges Feld hängen an
+        // `data-flux-control`, das Ankreuzfeld an seinem eigenen Indikator. Fällt der
+        // Override an genau einer Sorte aus, sagt es nur diese eine Zeile.
+        for (const sorte of [
+            'Kante Textfeld (Anmeldung)',
+            'Kante Ankreuzfeld (Anmeldung)',
+            'Kante Mehrzeiliges Feld (Composer)',
+            'Kante Auswahlfeld (Umfrage)',
+        ]) {
+            expect(
+                measured.some((m) => m.label === sorte),
+                `${sorte} nicht gemessen — das Bedienelement rendert nicht, oder sein Selektor trifft einen anderen (versteckten) Knoten derselben Sorte`,
+            ).toBe(true)
+        }
+
         // Deckkraft der inaktiven Kategorie-Tabs. KEIN Kontrastwert, sondern der Wert
         // selbst: die Beschriftung ist ein Farb-Emoji, an dem `color` nichts malt (siehe
         // measureEmojiPicker). Untergrenze 0.7 — darunter liegt das Band, in dem
