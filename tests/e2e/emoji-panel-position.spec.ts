@@ -20,26 +20,16 @@
 import { test, expect, type Page } from './support/fixtures'
 import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
+import { viewportOverflow } from './support/viewport'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 
-/** Geometrie des teleportierten Panels relativ zum Viewport. */
-const panelGeometry = (page: Page) =>
-    page.evaluate(() => {
-        const p = document.querySelector('body > div.fixed.z-50') as HTMLElement | null
-        if (!p) {
-            return null
-        }
-        const r = p.getBoundingClientRect()
-        return {
-            top: Math.round(r.top),
-            bottom: Math.round(r.bottom),
-            height: Math.round(r.height),
-            viewportHeight: window.innerHeight,
-            ueberlaufUnten: Math.round(r.bottom - window.innerHeight),
-            ueberlaufOben: Math.round(0 - r.top),
-        }
-    })
+/**
+ * Geometrie des teleportierten Panels relativ zum Viewport, über den generischen
+ * Helfer (`support/viewport.ts`, seit 2026-08-06). Vorher stand diese Funktion nur
+ * hier — der Auslöser für die Extraktion war genau dieser Test.
+ */
+const panelGeometry = (page: Page) => viewportOverflow(page, 'body > div.fixed.z-50')
 
 test('C1: das Emoji-Panel steht beim ersten Öffnen vollständig im Viewport', async ({ page }) => {
     await useZooid(page)
