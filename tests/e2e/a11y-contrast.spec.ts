@@ -48,6 +48,26 @@ import { loginNsec } from './support/login'
  * werden alle drei Auftritte getrennt (Zeile · Tab · Glocke), damit ein Ausbleiben
  * an EINEM Ort nicht als „geprüft" durchgeht — an genau dieser Stelle scheitert der
  * naive Anker: er misst, was gerendert ist, und ungerendert sieht aus wie grün.
+ *
+ * Seit dem Composer-Emoji-Knopf kommt das EMOJI-PANEL dazu (Phase 4). Es ist der
+ * Beleg dafür, dass dieser Anker nur so weit trägt wie seine Oberflächenliste: im
+ * Panel stand weißer Text auf weißer Karte (1:1), im dunklen Theme dazu ein
+ * Platzhalter bei 1,74:1 — beides unbemerkt, weil ein erst auf Klick aufgebautes
+ * Popover in keiner Phase vorkam. Der Platzhalter ist zugleich der Fall
+ * „Utility greift nicht": die `text-muted`-Utility kompiliert ihre Dark-Hälfte hinter
+ * einer Platzhalter-Variante zu `::placeholder:where(){…}` — ein leeres `:where()`,
+ * das nie matcht.
+ *
+ * Der kaputte Klassenname steht hier bewusst NICHT ausgeschrieben. Tailwind v4 scannt
+ * das Projekt automatisch, `tests/` eingeschlossen, und erzeugt Regeln aus jedem
+ * Textfund — auch aus einem Kommentar. Nachgewiesen: nach dem Fix aller echten
+ * Fundstellen blieb die tote Regel allein wegen der erklärenden Kommentare im
+ * gebauten CSS stehen.
+ *
+ * Ebenfalls neu und für jede künftige Messung gültig: zu jedem Träger wird die
+ * WIRKSAME DECKKRAFT mitgeführt und auf 1 geprüft. `opacity` steht nicht in `color`;
+ * ein Träger unter `opacity-70` meldete bisher sein volles Verhältnis. Das ist kein
+ * hypothetischer Fall — die Kategorie-Tabs des Panels laufen genau so.
  */
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
@@ -123,7 +143,7 @@ const COLOR_SRC = `(() => {
     return { parse, lum }
 })()`
 
-type Measured = { label: string; kind: 'text' | 'icon' | 'graphic'; fg: string; bg: string; ratio: number }
+type Measured = { label: string; kind: 'text' | 'icon' | 'graphic'; fg: string; bg: string; ratio: number; opacity: number }
 
 /**
  * Zusätzlich zu messende Einzelstellen: Farbträger, die sich NICHT über eine
@@ -131,8 +151,12 @@ type Measured = { label: string; kind: 'text' | 'icon' | 'graphic'; fg: string; 
  * einer anderen Route leben. `selector` muss genau ein sichtbares Element treffen —
  * trifft er keines, meldet die Messung das als eigenen Eintrag mit `ratio: 0`, statt
  * still nichts zurückzugeben. Ungemessen sähe sonst aus wie grün.
+ *
+ * `pseudo` misst ein Pseudo-Element statt des Elements selbst (`::placeholder`).
+ * Nötig, weil Platzhaltertext eine EIGENE Farbe trägt: im Emoji-Suchfeld stand sie
+ * dark auf zinc-600 (1,84:1), während der Eingabetext daneben sauber war.
  */
-type Extra = { selector: string; label: string; kind: 'text' | 'icon' | 'graphic' }
+type Extra = { selector: string; label: string; kind: 'text' | 'icon' | 'graphic'; pseudo?: string }
 
 /** Misst alle sichtbaren Brand-Farbträger im aktuellen Theme. */
 const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
@@ -142,6 +166,7 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 selector: string
                 label: string
                 kind: 'text' | 'icon' | 'graphic'
+                pseudo?: string
             }[]
             const { parse, lum } = eval(colorSrc) as {
                 parse: (css: string) => { r: number; g: number; b: number; a: number }
@@ -173,6 +198,22 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 }
                 return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`
             }
+            /**
+             * Wirksame Deckkraft: Produkt aller `opacity` von hier bis zur Wurzel.
+             * `opacity` steht NICHT in `color` — ein Element mit `opacity-70` meldet
+             * seine volle Textfarbe, und ein daraus gerechnetes Verhältnis wäre zu
+             * gut. Der Wert wird mitgeführt, damit ein solcher Fall auffliegt statt
+             * still eine zu schöne Zahl zu liefern (siehe Guard im Test).
+             */
+            const effectiveOpacity = (from: Element | null): number => {
+                let o = 1
+                let node: Element | null = from
+                while (node) {
+                    o *= Number(getComputedStyle(node).opacity)
+                    node = node.parentElement
+                }
+                return Math.round(o * 1000) / 1000
+            }
             const out: Measured[] = []
             for (const el of Array.from(document.querySelectorAll('span, div, button'))) {
                 if (!el.className || typeof el.className !== 'string') continue
@@ -189,6 +230,7 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                     fg,
                     bg,
                     ratio: Math.round(ratio * 100) / 100,
+                    opacity: effectiveOpacity(el),
                 })
             }
             // Informationstragende FLÄCHEN (1.4.11): Ungelesen-Punkt + Nav-Indikator.
@@ -205,13 +247,19 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 const lb = lum(bg)
                 const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
                 out.push({
-                    // Beschriftung aus der Rolle, nicht aus Text (beide sind aria-hidden):
-                    // `size-2 rounded-full` ist der Ungelesen-Punkt, `nav-pill` der Indikator.
-                    label: /(^|\s)size-2(\s|$)/.test(el.className) ? 'Ungelesen-Punkt' : 'Nav-Indikator',
+                    // Beschriftung aus der Rolle, nicht aus Text (alle sind aria-hidden):
+                    // `size-2 rounded-full` ist der Ungelesen-Punkt, `inset-x-1` der
+                    // Aktiv-Unterstrich der Emoji-Kategorien, alles übrige der Nav-Indikator.
+                    label: /(^|\s)size-2(\s|$)/.test(el.className)
+                        ? 'Ungelesen-Punkt'
+                        : /(^|\s)inset-x-1(\s|$)/.test(el.className)
+                          ? 'Emoji-Kategorie aktiv (Unterstrich)'
+                          : 'Nav-Indikator',
                     kind: 'graphic',
                     fg,
                     bg,
                     ratio: Math.round(ratio * 100) / 100,
+                    opacity: effectiveOpacity(el),
                 })
             }
             // P6 — die Zähler-Pillen (`unread-badge`). Anders als oben ist hier die
@@ -243,6 +291,7 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                     fg,
                     bg,
                     ratio: Math.round(ratio * 100) / 100,
+                    opacity: effectiveOpacity(el),
                 })
             }
             // Einzelstellen (siehe {@link Extra}) — bewusst über einen expliziten
@@ -252,15 +301,24 @@ const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
             for (const spec of extras) {
                 const el = document.querySelector(spec.selector) as HTMLElement | null
                 if (!el || !el.offsetParent) {
-                    out.push({ label: `${spec.label} (NICHT GEFUNDEN)`, kind: spec.kind, fg: '-', bg: '-', ratio: 0 })
+                    out.push({ label: `${spec.label} (NICHT GEFUNDEN)`, kind: spec.kind, fg: '-', bg: '-', ratio: 0, opacity: 1 })
                     continue
                 }
-                const fg = getComputedStyle(el).color
+                // `pseudo` (z.B. '::placeholder') hat eine eigene Farbe, aber denselben
+                // Untergrund wie sein Element — `effectiveBg` bleibt deshalb unverändert.
+                const fg = getComputedStyle(el, spec.pseudo ?? null).color
                 const bg = effectiveBg(el)
                 const lf = lum(fg)
                 const lb = lum(bg)
                 const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
-                out.push({ label: spec.label, kind: spec.kind, fg, bg, ratio: Math.round(ratio * 100) / 100 })
+                out.push({
+                    label: spec.label,
+                    kind: spec.kind,
+                    fg,
+                    bg,
+                    ratio: Math.round(ratio * 100) / 100,
+                    opacity: effectiveOpacity(el),
+                })
             }
             return out
         },
@@ -347,6 +405,82 @@ async function measureRoomDivider(page: Page): Promise<Measured[]> {
     return measure(page, [{ selector: DIVIDER_SELECTOR, label: 'Ungelesen-Divider (Raum)', kind: 'text' }])
 }
 
+/**
+ * Phase 4 — das Emoji-Panel (Composer-Picker).
+ *
+ * **Warum es hier fehlte und das teuer war:** in diesem Panel stand weißer Text auf
+ * weißer Karte — gemessen 1:1 — und ist durch ein QS-Gate spaziert, weil der Anker
+ * ihn nicht ansah. Ein Panel, das sich erst auf Klick aufbaut, wird von keiner der
+ * Phasen oben erfasst; ungemessen sieht aus wie grün.
+ *
+ * Zwei Unterphasen, weil sich die Zustände ausschließen: die Kategorie-Tabs sind bei
+ * AKTIVER Suche ausgeblendet (`x-show="ready && !search.trim()"`), der Leerzustand
+ * entsteht nur MIT einer Suche ohne Treffer. In einem Durchgang wäre immer eines der
+ * beiden ungemessen.
+ *
+ * Der Emoji-Knopf im Composer existiert nur auf einem Zeigegerät (`$store.viewport.mouse`
+ * gatet das `<template x-if>`); Chromium meldet im Standardprojekt `(hover: hover)` und
+ * `(pointer: fine)` ohne Sonderkonfiguration — dieselbe Vorbedingung wie in
+ * `emoji-composer.spec.ts`.
+ *
+ * Was NICHT als Verhältnis gemessen wird und warum: die Kategorie-Beschriftungen sind
+ * FARB-EMOJI. `color` malt an ihnen nichts, ein Kontrastwert daraus wäre eine erfundene
+ * Zahl — genau das, wogegen der Parser oben absichtlich wirft. Ihre Lesbarkeit hängt
+ * allein an der Deckkraft, und die wird als eigener Wert geprüft (`tabDeckkraft`).
+ * Der Aktiv-ZUSTAND dagegen hat einen echten Farbträger, den Unterstrich; er läuft über
+ * dieselbe `bg-brand-700`-Klassenregel wie Ungelesen-Punkt und Nav-Indikator.
+ */
+const PICKER = 'body > div.fixed.z-50'
+const SEARCH = `${PICKER} input[type=search]`
+
+async function measureEmojiPicker(page: Page): Promise<{ measured: Measured[]; tabDeckkraft: number }> {
+    const composer = page
+        .locator('div.relative.flex.items-end.gap-2')
+        .filter({ has: page.getByPlaceholder('Nachricht schreiben…') })
+    await composer.getByRole('button', { name: 'Emoji einfügen' }).click()
+    await expect(page.locator(PICKER)).toBeVisible({ timeout: 15_000 })
+    // Die Tabs erscheinen erst, wenn emojibase geladen ist. Ohne dieses Warten misst
+    // die Phase den Ladezustand: kein Unterstrich, kein Tab — und meldet „nicht
+    // gefunden" für etwas, das nur noch nicht da ist.
+    await expect(page.getByRole('tab').first()).toBeVisible({ timeout: 20_000 })
+
+    // Unterphase A — Ruhezustand: Eingabefarbe, Platzhalter, Aktiv-Unterstrich.
+    const offen = (
+        await measure(page, [
+            { selector: SEARCH, label: 'Emoji-Suchfeld (Eingabe)', kind: 'text' },
+            { selector: SEARCH, label: 'Emoji-Suchfeld (Platzhalter)', kind: 'text', pseudo: '::placeholder' },
+        ])
+    ).filter((m) => m.label.startsWith('Emoji-'))
+
+    // Wirksame Deckkraft eines INAKTIVEN Tabs. `0`, wenn keiner gefunden wird — der
+    // Guard im Test schlägt dann an, statt dass eine fehlende Messung durchgeht.
+    const tabDeckkraft = await page.evaluate((sel) => {
+        const tabs = Array.from(document.querySelectorAll(`${sel} [role=tab]`)) as HTMLElement[]
+        const inaktiv = tabs.find((t) => t.getAttribute('aria-selected') !== 'true')
+        if (!inaktiv) {
+            return 0
+        }
+        let o = 1
+        let node: HTMLElement | null = inaktiv
+        while (node) {
+            o *= Number(getComputedStyle(node).opacity)
+            node = node.parentElement
+        }
+        return Math.round(o * 100) / 100
+    }, PICKER)
+
+    // Unterphase B — Leerzustand. Der Suchbegriff darf keine Treffer haben; die Tabs
+    // verschwinden dabei, deshalb erst jetzt.
+    await page.locator(SEARCH).fill('zzzznixdadraussen')
+    const leerText = page.locator(`${PICKER} p`)
+    await expect(leerText).toBeVisible({ timeout: 10_000 })
+    const leer = (
+        await measure(page, [{ selector: `${PICKER} p`, label: 'Emoji-Leerzustand', kind: 'text' }])
+    ).filter((m) => m.label.startsWith('Emoji-Leerzustand'))
+
+    return { measured: [...offen, ...leer], tabDeckkraft }
+}
+
 for (const theme of ['light', 'dark'] as const) {
     test(`A11y: gerenderter Kontrast der Brand-Farben erfüllt WCAG (${theme})`, async ({ page }) => {
         await useZooid(page)
@@ -382,9 +516,13 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(page.locator('span.bg-brand-500.text-zinc-950').first()).toBeVisible({ timeout: 20_000 })
 
         // Reihenfolge: erst alles auf `/spaces`, dann der Raum — der Raumbesuch ist ein
-        // echter Seitenwechsel und käme nicht ohne Reload zur Raumliste zurück.
-        const measured = [...(await measureAllSurfaces(page)), ...(await measureRoomDivider(page))]
+        // echter Seitenwechsel und käme nicht ohne Reload zur Raumliste zurück. Das
+        // Emoji-Panel hängt am Composer und wird deshalb im selben Raum aufgeklappt.
+        const spacesUndRaum = [...(await measureAllSurfaces(page)), ...(await measureRoomDivider(page))]
+        const picker = await measureEmojiPicker(page)
+        const measured = [...spacesUndRaum, ...picker.measured]
         console.log(`KONTRAST[${theme}] ` + JSON.stringify(measured, null, 1))
+        console.log(`DECKKRAFT[${theme}] inaktiver Emoji-Kategorie-Tab: ${picker.tabDeckkraft}`)
 
         // Gegenprobe gegen einen leeren Lauf: misst der Test überhaupt etwas — und
         // zwar ALLE drei Sorten? Ohne diese Zeilen bestünde der Test auch dann, wenn
@@ -410,6 +548,45 @@ for (const theme of ['light', 'dark'] as const) {
             measured.some((m) => m.label === 'Ungelesen-Divider (Raum)'),
             'Ungelesen-Divider nicht gemessen — der Selektor greift nicht mehr oder die Grenze entstand nicht',
         ).toBe(true)
+        // Emoji-Panel: jede Stelle EINZELN verlangen, aus demselben Grund wie bei den
+        // Zähler-Pillen. Der 1:1-Fehler dieses Panels lebte in genau einer davon.
+        for (const stelle of [
+            'Emoji-Suchfeld (Eingabe)',
+            'Emoji-Suchfeld (Platzhalter)',
+            'Emoji-Kategorie aktiv (Unterstrich)',
+            'Emoji-Leerzustand',
+        ]) {
+            // Zwei Ursachen, beide gleich rot — die Meldung nennt sie, weil sie in der
+            // Kalibrierung nachweislich verwechselbar waren: (1) das Panel rendert
+            // nicht (kein Zeigegerät, emojibase nicht geladen, Selektor veraltet),
+            // (2) der Farbträger ist aus der Klassen-Regel gefallen. Fall 2 ist beim
+            // Aufklapp-Unterstrich real passiert: zurück auf `bg-brand-500` gedreht,
+            // findet ihn die `bg-brand-700`-Regel nicht mehr — und genau dieser Zustand
+            // ist der, der mit 2,21:1 unter der Schwelle lag.
+            expect(
+                measured.some((m) => m.label === stelle),
+                `${stelle} nicht gemessen — entweder rendert das Emoji-Panel nicht (Zeigegerät? emojibase geladen?) oder der Träger trägt die erwartete Farbklasse nicht mehr`,
+            ).toBe(true)
+        }
+        // Deckkraft der inaktiven Kategorie-Tabs. KEIN Kontrastwert, sondern der Wert
+        // selbst: die Beschriftung ist ein Farb-Emoji, an dem `color` nichts malt (siehe
+        // measureEmojiPicker). Untergrenze 0.7 — darunter liegt das Band, in dem
+        // Material 3 DEAKTIVIERTE Elemente zeichnet (0.38), und ein bedienbarer Tab darf
+        // nicht aussehen wie ein gesperrter. `0` heißt: kein inaktiver Tab gefunden.
+        expect(
+            picker.tabDeckkraft,
+            `[${theme}] inaktiver Emoji-Kategorie-Tab bei Deckkraft ${picker.tabDeckkraft} — unter 0.7 liest er sich als deaktiviert`,
+        ).toBeGreaterThanOrEqual(0.7)
+
+        // Kein gemessener Farbträger darf unter einer gebrochenen Deckkraft liegen:
+        // `opacity` steht nicht in `color`, das Verhältnis oben wäre dann zu gut
+        // gerechnet. Lieber rot mit Hinweis als eine stille Schönfärbung.
+        for (const m of measured) {
+            expect(
+                m.opacity,
+                `[${theme}] ${m.label || '(Icon)'} liegt unter opacity ${m.opacity} — das gemessene Verhältnis ${m.ratio}:1 wäre erfunden`,
+            ).toBe(1)
+        }
 
         for (const m of measured) {
             const min = m.kind === 'text' ? 4.5 : 3
