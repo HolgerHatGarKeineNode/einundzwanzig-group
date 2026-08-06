@@ -13,5 +13,10 @@
         // reinen Module aus `packages/*/js/` mit `.ts`-Endung.
         "allowImportingTsExtensions": true
     },
-    "include": ["**/*.ts"]
+    // Die Specs importieren Module aus `packages/*/js/`, und TS zieht deren
+    // Abhängigkeiten mit herein — darunter `emoji.ts` mit seinen `?url`-Importen.
+    // Die Deklaration dafür liegt beim Package und damit außerhalb dieses `include`;
+    // ohne die zweite Zeile meldet nur DIESER der drei tsconfigs TS2307, während
+    // Wurzel und Package grün sind.
+    "include": ["**/*.ts", "../../packages/einundzwanzig-group/js/url-import.d.ts"]
 }
