@@ -2490,14 +2490,112 @@ test('Thread: Ansicht startet beim Laden ganz unten (letzte Antwort)', async ({ 
 // nie ein echtes Mitglied (welcome/Directory bleiben unberührt, [[e2e-dedicated-test-rooms]]).
 const HTTP = `http://localhost:${ZOOID_PORT}/`
 
-/** NIP-86-Management-Call als ADMIN (NIP-98 HTTP-Auth), wie das Seed-Skript. */
-function mgmt(body: string): void {
+/**
+ * Synchrones Warten ohne externen Prozess (`Atomics.wait` blockiert den aufrufenden
+ * Thread) — `mgmt()` und alle seine Aufrufer sind bewusst synchron (keine
+ * `await`-Kaskade durch sieben Aufrufstellen), der Retry-Backoff bleibt es deshalb
+ * auch.
+ */
+function sleepSync(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/**
+ * Ein NIP-86-Management-Call (ADMIN, NIP-98 HTTP-Auth) — genau EIN Versuch, ohne
+ * Retry. `mgmt()` unten entscheidet, ob ein Fehlschlag hier wiederholt wird.
+ *
+ * Fund des Koordinators (2026-08-07, nach `room.spec.ts:2655` unter voller
+ * Parallelität): die alte Fassung wertete die Antwort nie aus. `-s` unterdrückte
+ * curls eigene Fehlerausgabe, und khatru/nip86 (`HandleNIP86`, kein `WriteHeader`
+ * vor `json.NewEncoder(w).Encode(resp)`) beantwortet JEDEN Fall — Erfolg wie
+ * `{"error":"…"}` — mit HTTP 200. Ein Statuscheck allein hätte also NIE gegriffen.
+ * Nur das `error`-Feld im JSON-Body unterscheidet Erfolg von Fehlschlag.
+ *
+ * Nachgeprüft in DREI installierten khatru-Fassungen (`fiatjaf.com/nostr@…/khatru/
+ * nip86.go` in zwei Ständen, `github.com/fiatjaf/khatru@v0.19.1/nip86.go`): überall
+ * folgt auf das `respond:`-Label direkt `json.NewEncoder(w).Encode(resp)`, und in
+ * KEINER der Dateien kommt `WriteHeader` überhaupt vor — Go setzt dann implizit 200.
+ * Bewusst ohne Zeilennummer: die wandert zwischen den Fassungen (342 · 387 · 332),
+ * der `respond:`-Anker nicht.
+ *
+ * `-S` zusätzlich zu `-s`: unterdrückt nur die Fortschrittsanzeige, nicht mehr
+ * curls eigene Fehlermeldung bei einem echten Verbindungsfehler — die landet sonst
+ * unbenutzt im Orkus, während `execFileSync` nur "Command failed: curl …" wirft.
+ */
+function mgmtOnce(body: string): void {
     const hash = createHash('sha256').update(body).digest('hex')
     const evt = execFileSync(NAK, ['event', '-k', '27235', '--sec', ADMIN, '-t', `u=${HTTP}`, '-t', 'method=POST', '-t', `payload=${hash}`])
         .toString()
         .trim()
     const auth = Buffer.from(evt).toString('base64')
-    execFileSync('curl', ['-s', '-X', 'POST', HTTP, '-H', 'Content-Type: application/nostr+json+rpc', '-H', `Authorization: Nostr ${auth}`, '-d', body])
+    let raw: string
+    try {
+        // `-w '\n%{http_code}'` haengt den Status ans Ende — einziger Weg, Status UND
+        // Body aus einem einzigen curl-Aufruf zu bekommen, ohne `-i` (das mischt
+        // Response-Header in die Ausgabe und macht das JSON kaputt).
+        raw = execFileSync('curl', [
+            '-s',
+            '-S',
+            '-X',
+            'POST',
+            HTTP,
+            '-H',
+            'Content-Type: application/nostr+json+rpc',
+            '-H',
+            `Authorization: Nostr ${auth}`,
+            '-d',
+            body,
+            '-w',
+            '\n%{http_code}',
+        ]).toString()
+    } catch (e) {
+        // VERBINDUNGSFEHLER: curl selbst kam nicht durch (ECONNREFUSED/Timeout/Reset).
+        // Der einzige Fall, der in diesem Setup nachweislich transient ist — mehrere
+        // Worker treffen denselben Relay parallel mit Admin-Calls. `.transient`
+        // markiert das für `mgmt()`, NICHT string-matching auf die Fehlermeldung.
+        const err = new Error(
+            `NIP-86-Management-Call: Verbindung zu ${HTTP} fehlgeschlagen (${body}) — ${e instanceof Error ? e.message : String(e)}`,
+        ) as Error & { transient?: boolean }
+        err.transient = true
+        throw err
+    }
+    const nl = raw.lastIndexOf('\n')
+    const responseBody = raw.slice(0, nl)
+    const status = Number(raw.slice(nl + 1).trim())
+    let parsed: { error?: string } | undefined
+    try {
+        parsed = responseBody.trim() ? JSON.parse(responseBody) : undefined
+    } catch {
+        // Kein JSON (z.B. 404 von einem falschen Pfad) — der Statuscheck unten fängt
+        // das trotzdem, der rohe Body geht unverändert in die Fehlermeldung.
+    }
+    if (status < 200 || status >= 300 || parsed?.error) {
+        // ANTWORTENDER Relay mit Fehlerfeld/-status ist ein FALSCHER Aufruf (Body,
+        // Signatur, Berechtigung) — kein `.transient`, `mgmt()` wiederholt das NICHT.
+        // Ein Retry würde ihn nur dreimal langsam scheitern lassen statt einmal laut.
+        throw new Error(`NIP-86-Management-Call fehlgeschlagen (${body}): HTTP ${status || '?'} — ${responseBody || '(leere Antwort)'}`)
+    }
+}
+
+/**
+ * `mgmt()` mit Retry — NUR um den nachgewiesen transienten Fall (`mgmtOnce` markiert
+ * ihn über `.transient`). Ein falscher Aufruf (HTTP-Antwort mit `error`-Feld) wirft
+ * beim ERSTEN Versuch, nicht erst nach drei langsamen.
+ */
+function mgmt(body: string): void {
+    const maxAttempts = 3
+    for (let attempt = 1; ; attempt++) {
+        try {
+            mgmtOnce(body)
+            return
+        } catch (e) {
+            const transient = (e as (Error & { transient?: boolean }) | undefined)?.transient === true
+            if (!transient || attempt >= maxAttempts) {
+                throw e
+            }
+            sleepSync(300 * attempt)
+        }
+    }
 }
 
 /** Wegwerf-Autor als Relay-Member zulassen + dem Raum beitreten; gibt seinen Pubkey. */
