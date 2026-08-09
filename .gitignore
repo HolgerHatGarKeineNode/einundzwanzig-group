@@ -54,3 +54,6 @@ plans/
 # Wie docs/plans/: sammelt mit der Zeit Infra-Details und gehoert nicht in die History.
 docs/screenshots/
 tests/e2e/support/buzz-compose/slot-*/
+
+# CodeGraph-Index (Werkzeug-generiert, wird bei Bedarf neu gebaut).
+.codegraph/
