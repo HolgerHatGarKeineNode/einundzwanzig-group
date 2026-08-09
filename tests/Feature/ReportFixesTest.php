@@ -8,6 +8,8 @@ declare(strict_types=1);
  * der Mobile-app.js, wallet profileReady, reaktiver Raum-Name) prüft Playwright.
  */
 
+use Einundzwanzig\Group\Http\Middleware\SetLocale;
+
 // Locale-umschaltende Tests danach zurücksetzen (Web-Host ist deutsch).
 afterEach(fn () => app()->setLocale('de'));
 
@@ -49,7 +51,13 @@ test('🟠 Nav-Tab-Label wird zur Render-Zeit lokalisiert (Bug „Mehr" statt �
     app()->setLocale('en');
     expect(__('Einstellungen'))->toBe('Settings'); // Vorbedingung: Key existiert
 
-    $html = $this->withSession(authedSession())->get(route('group.spaces'))->assertOk()->getContent();
+    // Seit P2 (SetLocale) ist die Sprache eine Eigenschaft des REQUESTS, nicht des
+    // Testprozesses: die Middleware überschreibt das `app()->setLocale('en')` oben
+    // beim Eintritt in die web-Gruppe. Die Sprache muss deshalb so ankommen, wie ein
+    // echter Client sie schickt — hier per Cookie (das sticht `Accept-Language`).
+    $html = $this->withSession(authedSession())
+        ->withUnencryptedCookie(SetLocale::COOKIE, 'en')
+        ->get(route('group.spaces'))->assertOk()->getContent();
 
     // Der Tab zeigt die ÜBERSETZUNG (nav-tab rendert {{ __($label) }}) …
     expect($html)->toContain('Settings');

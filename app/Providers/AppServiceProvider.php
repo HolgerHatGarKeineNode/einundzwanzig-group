@@ -16,7 +16,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Diese App kennt ausschliesslich Nostr-Logins (NIP-07/NIP-46/NIP-55/nsec);
+        // der Schluessel bleibt im Browser. Laravel Fortify ist deshalb samt
+        // Abhaengigkeit entfernt — hier stand zuvor `Fortify::ignoreRoutes()`, weil
+        // `config/fortify.php` allein nicht genuegte: `login` (POST), `logout` (POST)
+        // und `password.confirm` standen in Fortifys Routendatei AUSSERHALB jedes
+        // `Features::enabled()`-Guards. Mit dem Paket faellt das ersatzlos weg.
     }
 
     /**

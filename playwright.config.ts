@@ -70,6 +70,23 @@ export default defineConfig({
     use: {
         // baseURL setzt das workerBackend-Fixture pro Worker (worker-eigener serve-Port).
         trace: 'on-first-retry',
+        /**
+         * Der Test-Browser spricht Deutsch.
+         *
+         * Seit P2 verhandelt die `SetLocale`-Middleware die Oberflächensprache über
+         * `Accept-Language`, solange kein Sprach-Cookie gesetzt ist. Host-Chromium
+         * sendet ab Werk `en-US,en` — ohne diesen Pin renderte die gesamte Suite auf
+         * Englisch und jede Assertion auf deutschen Text („Anmelden", „Räume", …)
+         * ginge rot, obwohl am Produkt nichts kaputt ist.
+         *
+         * `locale` setzt beides: den `Accept-Language`-Header (das ist der Hebel für
+         * die Middleware) UND `navigator.language`.
+         *
+         * Eine Spec, die den Sprachwechsel SELBST prüft, setzt ihren eigenen Context
+         * (`test.use({ locale: 'es-ES' })`) oder ein `locale`-Cookie — beides sticht
+         * diesen Default.
+         */
+        locale: 'de-DE',
     },
     projects: [
         /**

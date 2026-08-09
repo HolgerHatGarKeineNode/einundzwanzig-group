@@ -1,9 +1,13 @@
 {{-- Marken-Fehlerseiten (D5): eigenständige, schlanke Hülle — nur Theme-CSS +
      Brand-Mark, KEINE welshman-Insel/Flux-Runtime (auf einer Fehlerseite unnötig).
      @fluxAppearance wendet das geteilte Theme flackerfrei an; app.css bringt die
-     Tokens/Utilities. Rückweg immer zur Startseite. --}}
+     Tokens/Utilities. Rückweg immer zur Startseite.
+
+     P2: `lang` folgt der aufgelösten Sprache wie im Hauptlayout — dieselbe Regel
+     (WCAG 3.1.1) gilt für eine Fehlerseite genauso. Fällt die Middleware aus (500
+     vor dem Kernel), liefert getLocale() APP_LOCALE, also weiterhin „de". --}}
 <!DOCTYPE html>
-<html lang="de">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />

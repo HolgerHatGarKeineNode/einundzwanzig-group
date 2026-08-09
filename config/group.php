@@ -29,9 +29,13 @@ return [
      * (Wallet ist ein eigener Bottom-Nav-Peer-Tab, kein Hub-Eintrag → kein doppelter
      * Einstieg) und OHNE `relays` (die read-only NIP-65-Liste ist Fachjargon/selten
      * gebraucht → nur auf dem Mobile-Host für Power-User). Reihenfolge = Nutzer-
-     * Mentalmodell: Identität → Space → Medien → Darstellung → Sitzung.
+     * Mentalmodell: Identität → Space → Medien → Darstellung → Sprache → Sitzung.
+     *
+     * `language` steht direkt UNTER `appearance`: beide beantworten „wie sieht und
+     * klingt die Oberfläche aus" — im Gegensatz zu `account`/`session`, die dem
+     * Konto gehören.
      *
      * @var list<string>
      */
-    'settings' => ['account', 'space', 'blossom', 'appearance', 'session'],
+    'settings' => ['account', 'space', 'blossom', 'appearance', 'language', 'session'],
 ];

@@ -14,7 +14,6 @@
     "dependencies": {
         "@einundzwanzig/group": "file:packages/einundzwanzig-group",
         "@fontsource/inconsolata": "^5.2.8",
-        "@laravel/passkeys": "^0.2.0",
         "@tailwindcss/vite": "^4.1.11",
         "concurrently": "^9.0.1",
         "laravel-vite-plugin": "^3.1",

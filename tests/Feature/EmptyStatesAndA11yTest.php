@@ -1,6 +1,8 @@
 <?php
 
 declare(strict_types=1);
+use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * P3 (Leerzustände, Einstieg, Fokusführung) — Sicherheitsnetz für die
@@ -28,13 +30,37 @@ function fakeSessionPubkey(): string
     return str_repeat('a', 64);
 }
 
+/**
+ * `TestResponse::getContent()` delegiert (via `__call`) an Symfonys
+ * `Response::getContent(): string|false` — `false`, wenn die Antwort nie einen
+ * Body gesetzt bekam. Für eine normal ausgelieferte 200er-Seite kommt das in
+ * der Praxis nicht vor, aber genau deshalb darf ein Test es nicht kommentarlos
+ * annehmen: würde `false` ungeprüft weitergereicht, prüfte die nachgelagerte
+ * Assertion `false` gegen einen erwarteten String-Ausschnitt — der Test schlüge
+ * dann an einer zufälligen Stelle mit einer irreführenden Meldung fehl, statt
+ * klar zu sagen, dass die Antwort gar keinen Body hatte. Ein nicht lesbares
+ * Prüfstück ist ein Testfehler, keiner, den eine Assertion einfangen sollte.
+ *
+ * @param  TestResponse<Response>  $res
+ */
+function responseHtml(TestResponse $res): string
+{
+    $content = $res->getContent();
+
+    if ($content === false) {
+        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
+    }
+
+    return $content;
+}
+
 // ─── 1. Fünf Leerzustände: genau eine Handlung (oder bewusst keine) ──────────
 
 test('Leerer Raum: genau EIN CTA, Fokus-Kaskade nach Zustand (Mitglied → Composer, angemeldet → Beitreten, Gast → Gast-Composer)', function () {
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.room', ['h' => 'anyroom']))
         ->assertOk();
-    $html = $res->getContent();
+    $html = responseHtml($res);
 
     // Der Leerzustand selbst.
     expect($html)->toContain('Noch keine Nachrichten in diesem Raum.');
@@ -52,7 +78,7 @@ test('Leere Mitgliederliste: Einladen-CTA existiert NUR unter isAdmin, sonst han
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.directory'))
         ->assertOk();
-    $html = $res->getContent();
+    $html = responseHtml($res);
 
     expect($html)->toContain('Noch keine Mitglieder in diesem Space.');
     $block = extractBetween($html, 'x-if="profilesReady && members.length === 0 && !gatedOut"', '</template>');
@@ -68,7 +94,7 @@ test('Mitgliedersuche ohne Treffer: "Suche leeren" führt den Fokus per x-ref zu
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.directory'))
         ->assertOk();
-    $html = $res->getContent();
+    $html = responseHtml($res);
 
     // Das Suchfeld trägt den Ref, den der Leerzustand als Rücksprungziel nutzt.
     expect($html)->toContain('x-ref="search"');
@@ -80,7 +106,7 @@ test('Spaces :530 aufgeteilt: Suche-ohne-Treffer trägt "Suche leeren", der rein
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.spaces'))
         ->assertOk();
-    $html = $res->getContent();
+    $html = responseHtml($res);
 
     // Zwei GETRENNTE, sich gegenseitig ausschließende Bedingungen (die alte,
     // ungeteilte Formulierung darf nicht wieder auftauchen).
@@ -108,7 +134,7 @@ test('Space ohne Räume: "Raum anlegen" nur unter isAdmin', function () {
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.spaces'))
         ->assertOk();
-    $html = $res->getContent();
+    $html = responseHtml($res);
 
     expect($html)->toContain('Dieser Space hat noch keine Räume.');
     $block = extractBetween(
@@ -129,7 +155,7 @@ test('REGRESSION: gatedOut-Zustand bleibt handlungslos — verein-gate trägt de
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.spaces'))
         ->assertOk();
-    $html = $res->getContent();
+    $html = responseHtml($res);
 
     // Der Block, der ANSTATT der Raumliste erscheint, wenn gatedOut wahr ist.
     // Kein Button darin — Handlungslosigkeit ist hier eine Design-Entscheidung
@@ -235,12 +261,12 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         expect($n)->toBeGreaterThan(0, "Kalibrierte Zahl für $key ist 0 — Tippfehler beim Eintragen?");
     }
 
-    $room = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.room', ['h' => 'anyroom']))->assertOk()->getContent();
-    $directory = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.directory'))->assertOk()->getContent();
-    $spaces = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.spaces'))->assertOk()->getContent();
+    $room = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
+        ->get(route('group.room', ['h' => 'anyroom']))->assertOk());
+    $directory = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
+        ->get(route('group.directory'))->assertOk());
+    $spaces = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
+        ->get(route('group.spaces'))->assertOk());
 
     $countInRendered = function (string $html, array $carriers): int {
         $n = 0;
@@ -263,7 +289,7 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
 test('Gast (Mobile-Bypass, keine Session): Gast-Composer im Raum, Einstiegszeile, konditionale Beitreten-Karte', function () {
     config()->set('nativephp-internal.running', true);
 
-    $html = $this->get(route('group.room', ['h' => 'anyroom']))->assertOk()->getContent();
+    $html = responseHtml($this->get(route('group.room', ['h' => 'anyroom']))->assertOk());
 
     // Gast-Composer statt echtem Composer.
     expect($html)->toContain('anmelden erforderlich');
@@ -283,8 +309,8 @@ test('Gast (Mobile-Bypass, keine Session): Gast-Composer im Raum, Einstiegszeile
 test('Gast im Thread: derselbe Gast-Composer wie im Raum (Thread ist ein eigener, teilbarer Landeplatz)', function () {
     config()->set('nativephp-internal.running', true);
 
-    $html = $this->get(route('group.room.thread', ['h' => 'anyroom', 'nevent' => 'nevent1qqs0dummy']))
-        ->assertOk()->getContent();
+    $html = responseHtml($this->get(route('group.room.thread', ['h' => 'anyroom', 'nevent' => 'nevent1qqs0dummy']))
+        ->assertOk());
 
     expect($html)->toContain('Im Thread antworten…');
     expect($html)->toContain('!joined && ! $store.authGate?.authed');
