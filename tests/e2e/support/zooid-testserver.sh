@@ -236,17 +236,34 @@ nak event --auth --sec "$ADMIN" -k 9007 -t h=meethamburg -t name="Meetup Hamburg
 # Der Relay ist member-only (public_write=false, wie Prod), also darf der Test-User
 # (VIEWER) erst publizieren, NACHDEM ein Admin ihn per `allowpubkey` zugelassen hat.
 # Genau so läuft es auf group.einundzwanzig.space — Member fügen nur Admins hinzu.
+#
+# SCHEITERT LAUT bei einer `error`-Antwort (khatru liefert dabei HTTP 200 — der
+# Statuscode allein sagt nichts). Vorher schluckte `|| true` jeden Fehler: `createrole`
+# scheiterte monatelang unbemerkt an einem falschen Params-Format (Hue als
+# `["210","0.7","0.5"]`-Array statt als einzelne Zahl 0-360, siehe
+# `nip86/methods.go:250-253` — die Rolle existierte nie, wodurch jedes nachfolgende
+# `assignrole` KASKADIEREND ebenfalls scheiterte, siehe `management.go:360-363`
+# `role "…" does not exist`). Alle sieben Aufrufe unten laufen auf einer frischen
+# DB zum ersten Mal — keiner hat einen legitimen Fehlerfall; braucht ein künftiger
+# Aufruf eine, gehört ein EXPLIZITES `|| true` an GENAU diese eine Stelle, nicht in
+# `mgmt()` selbst.
 mgmt() {
-    local body="$1" hash evt auth
+    local body="$1" hash evt auth resp err
     hash=$(printf '%s' "$body" | sha256sum | cut -d' ' -f1)
     evt=$(nak event -k 27235 --sec "$ADMIN" -t u="$HTTP" -t method=POST -t payload="$hash" 2>/dev/null)
     auth=$(printf '%s' "$evt" | base64 -w0)
-    curl -s -X POST "$HTTP" -H 'Content-Type: application/nostr+json+rpc' \
-        -H "Authorization: Nostr $auth" -d "$body" >/dev/null 2>&1 || true
+    resp=$(curl -s -X POST "$HTTP" -H 'Content-Type: application/nostr+json+rpc' \
+        -H "Authorization: Nostr $auth" -d "$body")
+    err=$(printf '%s' "$resp" | jq -r '.error // empty' 2>/dev/null)
+    if [ -n "$err" ]; then
+        echo "mgmt() FEHLGESCHLAGEN: $body → $resp" >&2
+        exit 1
+    fi
 }
-# Directory-Rollen (33534, HSL-Farbe).
-mgmt '{"method":"createrole","params":["mod","Moderator","",["210","0.7","0.5"],"1"]}'
-mgmt '{"method":"createrole","params":["member","Mitglied","",["150","0.6","0.45"],"2"]}'
+# Directory-Rollen (33534). Hue als einzelne Zahl (0-360), Order als Zahl — beide
+# NICHT als String, siehe `nip86.CreateRole{ID, Label, Description, Hue int, Order int}`.
+mgmt '{"method":"createrole","params":["mod","Moderator","",210,1]}'
+mgmt '{"method":"createrole","params":["member","Mitglied","",150,2]}'
 mgmt "{\"method\":\"assignrole\",\"params\":[\"$SELF\",\"mod\"]}"
 # Test-User als Relay-Member zulassen (`allowpubkey` → darf lesen/schreiben/joinen)
 # UND ins Directory aufnehmen (`assignrole` → steht in der 13534 = Vereinsmitglied,
