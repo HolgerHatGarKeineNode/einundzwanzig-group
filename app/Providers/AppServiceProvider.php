@@ -7,7 +7,6 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -51,14 +50,10 @@ class AppServiceProvider extends ServiceProvider
             app()->isProduction(),
         );
 
-        Password::defaults(fn (): ?Password => app()->isProduction()
-            ? Password::min(12)
-                ->mixedCase()
-                ->letters()
-                ->numbers()
-                ->symbols()
-                ->uncompromised()
-            : null,
-        );
+        // Hier stand `Password::defaults(...)`. Diese Vorgabe wirkt ausschliesslich
+        // dort, wo eine Validierungsregel `Password::defaults()` AUFRUFT — mit dem
+        // Wegfall von Fortify (Registrierung, Passwort-Reset, Profil-Update) gibt es
+        // im ganzen Repo keinen solchen Aufruf mehr, und die App kennt nur noch
+        // Nostr-Logins. Eine Vorgabe ohne Verbraucher ersatzlos entfernt.
     }
 }
