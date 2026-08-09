@@ -76,9 +76,36 @@ WELCOME_SEED=3
 ROOM_SEED=15
 ROOM_CAP=$((ROOM_SEED + 6))
 
+# Läuft der auf $ZOOID_PORT gebundene Prozess noch aus dem BINARY, das gerade eben
+# gebaut wurde — oder aus einer bereits ersetzten (gelöschten) Inode? Schreibt `go build -o`
+# die Datei tatsächlich neu, geschieht das per temp+rename: die neue Inode ersetzt die alte,
+# ein laufender Prozess hält die alte weiter offen und führt unverändert ihren Code aus.
+# Ein per seeded_and_clean() wiederverwendeter Relay lief deshalb nach einem
+# Quell-Update mit VERALTETEM Code weiter, obwohl bin/zooid auf der Platte längst
+# aktuell war (belegt 2026-08-09: Prozess seit 16:17 auf einer um 16:46 ersetzten
+# Inode — `/proc/<pid>/exe` zeigt dann auf "… (deleted)"). Nur EIN Aufsetzen behebt
+# das (Neustart), kein erneutes Bauen — das Binary auf der Platte war ja schon richtig.
+#
+# Und genau DESHALB ist der (deleted)-Marker das richtige Signal — nicht die mtime:
+# bei unverändertem Quellstand schreibt Go die Datei GAR NICHT neu, es berührt nur die
+# mtime; die Inode bleibt erhalten (gemessen 2026-08-09: inode=25376652 vor und nach
+# einem Rebuild). Der Marker erscheint also ausschließlich dann, wenn wirklich neuer Code
+# entstanden ist — die Wiederverwendung bleibt im Normalfall unangetastet, ein
+# mtime-Vergleich hätte dagegen bei jedem Lauf einen überflüssigen Reset ausgelöst.
+binary_is_stale() {
+    local pid
+    pid=$(fuser "$ZOOID_PORT/tcp" 2>/dev/null | tr -d ' ')
+    [ -n "$pid" ] || return 1
+    readlink "/proc/$pid/exe" 2>/dev/null | grep -q ' (deleted)$'
+}
+
 # Läuft schon ein sauberer, geseedeter, nicht aufgeblähter zooid? → wiederverwenden.
 seeded_and_clean() {
     timeout 5 curl -sf -H 'Accept: application/nostr+json' "$HTTP" >/dev/null 2>&1 || return 1
+    if binary_is_stale; then
+        echo "zooid:$ZOOID_PORT laeuft aus veralteter (ersetzter) Binary-Inode → Reset"
+        return 1
+    fi
     # edit-Mitgliedschaft ist das LETZTE Seed-Artefakt → ihr Vorhandensein ⇒ Seed fertig.
     timeout 8 nak req -k 39002 -d edit --auth --sec "$USER" "$R" 2>/dev/null | grep -q '"kind":39002' || return 1
     # C5-Seed-Poll: fehlt sie (Relay von einem älteren Seed-Skript ohne poll-Raum), frisch aufsetzen.
@@ -103,7 +130,18 @@ seeded_and_clean() {
 }
 
 cd "$ZOOID_DIR" || exit 1
-[ -f bin/zooid ] || CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go
+# IMMER bauen, nicht nur wenn bin/zooid fehlt: ein liegendes Binary verriet nichts über
+# seinen Quellstand — am 2026-08-09 lief hier ein Binary vom 2026-07-03, einen Commit vor
+# der Pin-Unterstuetzung (c2f0c56, 07-07), waehrend die Quelle laengst weiter war. Der
+# Relay bestaetigte Anpin-Events mit `OK true` und tat nichts (Kind unbekannt) — ein
+# mtime-Vergleich waere fragiler gewesen (frischer Klon, `git checkout` setzt mtimes neu).
+# Kosten gemessen (warmer Go-Build-Cache, 2026-08-09): 1 Aufruf ~170ms, 6 parallele Aufrufe
+# (ein Aufruf je Playwright-Worker) ~300ms Wall-Zeit — vernachlaessigbar gegen den Seed
+# unten. WICHTIG: das Ueberschreiben allein reicht NICHT — ein zuvor gestarteter Prozess
+# laeuft unveraendert auf der alten (jetzt geloeschten) Inode weiter, bis er neu gestartet
+# wird. Genau das prueft binary_is_stale() unten in seeded_and_clean(), NICHT hier vor dem
+# RUNMARK-Pfad (der darf innerhalb eines Laufs niemals neu aufsetzen).
+CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go
 
 # Zweiter Aufruf INNERHALB desselben Laufs (Worker-Neustart nach einem Test-Timeout):
 # nur pruefen, ob der Relay noch da ist — niemals neu aufsetzen. Ein Neuaufbau hier

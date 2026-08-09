@@ -50,9 +50,14 @@ export default function globalSetup(): void {
         // im `workerBackend`-Fixture (eigener Port, eigenes Compose-Projekt) — genau wie
         // zooid. Hier einen gemeinsamen Stack hochzuziehen war der Grund für `workers: 1`.
     } else {
+        // IMMER bauen (nicht nur bei fehlendem Binary) — dieselbe Begründung wie in
+        // zooid-testserver.sh: ein liegendes Binary verrät nichts über seinen Quellstand,
+        // ein veralteter Guard bestätigt Events (`OK true`), ohne sie umzusetzen. Kosten
+        // mit warmem Go-Build-Cache gemessen: ~170ms, vernachlässigbar hier (läuft einmal
+        // vor allen Workern).
         execFileSync(
             'bash',
-            ['-c', '[ -f /home/user/Code/zooid/bin/zooid ] || (cd /home/user/Code/zooid && CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go)'],
+            ['-c', '(cd /home/user/Code/zooid && CGO_ENABLED=1 go build -o bin/zooid cmd/relay/main.go)'],
             { stdio: 'inherit' },
         )
     }
