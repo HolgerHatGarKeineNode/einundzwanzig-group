@@ -58,6 +58,33 @@ const CLIENT_AUTH = 22242
 /** Rollen, die dieses Skript niemals vergibt und niemals entzieht. */
 const PROTECTED_ROLES = new Set(['owner', 'admin'])
 
+/**
+ * Einzelne Pubkeys, die das Skript niemals entfernt, obwohl sie nicht in der
+ * Vereins-API stehen. Kommagetrennte 64-stellige Hex-Werte in `PROTECTED_PUBKEYS`.
+ *
+ * WARUM ueber eine Umgebungsvariable und nicht als Liste hier im Code: das sind
+ * Bestandsdaten des Betreibers, keine Programmlogik. Sie gehoeren neben den Relay
+ * und nicht in ein Repo, das auch anderswo ausgecheckt wird.
+ *
+ * WARUM es diesen Schutz ueberhaupt gibt (gemessen 2026-08-10): Am 2026-07-29 um
+ * 12:42 UTC wurden zehn Pubkeys per `buzz-admin add-member` von Hand aufgenommen —
+ * eine Pilot-Runde zum Buzz-Start, erkennbar daran, dass genau diese zehn ab 12:43
+ * im Kanal `general` schrieben. Sie stehen in KEINEM Jahrgang der Vereins-API, weil
+ * sie nie ueber den offiziellen Mitgliederweg kamen. Der naechtliche Lauf stufte sie
+ * deshalb jedes Mal als "zu entfernen" ein: vier belegte Termine (01./05./06./09.08.)
+ * mit je zehn kind-8001-Deltas — und weil `require_relay_membership` aktiv ist,
+ * scheiterten diese Personen zwischenzeitlich real am NIP-42-AUTH.
+ *
+ * NICHT ueber die Rolle `admin` loesen: das vergaebe echte Schreibrechte am Relay,
+ * nur um eine Entfernung zu verhindern.
+ */
+const PROTECTED_PUBKEYS = new Set(
+    (process.env.PROTECTED_PUBKEYS || '')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => /^[0-9a-f]{64}$/.test(s)),
+)
+
 const isHex64 = (s) => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s)
 
 function secretKey() {
@@ -334,18 +361,32 @@ async function main() {
     const toAdd = [...desired].filter((pk) => !current.has(pk)).sort()
     // Entfernen: auf dem Relay als `member`, aber nicht mehr in der API. Owner und
     // Admins bleiben aussen vor — sie stehen bewusst dort und nicht wegen der API.
+    // Ebenso die einzeln geschuetzten Pubkeys (siehe PROTECTED_PUBKEYS oben).
     const toRemove = [...current]
-        .filter(([pk, role]) => !PROTECTED_ROLES.has(role) && !desired.has(pk))
+        .filter(([pk, role]) => !PROTECTED_ROLES.has(role) && !PROTECTED_PUBKEYS.has(pk) && !desired.has(pk))
         .map(([pk]) => pk)
         .sort()
+
+    const protectedByRole = [...current.values()].filter((r) => PROTECTED_ROLES.has(r)).length
+    const protectedByKey = [...current.keys()].filter((pk) => PROTECTED_PUBKEYS.has(pk)).length
 
     console.log(
         `Relay:    ${RELAY}\n` +
             `Absender: ${signerPub} (Rolle ${signerRole})\n` +
             `Soll:     ${desired.size} Vereinsmitglieder | Ist: ${current.size} Eintraege ` +
-            `(davon geschuetzt: ${[...current.values()].filter((r) => PROTECTED_ROLES.has(r)).length})\n` +
+            `(geschuetzt: ${protectedByRole} per Rolle, ${protectedByKey} per Pubkey)\n` +
             `Plan:     +${toAdd.length} aufnehmen  -${toRemove.length} entfernen${APPLY ? '' : '   [TROCKENLAUF]'}`,
     )
+
+    // Wer geschuetzt ist, aber nicht in der API steht, wird benannt statt stillschweigend
+    // uebergangen — sonst waechst die Ausnahmeliste unbemerkt und niemand raeumt sie je auf.
+    const protectedAndUnknown = [...current.keys()].filter((pk) => PROTECTED_PUBKEYS.has(pk) && !desired.has(pk))
+    if (protectedAndUnknown.length > 0) {
+        console.log(
+            `Hinweis:  ${protectedAndUnknown.length} geschuetzte Pubkeys stehen nicht in der Vereins-API ` +
+                `(${protectedAndUnknown.map((pk) => pk.slice(0, 8)).join(', ')}) — bewusste Ausnahme, siehe PROTECTED_PUBKEYS.`,
+        )
+    }
 
     if (toRemove.length > MAX_REMOVALS && !FORCE) {
         relay.close()
