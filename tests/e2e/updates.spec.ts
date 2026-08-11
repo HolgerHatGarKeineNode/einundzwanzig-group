@@ -945,7 +945,13 @@ test('Anker 11: zweiter Tap auf „Alles" zerstört das Rückgängig nicht — K
     await openUpdates(page)
     const rowA = roomRow(page, roomX.name)
     await expect(rowA).toBeVisible({ timeout: 30_000 })
-    expect((await rowA.getAttribute('aria-label')) ?? '').toContain(UNREAD_PREFIX)
+    // `toBeVisible` garantiert nur, dass die Zeile im DOM steht — nicht, dass ihr
+    // `aria-label` schon den ungelesenen Stand trägt (der kommt reaktiv nach dem
+    // ersten Mount). Jede andere aria-label-Prüfung auf `rowA` in diesem Test läuft
+    // korrekt über `expect.poll` (unten); diese hier lief bislang synchron und riss
+    // unter CPU-Last vereinzelt: gemessen am 2026-08-11 in einem Vollsuite-Lauf
+    // (`updates.spec.ts:935`), Zeile bereits sichtbar, aria-label noch ohne Präfix.
+    await expect.poll(async () => (await rowA.getAttribute('aria-label')) ?? '', { timeout: 10_000 }).toContain(UNREAD_PREFIX)
 
     const allesKnopf = page.getByRole('button', { name: 'Alles als gelesen markieren' })
     await expect(allesKnopf, 'mit Ungelesenem muss der Knopf stehen').toBeVisible()
@@ -1721,7 +1727,10 @@ test('Anker 19: Raum-Badge zeigt exakt N — Badge und Rauminhalt stimmen übere
 
     const roomButton = page.getByRole('button', { name: new RegExp(room.name) })
     const pill = roomButton.locator('span.bg-brand-500.rounded-pill')
-    await expect.poll(async () => ((await pill.textContent()) ?? '').trim(), { timeout: 30_000 }).toBe(String(COUNT))
+    // 30s → 45s: gemessen am 2026-08-11, Vollsuite mit sechs Workern, Timeout bei 30s
+    // überschritten (Received "4" statt "5" — die fünfte Zustellung war unterwegs, kein
+    // Zählfehler). Reines Budget für Last, keine Änderung der Aussage.
+    await expect.poll(async () => ((await pill.textContent()) ?? '').trim(), { timeout: 45_000 }).toBe(String(COUNT))
     console.log(`[anker19] Badge zeigt "${await pill.textContent()}" für ${COUNT} publizierte Nachrichten`)
 
     // Gegenprobe: im Raum stehen wirklich COUNT Nachrichten mit dieser Markierung — jede
@@ -1814,10 +1823,14 @@ test('Anker 20: Glockenzahl entspricht exakt den ungelesenen /updates-Zeilen (Ga
     // 2026-07-29 gefallen, während er einzeln zuverlässig lief: unter Last dauert die
     // Zustellung länger als die Stabilitätsfrist. Kein Produktfehler — der Test hat auf
     // „ändert sich nicht mehr" geprüft, wo er „ist angekommen" meinte.
+    // 60s → 90s: gemessen am 2026-08-11, Vollsuite mit sechs Workern, Timeout bei 60s
+    // überschritten — derselbe, im Kommentar oben bereits für 2026-07-29 dokumentierte
+    // Effekt (Zustellung dauert unter Last länger als die Stabilitätsfrist), diesmal am
+    // Timeout selbst statt an waitStable(). Reines Budget, keine Änderung der Aussage.
     await expect
         .poll(readBellCount, {
             message: 'die eigene Nachricht muss mindestens EINE Zeile beitragen',
-            timeout: 60_000,
+            timeout: 90_000,
         })
         .toBeGreaterThan(0)
 

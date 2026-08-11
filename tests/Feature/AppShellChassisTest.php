@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * P1 (App-Shell-Verschmelzung, plans/APP-SHELL-VERSCHMELZUNG.md): das additive
@@ -10,6 +12,50 @@ use Illuminate\Support\Facades\Blade;
  * nav-tab-Gate, status-strip, app-shell-Chrome — und dass das ALTE Vollbild-
  * Layout (Default-Config) unverändert weiterläuft. Motion/Interaktion → E2E.
  */
+
+/**
+ * Grenzt NUR auf das `<nav>` der fixen Bottom-Bar ein — NICHT auf die Zeichenkette
+ * `aria-label="Hauptnavigation"`: die trägt AUCH die Rail-Fußzeile
+ * (`desktop-rail.blade.php` → `<x-group::bottom-nav orientation="rail" />`), nur mit
+ * anderer Zeilenformatierung (`<nav\n    aria-label="Hauptnavigation"\n    @class(…`
+ * dort vs. `<nav aria-label="Hauptnavigation" class="…` hier — deshalb griff ein
+ * naiver `Str::between($html, '<nav aria-label="Hauptnavigation"', '</nav>')` nur auf
+ * der Rail. Und `Str::between()` ist zusätzlich `beforeLast`, nicht die kleinste
+ * Übereinstimmung: vom ERSTEN `aria-label`-Treffer (Rail, früh im Dokument) bis zum
+ * LETZTEN `</nav>` im GANZEN Rest der Seite — gemessen 160.816 von 282.750 Zeichen,
+ * 57 % der Antwort. Dass der ursprüngliche Test damit trotzdem eine Weile „funktionierte",
+ * war Zufall der Seitenstruktur (die Palette mit ihrer eigenen „Mitglieder"-Überschrift
+ * rendert NACH `{{ $slot }}`, also außerhalb der geernteten Spanne) — kein Beleg dafür,
+ * dass er den Nav-Block maß.
+ *
+ * Der Marker hier (`fixed inset-x-0 bottom-0`) ist der unbedingte erste Eintrag im
+ * `@class([...])`-Array von `bottom-nav.blade.php` — er steht NUR an der fixen Bar,
+ * nie an der Rail-Fußzeile (die trägt `flex flex-col gap-0.5`). Danach reicht die
+ * KLEINSTE Übereinstimmung (erstes `</nav>` nach dem Marker), weil zwischen diesem
+ * Marker und dem eigenen `</nav>` kein zweites `<nav>` mehr öffnet.
+ *
+ * @param  TestResponse<Response>  $res
+ */
+function bottomNavHtml(TestResponse $res): string
+{
+    $content = $res->getContent();
+    if ($content === false) {
+        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
+    }
+
+    $start = strpos($content, 'fixed inset-x-0 bottom-0');
+    if ($start === false) {
+        throw new RuntimeException('Bottom-Nav-Marker "fixed inset-x-0 bottom-0" nicht gefunden — Klassenliste in bottom-nav.blade.php geändert?');
+    }
+
+    $end = strpos($content, '</nav>', $start);
+    if ($end === false) {
+        throw new RuntimeException('Kein schließendes </nav> nach dem Bottom-Nav-Marker gefunden.');
+    }
+
+    return substr($content, $start, $end - $start);
+}
+
 test('P2 Web-Host-Config: group.spaces rendert die 3 Web-Tabs (Chat · Wallet · Einstellungen) via app-shell', function () {
     $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
 
@@ -23,7 +69,13 @@ test('P2 Web-Host-Config: group.spaces rendert die 3 Web-Tabs (Chat · Wallet ·
     foreach (['Chat', 'Wallet', 'Einstellungen'] as $label) {
         $res->assertSee($label);
     }
-    $res->assertDontSee('>Mitglieder<', false);
+    // Gemeint ist die BOTTOM-NAV, nicht die ganze Seite und nicht die Rail-Fußzeile
+    // (die trägt dieselben Tabs ein zweites Mal, s. `bottomNavHtml()`): seit P4
+    // (Befehlspalette) trägt die Palette eine Sektionsüberschrift „Mitglieder" — die
+    // ist kein Bottom-Tab. Eine seitenweite Zeichenketten-Prüfung beantwortet die
+    // Frage „ist Mitglieder ein Tab?" nicht mehr; geprüft wird deshalb NUR die
+    // fixe Bottom-Bar.
+    expect(bottomNavHtml($res))->not->toContain('>Mitglieder<');
     // Wallet-Tab ist per Nav erreichbar (verlinkt die Wallet-Route).
     $res->assertSee('href="'.route('group.wallet').'"', false);
     // Kein Takeover: ohne `group.exit` (eigenständiger Web-Client) gibt es keinen
