@@ -42,7 +42,19 @@ const isBuzz = process.env.E2E_RELAY === 'buzz'
  * `workspaces.spec.ts` bleibt AUSSEN VOR, obwohl es Buzz berührt: es fährt im
  * zooid-Modus und braucht beide Stacks gleichzeitig — genau das ist seine Aussage.
  */
-const BUZZ_SPECS = /buzz-.*\.spec\.ts$/
+/*
+ * `pin-room.spec.ts` steht namentlich daneben, obwohl es nicht mit `buzz-` beginnt.
+ * Umbenennen wäre falsch: die Datei ist zu zwei Dritteln reine Logik und zooid-E2E,
+ * die im Normalmodus laufen MÜSSEN — ein `buzz-`-Name schlösse sie dort aus.
+ * Anpinnen ist die erste Fläche, die auf beiden Relays verschiedene Kinds schickt
+ * (zooid 9010→39005, Buzz 40004), also die erste, die BEIDE Arme braucht.
+ *
+ * Die Lücke war teuer: `E2E_RELAY=buzz npx playwright test tests/e2e/pin-room.spec.ts
+ * --list` meldete "Total: 0 tests in 0 files", obwohl die Datei 27 Tests trägt — kein
+ * Fehler, kein Hinweis, nur Stille. Der Buzz-Pin war dabei komplett kaputt und wäre
+ * unentdeckt geblieben. Wer hier eine Spec ergänzt, ergänzt sie in DIESER Liste.
+ */
+const BUZZ_SPECS = /(?:buzz-.*|pin-room)\.spec\.ts$/
 
 /** Host-Chromium, kein von Playwright heruntergeladenes Binary — gilt für JEDES Projekt. */
 const hostChromium = {

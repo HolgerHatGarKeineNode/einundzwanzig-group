@@ -216,7 +216,7 @@ test('REGRESSION: role="log" aria-live="polite" aria-relevant="additions" am Cha
 });
 
 test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces bleiben zahlenmäßig erhalten', function () use ($ariaFiles) {
-    // Kalibrierte Zahlen (Stand 2026-08-09, festgenagelt als LITERAL, NICHT aus
+    // Kalibrierte Zahlen (Stand 2026-08-11, festgenagelt als LITERAL, NICHT aus
     // der Quelle neu berechnet). Ein früherer Entwurf hatte hier
     // `count(ariaCarriersFromSource(...))` auf BEIDEN Seiten — das ist vakuös:
     // löscht jemand ein `aria-live`, sinken erwartete UND tatsächliche Zahl
@@ -224,6 +224,24 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // `aria-live="polite"` aus `⚡spaces.blade.php:230` entfernt →
     // `php artisan test tests/Feature/EmptyStatesAndA11yTest.php` blieb 10/10
     // grün). Deshalb hier hart codiert.
+    //
+    // 'room' 27 → 35 (Stand 2026-08-11, P6a/P6b: Commits `d636c8a` Suche und
+    // `b8b53de` Anpinnen im Package-Repo). Nachvollzogen per Multiset-Diff der
+    // sortierten Träger-Liste vor/nach P6 (`git show d636c8a^:…⚡room.blade.php`
+    // gegen den aktuellen Stand) — der Diff enthielt AUSSCHLIESSLICH Additions
+    // (`>`), keine einzige Deletion (`<`): kein einziger der 27 vorbestehenden
+    // Träger ist verschwunden, es kamen exakt 8 neu dazu:
+    //   +2 aria-controls="room-pin-list" / "room-search-panel"
+    //   +2 aria-expanded="false" / "true"                  (Suchpanel-Toggle)
+    //   +1 role="search"                                   (Such-Container)
+    //   +1 role="status"                                   (Such-Status, zweiter
+    //                                                        role="status" kam
+    //                                                        schon vor P6 vor)
+    //   +2 x-bind:aria-expanded="…roomPins.collapsed…" / "…expanded…"
+    //                                                       (Pin-Leiste + Overflow)
+    // 27 + 8 = 35. 'directory' und 'spaces' unverändert (P6 hat diese Dateien
+    // nicht angefasst — `git log d636c8a^..HEAD -- ⚡directory.blade.php
+    // ⚡spaces.blade.php` im Package-Repo ist leer).
     //
     // NEU ERMITTELN bei einer LEGITIMEN Änderung (neues role=/aria-*-Attribut
     // bewusst hinzugefügt/entfernt) — dieses Kommando aus dem Repo-Root:
@@ -248,7 +266,7 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // Attribut dazukam/wegfiel — sonst ist „38 → 41" so wenig nachrechenbar wie
     // die dynamische Fassung, die das hier ersetzt.
     $expected = [
-        'room' => 27,
+        'room' => 35,
         'directory' => 2,
         'spaces' => 9,
     ];
