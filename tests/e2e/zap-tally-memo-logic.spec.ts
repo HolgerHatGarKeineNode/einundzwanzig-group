@@ -51,6 +51,13 @@ const makeCtx = (zappers: Map<string, Zapper>): ChatBuildCtx => ({
     $handles: new Map() as ChatBuildCtx['$handles'],
     $zappers: zappers,
     byId: new Map([[EVENT.id, EVENT]]),
+    // P5-Karten-Felder: hier neutral. `cards: false` hält diesen Test bei seiner Frage
+    // (Zapper-Auflösung bustet den Memo-Cache) — mit eingeschalteten Karten hinge das
+    // Ergebnis zusätzlich am Karten-Zweig, und der Test prüfte zwei Dinge auf einmal.
+    refEvents: new Map(),
+    h: 'room',
+    search: '',
+    cards: false,
     commentsByRoot: new Map(),
     reactionsByTarget: new Map(),
     pollResponsesByTarget: new Map(),
