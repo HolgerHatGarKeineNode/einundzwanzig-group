@@ -15,6 +15,34 @@ return Application::configure(basePath: dirname(__DIR__))
         then: function (): void {
             // Bild-Proxy ohne jede Middleware-Gruppe — siehe routes/img.php.
             Route::middleware([])->group(__DIR__.'/../routes/img.php');
+
+            /*
+             * P4 — Vereins-Proxy, NUR in der gehosteten Web-Instanz.
+             *
+             * Im NativePHP-Build läuft dieselbe Anwendung lokal auf dem Gerät;
+             * „Server-Konfiguration" wäre dort dasselbe wie „Bundle", und der
+             * `X-Api-Key` des Vereins läge in der App jedes Nutzers. Deshalb
+             * werden die Routen dort nicht registriert — sie EXISTIEREN nicht,
+             * statt bloß zu verweigern. Der Mobile-Build ruft denselben Proxy
+             * über HTTPS bei der Web-Instanz auf und trägt kein Geheimnis.
+             *
+             * `api/verein` als Präfix, damit der bereits vorhandene
+             * `shouldRenderJsonWhen`-Hook (`$request->is('api/*')`) greift und
+             * auch Framework-Fehler (405 auf `DELETE /me`, 404 auf `export`,
+             * 429 aus dem Limiter) als JSON herauskommen. `web` wegen der
+             * Session: der Proxy bindet jeden Aufruf an den angemeldeten
+             * Pubkey, und der steht in `nostr_pubkey`.
+             *
+             * Die Bedingung wird beim Booten der Routen ausgewertet und friert
+             * damit in `route:cache` ein — für den Mobile-Build ist das der
+             * gewünschte Zustand (eigener Build, eigene Umgebung), aber ein
+             * gecachter Web-Routenstand darf nicht in ein Mobile-Bundle wandern.
+             */
+            if (! config('nativephp-internal.running')) {
+                Route::middleware('web')
+                    ->prefix('api/verein')
+                    ->group(__DIR__.'/../routes/verein.php');
+            }
         },
     )
     // Nostr-Gate (`nostr.auth`) + CSP kommen aus dem einundzwanzig/group-Package
