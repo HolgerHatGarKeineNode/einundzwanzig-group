@@ -96,13 +96,21 @@ export type Measured = { label: string; kind: 'text' | 'icon' | 'graphic'; fg: s
  * `borderColor` — die Kurzform liefert vier Werte, sobald sich eine Seite
  * unterscheidet, und daraus wäre keine Zahl mehr zu lesen (an der Flux-Textarea
  * dieser App tritt genau das auf).
+ *
+ * `prop: 'backgroundColor'` misst eine FLÄCHE gegen ihren Untergrund (z. B. eine
+ * Karte gegen die Seite dahinter) — anders als bei Text/Kante ist der Untergrund
+ * hier NICHT das Element selbst, sondern sein ELTERN-Element (Teambesprechung
+ * 2026-08-12, `design-lead`, vom `reviewer` am Code bestätigt): eine DECKENDE
+ * Fläche bricht in `effectiveBg(el)` sofort am ersten Schritt ab (`a === 1`) und
+ * liefert die eigene Füllung als „Untergrund" zurück — `fg === bg`, lautlos
+ * 1,00:1, unabhängig von der wahren Fläche dahinter. Siehe `measure()` unten.
  */
 export type Extra = {
     selector: string
     label: string
     kind: 'text' | 'icon' | 'graphic'
     pseudo?: string
-    prop?: 'borderTopColor'
+    prop?: 'borderTopColor' | 'backgroundColor'
 }
 
 /**
@@ -124,7 +132,7 @@ export const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 label: string
                 kind: 'text' | 'icon' | 'graphic'
                 pseudo?: string
-                prop?: 'borderTopColor'
+                prop?: 'borderTopColor' | 'backgroundColor'
             }[]
             const { parse, lum } = eval(colorSrc) as {
                 parse: (css: string) => { r: number; g: number; b: number; a: number }
@@ -290,9 +298,17 @@ export const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 // Bei einer KANTE ist der so ermittelte Untergrund die Fläche IM Feld;
                 // das ist die strengere der beiden Nachbarfarben (außen liegt die
                 // hellere Karte), also die richtige Prüfung.
+                //
+                // Bei einer FLÄCHE (`backgroundColor`) ist das FALSCH: das Element ist
+                // hier der Vordergrund selbst, `effectiveBg(el)` bräche bei einer
+                // deckenden Füllung sofort am Element ab und läse dessen eigene Farbe
+                // als Untergrund — `fg === bg`, lautlos 1,00:1. Der Untergrund einer
+                // Fläche ist das, was DAHINTER liegt: das ELTERN-Element (siehe die
+                // „Informationstragende FLÄCHEN"-Schleife oben, die das für ihre beiden
+                // Sonderfälle schon richtig macht — hier gilt dieselbe Regel generisch).
                 const stil = getComputedStyle(el, spec.pseudo ?? null)
                 const fg = spec.prop ? stil[spec.prop] : stil.color
-                const bg = effectiveBg(el)
+                const bg = spec.prop === 'backgroundColor' ? effectiveBg(el.parentElement) : effectiveBg(el)
                 const fgc = compose(fg, bg)
                 const lf = lum(fgc)
                 const lb = lum(bg)

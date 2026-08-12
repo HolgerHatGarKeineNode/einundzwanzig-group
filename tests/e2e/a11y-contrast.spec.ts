@@ -522,3 +522,77 @@ for (const theme of ['light', 'dark'] as const) {
         }
     })
 }
+
+/**
+ * P6 — Regression: `measure()`s `prop: 'backgroundColor'` muss eine FLÄCHE gegen
+ * ihren ELTERN-Untergrund messen, nicht gegen sich selbst (Fund `design-lead`,
+ * bestätigt `reviewer`, Plan `mitglieds-onboarding.md` P5-Nachtrag). Vor der
+ * Reparatur brach `effectiveBg(el)` bei einer DECKENDEN Fläche sofort am
+ * Element selbst ab (`a === 1`) und lieferte dessen eigene Füllung als
+ * „Untergrund" — `fg === bg`, lautlos exakt 1,00:1, unabhängig von der wahren
+ * Fläche dahinter.
+ *
+ * Prüfgegenstand: die deckende Karte des Vereins-Statuten-Schritts
+ * (`surface-card`) gegen die Seite dahinter — gemessen (empirisch, nicht
+ * gerechnet) `rgb(255,255,255)` auf `rgb(250,250,250)` hell und
+ * `rgb(23,23,23)` auf `rgb(10,10,10)` dunkel: zwei unterschiedliche, aber
+ * beide DECKENDE Farben. Keine Geschmacksfrage — eine Karte, die sich farblich
+ * nicht vom Rand abhöbe, wäre keine Karte, und genau das prüft `bg !== fg`.
+ *
+ * Kalibriert: die Zeile, die `bg` bei `prop === 'backgroundColor'` vom
+ * ELTERN-Element statt vom Element selbst holt, entfernt (`effectiveBg(el)`
+ * statt `effectiveBg(el.parentElement)`) → GENAU diese beiden Assertions
+ * fallen (`bg` wird zu `fg` identisch, `ratio` wird exakt `1`); alle anderen
+ * Tests dieser Datei bleiben unberührt, weil kein anderer Aufrufer
+ * `prop: 'backgroundColor'` verwendet.
+ */
+test('Kontrast-Helfer: `backgroundColor`-Flächen werden gegen den Eltern-Untergrund gemessen, nicht gegen sich selbst', async ({ page }) => {
+    await page.addInitScript(() => {
+        ;(window as unknown as { __nostrVerein: unknown }).__nostrVerein = {
+            api: 'https://verein.e2e-test.invalid',
+            proxy: '',
+            activationMinutes: 1440,
+            publicUrl: 'https://verein.einundzwanzig.space/',
+        }
+    })
+    await useZooid(page)
+    await loginNsec(page, NSEC)
+
+    await page.route('**/api/verein/**', (route) => {
+        const url = new URL(route.request().url())
+        if (url.pathname.endsWith('/config')) {
+            return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    data: {
+                        fee: 21,
+                        currency: 'EUR',
+                        year: 2026,
+                        statutes: { url: 'https://verein.e2e-test.invalid/statuten.pdf', version: '3', adopted_at: '2025-01-01' },
+                        application: { application_text_max_length: 500, optional_fields: [] },
+                    },
+                }),
+            })
+        }
+        if (url.pathname.endsWith('/me')) {
+            return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ data: { statutes_accepted_at: null, current_year: { year: 2026, paid: false } } }),
+            })
+        }
+        return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
+    })
+
+    await page.goto('/verein/beitritt')
+    await expect(page.getByTestId('verein-statuten')).toBeVisible({ timeout: 15_000 })
+
+    const [card] = await measure(page, [
+        { selector: '[data-testid="verein-statuten"]', label: 'Statuten-Karte (Fläche)', kind: 'graphic', prop: 'backgroundColor' },
+    ])
+
+    expect(card.label).toBe('Statuten-Karte (Fläche)')
+    expect(card.bg, `bg (${card.bg}) ist die Karte selbst — effectiveBg misst wieder am Element statt am Elternteil`).not.toBe(card.fg)
+    expect(card.ratio, 'ratio exakt 1 heisst: Selbstbezug, keine echte Flächenmessung').not.toBe(1)
+})
