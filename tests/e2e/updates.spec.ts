@@ -666,6 +666,11 @@ test('Anker 7: aria-label beginnt mit dem Ungelesen-Zustand, kappt den Snippet u
     const row = roomRow(page, room.name)
     await expect(row).toBeVisible({ timeout: 30_000 })
 
+    // Dieselbe Bauart wie Anker 11 (gemessen 2026-08-11, `updates.spec.ts:935`):
+    // `toBeVisible` garantiert nur, dass die Zeile im DOM steht — nicht, dass ihr
+    // `aria-label` den ungelesenen Stand schon trägt (kommt reaktiv nach dem ersten
+    // Mount). Ein synchroner Read direkt danach war derselbe Race, nur hier unentdeckt.
+    await expect.poll(async () => (await row.getAttribute('aria-label')) ?? '', { timeout: 25_000 }).toContain(UNREAD_PREFIX)
     const unreadLabel = (await row.getAttribute('aria-label')) as string
     console.log(`[anker7] ungelesen (${unreadLabel.length} Zeichen): "${unreadLabel}"`)
     expect(unreadLabel, 'der Zustand muss im ERSTEN Wort stehen, nicht am Ende').toMatch(new RegExp(`^${UNREAD_PREFIX}`))
@@ -1197,6 +1202,10 @@ test('Anker 14: kalter Direkteinstieg auf /updates zeigt dieselbe Zeile wie die 
     await openUpdates(page)
     const warmRow = roomRow(page, room.name)
     await expect(warmRow).toBeVisible({ timeout: 30_000 })
+    // Dieselbe Bauart wie Anker 11/7: `toBeVisible` sagt nichts über den reaktiv
+    // nachlaufenden Ungelesen-Stand im `aria-label`. Vor dem Lesen abwarten, statt
+    // synchron eine Momentaufnahme zu nehmen.
+    await expect.poll(async () => (await warmRow.getAttribute('aria-label')) ?? '', { timeout: 25_000 }).toContain(UNREAD_PREFIX)
     const warmLabel = (await warmRow.getAttribute('aria-label')) as string
     console.log(`[anker14] warm : "${warmLabel}"`)
 
@@ -1273,6 +1282,9 @@ test('Anker 14: kalter Direkteinstieg auf /updates zeigt dieselbe Zeile wie die 
         console.log(`[anker14] FEHLSCHLAG-Diagnose: joined=${state.joined} items=${state.items} loading=${state.loading}`)
         throw error
     }
+    // Dieselbe Bauart wie Anker 11/7/warm oben: den reaktiven Ungelesen-Stand
+    // abwarten, bevor das Label als „kalt"-Momentaufnahme gilt.
+    await expect.poll(async () => (await coldRow.getAttribute('aria-label')) ?? '', { timeout: 25_000 }).toContain(UNREAD_PREFIX)
     const coldLabel = (await coldRow.getAttribute('aria-label')) as string
     console.log(`[anker14] kalt : "${coldLabel}"`)
 
@@ -1643,7 +1655,12 @@ test('Anker 18: „Rückgängig" nach Ablauf der Frist stellt nichts wieder her'
     // knapp für den ersten Listenaufbau — Anker 3 ist genau an dieser Grenze gerissen.
     // Die geprüfte Zusage ändert sich dadurch nicht, nur die Geduld beim Vorbereiten.
     await expect(row).toBeVisible({ timeout: 45_000 })
-    expect((await row.getAttribute('aria-label')) ?? '', 'Ausgangslage: ungelesen').toContain(UNREAD_PREFIX)
+    // Dieselbe Bauart wie Anker 11/7/14: `toBeVisible` sagt nichts über den reaktiv
+    // nachlaufenden Ungelesen-Stand im `aria-label` — vor der Ausgangslage abwarten,
+    // statt sie synchron zu lesen.
+    await expect
+        .poll(async () => (await row.getAttribute('aria-label')) ?? '', { timeout: 25_000 })
+        .toContain(UNREAD_PREFIX)
 
     await page.getByRole('button', { name: 'Alles als gelesen markieren' }).click()
     await expect
@@ -1730,6 +1747,17 @@ test('Anker 19: Raum-Badge zeigt exakt N — Badge und Rauminhalt stimmen übere
     // 30s → 45s: gemessen am 2026-08-11, Vollsuite mit sechs Workern, Timeout bei 30s
     // überschritten (Received "4" statt "5" — die fünfte Zustellung war unterwegs, kein
     // Zählfehler). Reines Budget für Last, keine Änderung der Aussage.
+    //
+    // OBERGRENZE (P1, restposten-aus-ux-plan.md): der seinerzeit vermutete Auslöser —
+    // die global im Layout hängende Befehlspalette erhöhe den Boot-Aufwand jeder Seite —
+    // ist geprüft und NICHT bestätigt (Messung 2026-08-12: 4 Läufe × 96
+    // Navigation-Timing-Samples, mit vs. ohne `<x-group::command-palette />`; ohne
+    // Palette median +15..30ms, nicht schneller). Es gibt also keine behebbare Ursache,
+    // an die dieses Budget zurückgenommen werden könnte — es bleibt als reine
+    // Zeit-Umgehung stehen. Reißt es NOCH EINMAL unter unverändertem Worker-Aufbau
+    // (6 Worker, `npm run test:e2e`), ist die Umgehung gescheitert: dann keine dritte
+    // Anhebung, sondern eine strukturelle Lösung (z. B. Worker-Drosselung für
+    // toPass-lastige Specs, siehe P1 Schritt 4 desselben Plans).
     await expect.poll(async () => ((await pill.textContent()) ?? '').trim(), { timeout: 45_000 }).toBe(String(COUNT))
     console.log(`[anker19] Badge zeigt "${await pill.textContent()}" für ${COUNT} publizierte Nachrichten`)
 
@@ -1827,6 +1855,13 @@ test('Anker 20: Glockenzahl entspricht exakt den ungelesenen /updates-Zeilen (Ga
     // überschritten — derselbe, im Kommentar oben bereits für 2026-07-29 dokumentierte
     // Effekt (Zustellung dauert unter Last länger als die Stabilitätsfrist), diesmal am
     // Timeout selbst statt an waitStable(). Reines Budget, keine Änderung der Aussage.
+    //
+    // OBERGRENZE (P1, restposten-aus-ux-plan.md): siehe Anker 19 oben — derselbe
+    // Ursachen-Kandidat (Befehlspalette erhöht den Seiten-Boot-Aufwand) ist geprüft und
+    // NICHT bestätigt, keine behebbare Ursache also. Reißt dieses Budget NOCH EINMAL
+    // unter unverändertem Worker-Aufbau, ist die Umgehung gescheitert: dann keine dritte
+    // Anhebung, sondern eine strukturelle Lösung (Worker-Drosselung für toPass-lastige
+    // Specs, P1 Schritt 4).
     await expect
         .poll(readBellCount, {
             message: 'die eigene Nachricht muss mindestens EINE Zeile beitragen',
