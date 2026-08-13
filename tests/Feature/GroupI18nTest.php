@@ -51,6 +51,86 @@ test('& -Keys sind entschärft (kein &amp;-Doppelescape) und lösen auf', functi
     }
 });
 
+// ── Ganze Sätze statt Fragmente ──────────────────────────────────────────────
+
+/*
+ * Vier Sätze des Vereins-Flows standen im Markup in Stücken, weil ein reaktives
+ * `<span x-text>` mitten im Satz saß:
+ *
+ *     {{ __('Bitte noch') }} <span x-text="error.retryAfter"></span> {{ __('Sekunden warten.') }}
+ *
+ * Der Übersetzer bekam zwei Einträge und konnte weder die Wortstellung wählen
+ * (Ungarisch stellt das Verb ans Ende) noch den Kasus (Lettisch, Polnisch) —
+ * beides hängt an dem, was dazwischen steht, und das sah er nie.
+ *
+ * Die drei Fälle hier bewachen den Zustand danach, und zwar in der Reihenfolge,
+ * in der er kaputtgehen kann: der Satz kommt zurück in Stücken (1), eine Sprache
+ * bekommt den neuen Schlüssel nicht (2), oder sie bekommt ihn ohne Platzhalter
+ * (3). Fall 3 ist der bösartigste: die Oberfläche zeigt dann einen vollständig
+ * aussehenden Satz, in dem die Zahl einfach fehlt.
+ */
+
+/** Die vier Sätze und die Platzhalter, die jede Übersetzung tragen MUSS. */
+$sentences = [
+    'Bitte noch :seconds Sekunden warten.' => [':seconds'],
+    'Fassung :version, beschlossen am :date' => [':version', ':date'],
+    ':used / :max Zeichen' => [':used', ':max'],
+    'Das dauert :duration.' => [':duration'],
+];
+
+/** Die Fragmente von vorher — Leichen, sobald der Satz ganz ist. */
+$fragments = ['Bitte noch', 'Sekunden warten.', 'Fassung', 'beschlossen am', 'Zeichen', 'Das dauert'];
+
+test('die vier Sätze stehen als GANZER Satz im Katalog — die Fragmente nirgends mehr', function () use ($langDir, $sentences, $fragments) {
+    foreach (['en', 'es', 'pt', 'nl', 'pl', 'hu', 'lv'] as $loc) {
+        $data = json_decode((string) file_get_contents($langDir.'/'.$loc.'.json'), true);
+
+        foreach (array_keys($sentences) as $key) {
+            expect(array_key_exists($key, $data))->toBeTrue("„{$key}\" fehlt in {$loc}.json");
+        }
+
+        foreach ($fragments as $dead) {
+            expect(array_key_exists($dead, $data))->toBeFalse("Fragment „{$dead}\" lebt noch in {$loc}.json");
+        }
+    }
+});
+
+test('jede Übersetzung der vier Sätze trägt ihre Platzhalter — ein verlorener frisst den Wert', function () use ($langDir, $sentences) {
+    foreach (['en', 'es', 'pt', 'nl', 'pl', 'hu', 'lv'] as $loc) {
+        $data = json_decode((string) file_get_contents($langDir.'/'.$loc.'.json'), true);
+
+        foreach ($sentences as $key => $placeholders) {
+            foreach ($placeholders as $placeholder) {
+                // `?? ''` statt direktem Zugriff: fehlt der Schlüssel ganz, soll
+                // dieser Fall SCHEITERN und nicht mit „Undefined array key"
+                // abbrechen — ein Abbruch nennt den Ort, aber nicht die Aussage.
+                expect(str_contains((string) ($data[$key] ?? ''), $placeholder))
+                    ->toBeTrue("{$placeholder} fehlt in {$loc}.json bei „{$key}\"");
+            }
+        }
+    }
+});
+
+test('alle 7 Kataloge tragen DIESELBE Schlüsselmenge — kein Schlüssel nur in sechs', function () use ($langDir) {
+    /*
+     * Der Zusatz zu den Fällen oben: die vier Sätze sind geprüft, aber ein
+     * Schlüssel, der beim Umbau nur in sechs Dateien landet, fiele in der
+     * siebten STILL auf Deutsch zurück — ununterscheidbar von einer bloß
+     * fehlenden Übersetzung. Bei sieben Dateien ist das Augenmaß die
+     * Fehlerquelle, nicht die Übersetzung.
+     */
+    $reference = array_keys((array) json_decode((string) file_get_contents($langDir.'/en.json'), true));
+    sort($reference);
+
+    foreach (['es', 'pt', 'nl', 'pl', 'hu', 'lv'] as $loc) {
+        $keys = array_keys((array) json_decode((string) file_get_contents($langDir.'/'.$loc.'.json'), true));
+        sort($keys);
+
+        expect(array_diff($reference, $keys))->toBe([], "{$loc}.json fehlen Schlüssel aus en.json");
+        expect(array_diff($keys, $reference))->toBe([], "{$loc}.json hat Schlüssel, die en.json nicht kennt");
+    }
+});
+
 test('Bitcoin/Nostr-Jargon + Marke bleiben unübersetzt (Sats, npub, EINUNDZWANZIG)', function () use ($langDir) {
     $data = json_decode((string) file_get_contents($langDir.'/es.json'), true);
     // „Betrag (Sats)" behält die Einheit „Sats".

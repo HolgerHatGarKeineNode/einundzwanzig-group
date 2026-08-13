@@ -286,6 +286,76 @@ test('die Texte des Flows laufen durch __() und nicht als Literale ins Markup', 
         ->and($html)->not->toContain('>Abbrechen<');
 });
 
+test('die vier reaktiven Sätze stehen als GANZER Satz in der Insel, nicht als Fragment im Markup', function () {
+    /*
+     * Vier Sätze waren in Stücken gebaut, weil ein reaktives `<span x-text>`
+     * mitten im Satz saß:
+     *
+     *     {{ __('Bitte noch') }} <span x-text="error.retryAfter"></span> {{ __('Sekunden warten.') }}
+     *
+     * Deutsch liest sich das richtig — für jede andere Sprache ist es unlösbar:
+     * der Übersetzer bekommt zwei Einträge und kann weder die Wortstellung
+     * ändern noch den Kasus wählen, weil beides von dem abhängt, was dazwischen
+     * steht, und das sieht er nie. Belegt an den ausgelieferten Katalogen:
+     * Polnisch braucht für 2/3/4 eine andere Form als für 5–21, Lettisch für
+     * alles auf 1 (außer 11) eine andere als für den Rest.
+     *
+     * Dieser Fall prüft die BAUFORM, wie der Wallet/Checkout-Fall darunter: Die
+     * Fläche fragt die Insel nach dem fertigen Satz, und sie setzt ihn nirgends
+     * mehr selbst zusammen. Der Satz selbst und seine Füllung sind eine Ebene
+     * tiefer geprüft (`js/vereinFlow.test.ts`), die Kataloge in
+     * `GroupI18nTest.php`.
+     */
+    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+
+    // Die Fläche fragt nach dem fertigen Satz …
+    foreach (['retryLine()', 'statutesLine()', 'charCountLine()', 'waitLine()'] as $call) {
+        expect(str_contains($html, 'x-text="'.$call.'"'))->toBeTrue("Der Haken {$call} fehlt im Markup");
+    }
+
+    /*
+     * … und baut ihn nirgends mehr selbst zusammen. Geprüft wird der ROHE Wert
+     * im `x-text` und nicht der deutsche Text drumherum: „Zeichen" und „Fassung"
+     * kommen anderswo auf der Seite in gültiger Verwendung vor, diese fünf
+     * Ausdrücke dagegen gab es NUR in den zerstückelten Sätzen.
+     */
+    foreach (['x-text="error.retryAfter"', 'x-text="applicationText.length"', 'x-text="applicationTextMax"', 'x-text="waitText"', 'statutesVersion ||'] as $split) {
+        expect(str_contains($html, $split))->toBeFalse("Das Fragment {$split} ist zurück");
+    }
+
+    // Und im Markup steht kein Fragment-Schlüssel mehr.
+    $blade = (string) file_get_contents(dirname(__DIR__, 2).'/packages/einundzwanzig-group/resources/views/⚡verein.blade.php');
+
+    foreach (['Bitte noch', 'Sekunden warten.', 'Fassung', 'beschlossen am', 'Zeichen', 'Das dauert'] as $fragment) {
+        expect(str_contains($blade, "__('".$fragment."')"))
+            ->toBeFalse("Fragment-Schlüssel __('{$fragment}') steht wieder im Markup");
+    }
+});
+
+test('der ganze Satz kommt auch wirklich im Browser an — im Katalog der aktiven Sprache', function () {
+    /*
+     * Die Ersetzung passiert in der Insel, nicht in Blade (`__()` würde
+     * serverseitig füllen und den reaktiven Wert einfrieren). Damit hängt der
+     * Satz am ausgelieferten Katalog — fehlt er dort, fällt die Fläche STILL
+     * auf Deutsch zurück, mitten in einer englischen Seite.
+     *
+     * `Accept-Language` statt `app()->setLocale()`: `SetLocale` läuft in der
+     * `web`-Gruppe und überschreibt die Locale bei jedem Request.
+     */
+    $html = vereinHtml(vereinGet($this, route('group.verein.join'), headers: ['Accept-Language' => 'en'])->assertOk());
+
+    /*
+     * Der Zeichenzähler wird ohne seinen Schrägstrich geprüft: `@js` schreibt
+     * den Katalog als `JSON.parse('…')` und escapt dabei ZWEIMAL — aus „/" wird
+     * „\\\/". Diese Kodierung ist eine Eigenheit des Ausgabewerkzeugs und keine
+     * Aussage über die Übersetzung; sie hier festzuschreiben hieße, den Test bei
+     * jeder Änderung an `@js` rot zu machen, ohne dass am Katalog etwas fehlt.
+     */
+    foreach (['Please wait another :seconds seconds.', 'Version :version, adopted on :date', ':max characters', 'This takes :duration.'] as $sentence) {
+        expect(str_contains($html, $sentence))->toBeTrue("„{$sentence}\" fehlt im ausgelieferten en-Katalog");
+    }
+});
+
 // ── 7. Eine Wahrheitsquelle für die Wallet/Checkout-Weiche ───────────────────
 
 test('die Zahlweg-Weiche steht nur EINMAL — im geprüften Reduzierer, nicht im Markup', function () {
