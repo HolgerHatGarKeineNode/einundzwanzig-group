@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Einundzwanzig\Group\Http\Middleware\SetLocale;
 use Illuminate\Support\Js;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -62,9 +63,19 @@ function vereinHtml(TestResponse $res): string
  * @param  array<string, string>  $headers
  * @return TestResponse<Response>
  */
-function vereinGet(TestCase $test, string $url, bool $follow = false, array $headers = []): TestResponse
+function vereinGet(TestCase $test, string $url, bool $follow = false, array $headers = [], ?string $locale = null): TestResponse
 {
     $pending = $test->withSession(['nostr_pubkey' => vereinFakeSessionPubkey()]);
+
+    // Die Sprache kommt ueber das `locale`-Cookie, nicht ueber `Accept-Language`:
+    // seit dem 2026-08-13 entscheidet der Browser-Header NICHT mehr (Entscheidung
+    // des Nutzers, siehe `SetLocale`). Das Cookie ist die ausdrueckliche Wahl und
+    // der einzige Weg, im Test eine andere Oberflaechensprache zu erzwingen.
+    // `app()->setLocale()` vorher zu setzen hilft nicht — `SetLocale` laeuft in
+    // der `web`-Gruppe und ueberschreibt es bei jedem Request.
+    if ($locale !== null) {
+        $pending = $pending->withUnencryptedCookie(SetLocale::COOKIE, $locale);
+    }
 
     return $follow ? $pending->followingRedirects()->get($url, $headers) : $pending->get($url, $headers);
 }
@@ -275,11 +286,8 @@ test('die Texte des Flows laufen durch __() und nicht als Literale ins Markup', 
     // Nicht-de fällt auf den Key zurück) — das ist der vorgesehene Zustand für
     // Texte, die noch durch die Gestaltung gehen.
     //
-    // Die Sprache kommt über `Accept-Language` und NICHT über `app()->setLocale()`
-    // vor dem Aufruf: `SetLocale` läuft in der `web`-Gruppe und überschreibt die
-    // Locale bei jedem Request aus Cookie/Session/Header — eine vorher gesetzte
-    // Locale überlebt den Aufruf nicht.
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'), headers: ['Accept-Language' => 'en'])->assertOk());
+    // Die Sprache kommt über das `locale`-Cookie — siehe Kopf von `vereinGet()`.
+    $html = vereinHtml(vereinGet($this, route('group.verein.join'), locale: 'en')->assertOk());
 
     expect($html)->toContain('Cancel')
         ->and($html)->toContain('To the rooms')
@@ -371,10 +379,10 @@ test('der ganze Satz kommt auch wirklich im Browser an — im Katalog der aktive
      * Satz am ausgelieferten Katalog — fehlt er dort, fällt die Fläche STILL
      * auf Deutsch zurück, mitten in einer englischen Seite.
      *
-     * `Accept-Language` statt `app()->setLocale()`: `SetLocale` läuft in der
+     * Das `locale`-Cookie statt `app()->setLocale()`: `SetLocale` läuft in der
      * `web`-Gruppe und überschreibt die Locale bei jedem Request.
      */
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'), headers: ['Accept-Language' => 'en'])->assertOk());
+    $html = vereinHtml(vereinGet($this, route('group.verein.join'), locale: 'en')->assertOk());
 
     /*
      * Der Zeichenzähler wird ohne seinen Schrägstrich geprüft: `@js` schreibt

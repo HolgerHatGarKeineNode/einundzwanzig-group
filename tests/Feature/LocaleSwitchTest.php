@@ -7,8 +7,9 @@ declare(strict_types=1);
  *
  * Deckt genau die Punkte aus der Phasen-Anforderung ab:
  *  1. `SetLocale::resolve()` als Tabelle (acht Cookies, Müll, leer, fehlende
- *     Session, Accept-Language mit q-Werten/Regionen/`*`, Vorrang
- *     Cookie > Session > Header).
+ *     Session, Vorrang Cookie > Session > Default `de`). `Accept-Language`
+ *     entscheidet seit 2026-08-13 NICHT mehr — die Fälle dazu prüfen jetzt,
+ *     dass er ignoriert wird.
  *  2. `<html lang>` je Sprache (es, pl, plus pt-BR → pt).
  *  3. `POST /locale`: 302, Cookie-Attribute, Session, ungültiger Wert,
  *     guest-fähig.
@@ -54,62 +55,55 @@ test('ein gültiger Cookie-Wert gewinnt für jede der acht Sprachen', function (
     expect(SetLocale::resolve($request))->toBe($locale);
 })->with(['de', 'en', 'es', 'hu', 'lv', 'nl', 'pl', 'pt']);
 
-test('ein Müll-Cookie fällt durch auf Accept-Language — nicht hart auf de', function () {
+test('ein Müll-Cookie fällt auf Deutsch — nicht auf die Browsersprache', function () {
     $request = Request::create('/');
     $request->cookies->set(SetLocale::COOKIE, 'xx-nicht-in-der-whitelist');
     $request->headers->set('Accept-Language', 'es-ES,es;q=0.9');
 
-    expect(SetLocale::resolve($request))->toBe('es');
+    expect(SetLocale::resolve($request))->toBe('de');
 });
 
-test('ein leerer Cookie fällt durch auf Accept-Language', function () {
+test('ein leerer Cookie fällt auf Deutsch', function () {
     $request = Request::create('/');
     $request->cookies->set(SetLocale::COOKIE, '');
     $request->headers->set('Accept-Language', 'pl-PL,pl;q=0.9');
 
-    expect(SetLocale::resolve($request))->toBe('pl');
+    expect(SetLocale::resolve($request))->toBe('de');
 });
 
-test('eine fehlende Session bricht die Auflösung nicht — der Header entscheidet', function () {
+test('eine fehlende Session bricht die Auflösung nicht — ohne Wahl gilt Deutsch', function () {
     $request = Request::create('/');
     $request->headers->set('Accept-Language', 'nl-NL,nl;q=0.9');
 
     expect($request->hasSession())->toBeFalse(); // Vorbedingung des Falls
-    expect(SetLocale::resolve($request))->toBe('nl');
-});
-
-test('Accept-Language mit Regionscode wird auf den Basiscode reduziert (pt-BR → pt)', function () {
-    $request = Request::create('/');
-    $request->headers->set('Accept-Language', 'pt-BR,pt;q=0.9');
-
-    expect(SetLocale::resolve($request))->toBe('pt');
-});
-
-test('Accept-Language: der höchste q-Wert gewinnt nur unter den TATSÄCHLICH unterstützten Sprachen', function () {
-    // "fr" führt mit q=0.9, ist aber nicht in der Whitelist — "pt-BR" (q=0.8)
-    // ist die einzige tatsächlich passende Übereinstimmung.
-    $request = Request::create('/');
-    $request->headers->set('Accept-Language', 'fr;q=0.9,pt-BR;q=0.8');
-
-    expect(SetLocale::resolve($request))->toBe('pt');
-});
-
-test('Accept-Language "*" trifft nichts Konkretes und fällt auf den ersten Whitelist-Eintrag', function () {
-    $request = Request::create('/');
-    $request->headers->set('Accept-Language', '*');
-
-    expect(SetLocale::resolve($request))->toBe(SetLocale::supported()[0])
-        ->and(SetLocale::resolve($request))->toBe('de');
-});
-
-test('Accept-Language ohne jede Übereinstimmung fällt auf den ersten Whitelist-Eintrag', function () {
-    $request = Request::create('/');
-    $request->headers->set('Accept-Language', 'fr-FR,it;q=0.8');
-
     expect(SetLocale::resolve($request))->toBe('de');
 });
 
-test('Vorrang: Cookie schlägt Session UND Accept-Language', function () {
+// ── Accept-Language entscheidet NICHT (Entscheidung des Nutzers, 2026-08-13) ──
+//
+// Diese Fälle standen vorher hier und prüften das GEGENTEIL: dass die
+// Browsersprache gewinnt, mit q-Werten, Regionscodes und `*`. Sie sind bewusst
+// nicht gelöscht, sondern umgedreht — die Verhandlung war eine ausdrückliche
+// Entscheidung, ihre Abschaffung ist es auch, und beides gehört festgehalten.
+// Wer die Verhandlung je zurückholt, soll hier scheitern und nicht raten.
+
+test('die Browsersprache entscheidet nicht — auch nicht als exakter Whitelist-Treffer', function (string $header) {
+    $request = Request::create('/');
+    $request->headers->set('Accept-Language', $header);
+
+    expect(SetLocale::resolve($request))->toBe('de');
+})->with([
+    'es-ES,es;q=0.9',           // exakter Treffer in der Whitelist
+    'pt-BR,pt;q=0.9',           // Regionscode, vorher auf `pt` reduziert
+    'fr;q=0.9,pt-BR;q=0.8',     // q-Werte, vorher `pt`
+    'nl-NL,nl;q=0.9',
+    'pl-PL,pl;q=0.9',
+    '*',                        // traf schon vorher nichts Konkretes
+    'fr-FR,it;q=0.8',           // keine Übereinstimmung
+    '',                         // gar kein Header
+]);
+
+test('Vorrang: Cookie schlägt Session UND die Browsersprache', function () {
     $request = Request::create('/');
     $request->cookies->set(SetLocale::COOKIE, 'es');
     $request->setLaravelSession(makeSessionWith([SetLocale::SESSION_KEY => 'en']));
@@ -118,13 +112,21 @@ test('Vorrang: Cookie schlägt Session UND Accept-Language', function () {
     expect(SetLocale::resolve($request))->toBe('es');
 });
 
-test('Vorrang: Session schlägt Accept-Language, wenn kein Cookie gesetzt ist', function () {
+test('Vorrang: die Session gilt, auch wenn der Browser etwas anderes sagt', function () {
     $request = Request::create('/');
     $request->setLaravelSession(makeSessionWith([SetLocale::SESSION_KEY => 'hu']));
     $request->headers->set('Accept-Language', 'es-ES,es;q=0.9');
 
     expect(SetLocale::resolve($request))->toBe('hu');
 });
+
+test('alle acht Sprachen bleiben wählbar — abgeschafft ist nur die AUTOMATIK', function (string $locale) {
+    $request = Request::create('/');
+    $request->cookies->set(SetLocale::COOKIE, $locale);
+    $request->headers->set('Accept-Language', 'fr-FR,it;q=0.8');
+
+    expect(SetLocale::resolve($request))->toBe($locale);
+})->with(['de', 'en', 'es', 'hu', 'lv', 'nl', 'pl', 'pt']);
 
 // ── 2. <html lang> je Sprache ────────────────────────────────────────────
 
@@ -135,12 +137,13 @@ test('<html lang> folgt dem Cookie', function (string $locale) {
     expect($response->getContent())->toContain('<html lang="'.$locale.'">');
 })->with(['es', 'pl']);
 
-test('<html lang> folgt pt-BR über Accept-Language-Regionsverhandlung auf pt', function () {
-    // setUp() setzt "de-DE,de;q=0.9" als Default-Header — hier bewusst überschrieben.
+test('<html lang> bleibt de, auch wenn der Browser pt-BR verlangt', function () {
+    // setUp() setzt "de-DE,de;q=0.9" als Default-Header — hier bewusst überschrieben,
+    // damit der Fall wirklich einen fremdsprachigen Browser nachstellt.
     $response = $this->withHeader('Accept-Language', 'pt-BR,pt;q=0.9')->get('/');
 
     $response->assertOk();
-    expect($response->getContent())->toContain('<html lang="pt">');
+    expect($response->getContent())->toContain('<html lang="de">');
 });
 
 // ── 3. POST /locale ──────────────────────────────────────────────────────
