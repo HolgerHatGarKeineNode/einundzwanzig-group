@@ -64,13 +64,22 @@ main() {
 
     # Schluessel NUR aus der Umgebung/Datei lesen, nie als Argument — Argumente
     # stehen in der Prozessliste und damit fuer jeden `ps` sichtbar. `RELAY_SECRET`
-    # ist der Schluessel, mit dem der Relay selbst signiert; er liegt in der
-    # zooid-Config (`secret = "…"` in ~/group.einundzwanzig.space/config/*.toml).
+    # ist der Schluessel, mit dem der Relay selbst signiert.
     #
-    # BEWUSST NICHT automatisch aus der TOML gegrept: dieser Wrapper laeuft neben
-    # einem Relay-Verzeichnis, das wir laut Deploy-Doktrin NIE anfassen. Wer den
-    # Schluessel setzt, tut es einmal in der Crontab-Umgebung oder in einer
-    # `~/member-sync/.env`, die nur root/deploy lesen kann.
+    # ER LIEGT IN DER LIVE-CONFIG DES RELAYS, und die heisst NICHT `*.toml`:
+    #
+    #     ~/group.einundzwanzig.space/config/group.einundzwanzig.space   (Modus 0600)
+    #
+    # Der Dateiname ist der Hostname, ohne Endung. Hier stand frueher
+    # `config/*.toml` — der Glob loest sich auf nichts auf, und wer danach sucht,
+    # findet still nichts und schliesst "gibt es nicht". Am 2026-08-13 genau so
+    # passiert. Die `.bak`-Dateien in `config-backups/` tragen ebenfalls eine
+    # `secret`-Zeile; das ist NICHT die Live-Fassung.
+    #
+    # BEWUSST NICHT automatisch von dort gegrept: dieser Wrapper laeuft neben einem
+    # Relay-Verzeichnis, das wir laut Deploy-Doktrin NIE anfassen. Wer den
+    # Schluessel setzt, tut es EINMAL von Hand in eine `~/member-sync/.env` mit
+    # Modus 0600 — der Wrapper liest sie unten.
     if [ -z "${RELAY_SECRET:-}" ] && [ -f "$HERE/.env" ]; then
         # shellcheck disable=SC1091
         set -a && . "$HERE/.env" && set +a
