@@ -285,3 +285,32 @@ test('die Texte des Flows laufen durch __() und nicht als Literale ins Markup', 
         ->and($html)->toContain('To the rooms')
         ->and($html)->not->toContain('>Abbrechen<');
 });
+
+// ── 7. Eine Wahrheitsquelle für die Wallet/Checkout-Weiche ───────────────────
+
+test('die Zahlweg-Weiche steht nur EINMAL — im geprüften Reduzierer, nicht im Markup', function () {
+    /*
+     * Die Regel „in der App zahlen braucht BOLT11 und Wallet" stand zweimal da:
+     * in `canPayInApp` (`js/vereinFlow.ts`, über alle 2^10 Eingaben geprüft) und
+     * als `bolt11 && hasWallet` direkt im Markup. Beide sagten dasselbe — bis
+     * eine von beiden sich ändert.
+     *
+     * Geschützt war nur die eine: eine Mutation an `canPayInApp` traf keinen
+     * einzigen Fall, weil die Fläche die Frage selbst beantwortete. Aufgefallen
+     * ist das erst, als jemand genau diese Mutation als Kalibrierung setzen wollte.
+     *
+     * Dieser Fall ist der Riegel dagegen, dass die Doppelung zurückkommt: er
+     * prüft die Bauform, nicht das Verhalten (das tun die E2E-Fälle). Ein
+     * wieder eingesetztes `bolt11 && hasWallet` wäre sofort rot — und zwar hier,
+     * in der billigsten Schicht, nicht erst im Browser.
+     */
+    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+
+    // Die Fläche fragt die Insel …
+    expect(substr_count($html, 'payInApp()'))->toBe(4);
+
+    // … und beantwortet die Frage nirgends selbst.
+    expect($html)->not->toContain('bolt11 && hasWallet')
+        ->and($html)->not->toContain('bolt11 &amp;&amp; hasWallet')
+        ->and($html)->not->toContain('!hasWallet');
+});
