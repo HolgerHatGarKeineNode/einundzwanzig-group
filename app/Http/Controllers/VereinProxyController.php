@@ -145,9 +145,20 @@ class VereinProxyController
         // Fail closed. Ohne Schlüssel wird NICHT aufgerufen — ein Aufruf ohne
         // Schlüssel wäre beim Verein ein 401 und sähe für den Nutzer wie ein
         // Problem seiner Anmeldung aus, obwohl der Server falsch steht.
+        //
+        // Der Satz ist DERSELBE wie im Client (`js/verein.ts`, fehlende
+        // Basis-URL) und das mit Absicht: für den Nutzer ist beides ein
+        // Zustand — diese Installation ist nicht eingerichtet, dauerhaft, und
+        // kein Handgriff am Bildschirm hilft. Vorher standen dafür zwei
+        // deutsche Formulierungen, die sich nicht unterschieden; in es/pt/pl
+        // musste ein Unterschied erfunden werden, damit nicht zwei Schlüssel
+        // denselben Wert tragen. Unterscheidbar bleibt „gerade nicht
+        // verfügbar" (503 der Gegenseite, vorübergehend) — die Trennung, auf
+        // die es ankommt, ist dauerhaft gegen vorübergehend, nicht Client
+        // gegen Server. Woher der 503 kam, sagt der Ort, nicht der Text.
         if ($baseUrl === '' || $apiKey === '') {
             return response()->json([
-                'message' => __('Die Vereins-Anbindung ist nicht konfiguriert.'),
+                'message' => __('Die Vereins-Anbindung ist nicht eingerichtet.'),
             ], 503);
         }
 

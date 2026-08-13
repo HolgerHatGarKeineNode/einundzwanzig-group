@@ -72,7 +72,7 @@ test('& -Keys sind entschärft (kein &amp;-Doppelescape) und lösen auf', functi
 
 /** Die vier Sätze und die Platzhalter, die jede Übersetzung tragen MUSS. */
 $sentences = [
-    'Bitte noch :seconds Sekunden warten.' => [':seconds'],
+    'Bitte noch :seconds Sek. warten.' => [':seconds'],
     'Fassung :version, beschlossen am :date' => [':version', ':date'],
     ':used / :max Zeichen' => [':used', ':max'],
     'Das dauert :duration.' => [':duration'],
@@ -128,6 +128,119 @@ test('alle 7 Kataloge tragen DIESELBE Schlüsselmenge — kein Schlüssel nur in
 
         expect(array_diff($reference, $keys))->toBe([], "{$loc}.json fehlen Schlüssel aus en.json");
         expect(array_diff($keys, $reference))->toBe([], "{$loc}.json hat Schlüssel, die en.json nicht kennt");
+    }
+});
+
+// ── Numerus ohne Numerus-Mechanik ────────────────────────────────────────────
+
+/*
+ * `t()` kennt nur `:name`-Ersetzung, keine Pluralregeln — und das bleibt so
+ * (die Entscheidung samt Begründung steht in `js/vereinFlow.ts`, Abschnitt
+ * „Numerus: die Entscheidung, nicht die Vertagung"). Der Preis dafür ist eine
+ * Zusage an die Formulierung: **an keiner Stelle, an der eine freie Zahl steht,
+ * darf ein Wort daneben stehen, dessen Form sich nach dieser Zahl richtet.**
+ *
+ * Diese Zusage kann nur der Katalog halten, und sie kann still brechen: eine
+ * Übersetzung, die „st." wieder zu „stundām" ausschreibt, sieht in einem Diff
+ * wie eine Verbesserung aus und ist für Zahlen auf 1 falsch. Deshalb steht sie
+ * hier als Fall und nicht als Kommentar.
+ */
+test('die Wartebremse nennt die Einheit abgekürzt — „1 Sekunden" ist erreichbar', function () use ($langDir) {
+    /*
+     * `RETRY_AFTER_MIN_SECONDS` ist 1. Deutsch (= der Schlüssel selbst),
+     * Englisch, Spanisch, Portugiesisch und Niederländisch bilden für 1 eine
+     * andere Form als für 42 — dort MUSS die Einheit abgekürzt oder weggelassen
+     * sein. Ungarisch setzt nach einem Zahlwort ohnehin den Singular und darf
+     * ausschreiben; Polnisch und Lettisch kürzen bereits.
+     */
+    $ausgeschrieben = [
+        'en' => 'seconds',
+        'es' => 'segundos',
+        'pt' => 'segundos',
+        'nl' => 'seconden',
+    ];
+
+    foreach ($ausgeschrieben as $loc => $wort) {
+        $data = json_decode((string) file_get_contents($langDir.'/'.$loc.'.json'), true);
+        $wert = (string) ($data['Bitte noch :seconds Sek. warten.'] ?? '');
+
+        expect($wert)->not->toBe('', "Der Schlüssel fehlt in {$loc}.json");
+
+        /*
+         * Der PLATZHALTER fällt vorher raus. `:seconds` enthält die
+         * Zeichenkette „seconds" — ohne diesen Schritt hätte der Fall die
+         * englische Übersetzung angeschwärzt, obwohl dort nur der Platzhalter
+         * steht, und der Befund wäre falsch gewesen.
+         */
+        $ohnePlatzhalter = str_replace(':seconds', '', $wert);
+
+        expect(str_contains($ohnePlatzhalter, $wort))
+            ->toBeFalse("{$loc}.json schreibt die Einheit aus („{$wort}\") — für :seconds = 1 falsch");
+    }
+
+    // Und der deutsche Quelltext, also der Schlüssel selbst, ebenso.
+    app()->setLocale('de');
+    expect(__('Bitte noch :seconds Sek. warten.'))->not->toContain('Sekunden');
+});
+
+test('die Wartezeit in lv steht ohne flektierte Einheit — „līdz 21 stundām" ist falsch', function () use ($langDir) {
+    /*
+     * Lettisch ist die einzige der acht Sprachen, die hier zuschlägt: „līdz"
+     * regiert den Dativ, und der ist zahlabhängig — für alles auf 1 außer 11
+     * steht der Singular („līdz 21 stundai"), sonst der Plural („līdz 24
+     * stundām"). `formatWait` fängt allein die 1 selbst über einen eigenen
+     * Schlüssel ab; 21, 31, 41 … bleiben.
+     *
+     * Die anderen sieben sind auf dieselbe Klasse geprüft und unauffällig:
+     * de/en/es/pt bilden für jede Zahl ≠ 1 denselben Plural, nl setzt nach
+     * Zahlen „uur", hu den Singular, pl steht hinter „do" im Genitiv Plural.
+     */
+    $data = json_decode((string) file_get_contents($langDir.'/lv.json'), true);
+
+    foreach (['bis zu :count Stunden' => 'stundām', 'bis zu :count Minuten' => 'minūtēm'] as $key => $dativPlural) {
+        $wert = (string) ($data[$key] ?? '');
+
+        expect($wert)->not->toBe('', "„{$key}\" fehlt in lv.json");
+        expect(str_contains($wert, $dativPlural))
+            ->toBeFalse("lv.json trägt bei „{$key}\" den Dativ Plural „{$dativPlural}\" — für Zahlen auf 1 (außer 11) falsch");
+    }
+});
+
+// ── Keine Leichen: was zusammengelegt oder entfernt wurde, ist überall weg ────
+
+test('zusammengelegte und entfernte Schlüssel leben in keinem der 7 Kataloge weiter', function () use ($langDir) {
+    /*
+     * Zwei Schlüssel sind gefallen, und beide würden als Leiche nichts kaputt
+     * machen — genau deshalb bleiben sie sonst ewig stehen:
+     *
+     *  · „Die Vereins-Anbindung ist nicht konfiguriert." war die zweite von
+     *    zwei deutschen Formulierungen für EINEN Zustand (Installation nicht
+     *    eingerichtet). Im Deutschen war der Unterschied zu „… ist nicht
+     *    eingerichtet." null; in es/pt/pl musste einer ERFUNDEN werden, damit
+     *    nicht zwei Schlüssel denselben Wert tragen. Was bleibt, ist die
+     *    Trennung, die trägt: dauerhaft („nicht eingerichtet") gegen
+     *    vorübergehend („gerade nicht verfügbar").
+     *  · „name@example.org" war ein Beispiel-Platzhalter, in allen sieben
+     *    Katalogen bitgleich. Ein Schlüssel, der nichts übersetzt, aber jeden
+     *    Übersetzer einlädt, die nach RFC 2606 reservierte Domain durch etwas
+     *    Echtes zu ersetzen.
+     *
+     * Der alte Wartebremsen-Schlüssel steht mit in der Liste: er ist umbenannt
+     * worden, und eine zurückgelassene Altfassung wäre der stillste aller
+     * Fehler — der Katalog trüge beide, und welche gilt, entschiede der Code.
+     */
+    $tot = [
+        'Die Vereins-Anbindung ist nicht konfiguriert.',
+        'name@example.org',
+        'Bitte noch :seconds Sekunden warten.',
+    ];
+
+    foreach (['en', 'es', 'pt', 'nl', 'pl', 'hu', 'lv'] as $loc) {
+        $data = json_decode((string) file_get_contents($langDir.'/'.$loc.'.json'), true);
+
+        foreach ($tot as $key) {
+            expect(array_key_exists($key, $data))->toBeFalse("Leiche „{$key}\" lebt noch in {$loc}.json");
+        }
     }
 });
 

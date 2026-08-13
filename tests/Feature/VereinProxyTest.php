@@ -545,7 +545,12 @@ test('ohne API-Key antwortet der Proxy 503 und ruft nichts auf', function (?stri
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->call('GET', '/api/verein/config', [], [], [], proxyServer())
         ->assertStatus(503)
-        ->assertJsonPath('message', 'Die Vereins-Anbindung ist nicht konfiguriert.');
+        // Derselbe Satz, den der Client bei fehlender Basis-URL selbst setzt
+        // (`js/verein.ts`). Für den Nutzer ist beides EIN Zustand — die
+        // Installation ist nicht eingerichtet, dauerhaft. Vorher standen dafür
+        // zwei deutsche Formulierungen, deren Unterschied in es/pt/pl erfunden
+        // werden musste.
+        ->assertJsonPath('message', 'Die Vereins-Anbindung ist nicht eingerichtet.');
 
     Http::assertNothingSent();
 })->with([

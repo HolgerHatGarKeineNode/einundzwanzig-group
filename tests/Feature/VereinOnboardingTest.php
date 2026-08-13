@@ -309,8 +309,20 @@ test('die vier reaktiven Sätze stehen als GANZER Satz in der Insel, nicht als F
     $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     // Die Fläche fragt nach dem fertigen Satz …
-    foreach (['retryLine()', 'statutesLine()', 'charCountLine()', 'waitLine()'] as $call) {
+    foreach (['retryLine()', 'charCountLine()'] as $call) {
         expect(str_contains($html, 'x-text="'.$call.'"'))->toBeTrue("Der Haken {$call} fehlt im Markup");
+    }
+
+    /*
+     * … zwei davon in Stücken, weil in ihnen ein Teilstück ausgezeichnet wird
+     * (`font-medium` auf Fassung und Datum, `font-semibold` auf der Dauer).
+     * Geteilt wird trotzdem nicht der KATALOG, sondern erst das Ergebnis von
+     * `t()` — an den Platzhaltern, die in jeder Sprache dieselben sind. Der
+     * Übersetzer sieht weiterhin einen ganzen Satz; darauf sehen die Fälle in
+     * `GroupI18nTest.php` und `js/vereinFlow.test.ts`.
+     */
+    foreach (['statutesSegments()', 'waitSegments()'] as $call) {
+        expect(str_contains($html, 'in '.$call.'"'))->toBeTrue("Der Haken {$call} fehlt im Markup");
     }
 
     /*
@@ -330,6 +342,26 @@ test('die vier reaktiven Sätze stehen als GANZER Satz in der Insel, nicht als F
         expect(str_contains($blade, "__('".$fragment."')"))
             ->toBeFalse("Fragment-Schlüssel __('{$fragment}') steht wieder im Markup");
     }
+
+    /*
+     * Und der Preis für die zurückgeholten Auszeichnungen ist NICHT `x-html`.
+     *
+     * Das ist der eigentliche Riegel dieses Falls: `statutesSegments()` liefert
+     * Stücke, in denen `version` und `date` stehen — beides Werte aus
+     * `GET /config`, also Daten der Gegenseite. Als `x-html` gerendert wäre
+     * jedes davon eine Injektionsfläche, und der Weg dorthin ist genau eine
+     * bequeme Zeile weit. Deshalb steht die Zusicherung hier und nicht in einem
+     * Kommentar: im gesamten Vereins-Markup kommt `x-html` nicht vor.
+     *
+     * Die Blade-Kommentare werden VORHER entfernt, und das ist keine Kosmetik:
+     * die Begründung dieser Bauform steht als Kommentar in derselben Datei und
+     * nennt `x-html` beim Namen. Ein Fall, der die Prosa mitmisst, wäre schon
+     * beim ersten Lauf rot gewesen — er hätte die eigene Begründung als Befund
+     * gemeldet und wäre danach entschärft worden statt geschärft.
+     */
+    $markup = (string) preg_replace('/\{\{--.*?--\}\}/s', '', $blade);
+
+    expect(str_contains($markup, 'x-html'))->toBeFalse('x-html ist im Vereins-Markup zurück');
 });
 
 test('der ganze Satz kommt auch wirklich im Browser an — im Katalog der aktiven Sprache', function () {
@@ -351,7 +383,7 @@ test('der ganze Satz kommt auch wirklich im Browser an — im Katalog der aktive
      * Aussage über die Übersetzung; sie hier festzuschreiben hieße, den Test bei
      * jeder Änderung an `@js` rot zu machen, ohne dass am Katalog etwas fehlt.
      */
-    foreach (['Please wait another :seconds seconds.', 'Version :version, adopted on :date', ':max characters', 'This takes :duration.'] as $sentence) {
+    foreach (['Please wait another :seconds sec.', 'Version :version, adopted on :date', ':max characters', 'This takes :duration.'] as $sentence) {
         expect(str_contains($html, $sentence))->toBeTrue("„{$sentence}\" fehlt im ausgelieferten en-Katalog");
     }
 });
