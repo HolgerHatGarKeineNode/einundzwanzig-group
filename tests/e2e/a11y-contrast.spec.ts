@@ -31,9 +31,26 @@ import { measure, type Measured } from './support/contrast'
  * Zwei Schwellen, weil WCAG zwei Kriterien kennt — die Farbwahl folgt genau dem:
  *   Text   → 1.4.3,  4,5:1 → brand-800, auf grauem Grund brand-900 (dark: brand-400)
  *   Icons  → 1.4.11, 3:1   → brand-700                            (dark: brand-400)
- * Klassifiziert wird über die KLASSE, nicht über die gerenderte Farbe: im Dark-Mode
- * tragen Text und Icon dieselbe Farbe (brand-400), die Absicht steht aber weiter im
- * Klassennamen.
+ *
+ * **Klassifiziert wird seit P2/Restposten über den INHALT, nicht über die Klasse.**
+ * Hier stand bis 2026-08-15 `/text-brand-700/.test(className) ? 'icon' : 'text'` — und
+ * das war die teuerste Zeile dieses Ankers: jeder `text-brand-700`-Träger galt damit
+ * als Icon und wurde gegen 3:1 gemessen. Die Kontextzeile des Login-Sheets stand mit
+ * 4,40:1 als TEXT auf weißem Sheet und wäre hier grün durchgegangen; gefunden hat sie
+ * eine Handmessung des `design-lead`, nicht dieser Test. Die naheliegende Reparatur —
+ * die Bedingung umdrehen — wäre der Fehler mit umgekehrtem Vorzeichen gewesen: sechs
+ * Träger im Repo sind echte Grafik (vier `size-10`-Icon-Spans in `⚡spaces`, der
+ * Emoji-Knopf im Composer, das Häkchen der Länderauswahl) und tragen mit 4,40 gegen
+ * ihre 3:1 zu Recht. Gefragt wird deshalb, was die Farbe MALT (siehe `gemalteTexte()`
+ * in `support/contrast.ts`): eigener gemalter Textknoten → 1.4.3, nur Icon → 1.4.11.
+ * Das ist theme-stabil wie die alte Klassenregel (der Inhalt wechselt mit dem Theme
+ * nicht), nur eben richtig.
+ *
+ * Dazu die Großschrift-Ausnahme aus 1.4.3 (ab 18,66 px fett bzw. 24 px genügen 3:1) —
+ * ohne sie färbte die schärfere Einstufung legitime Überschriften rot. Sie wird pro
+ * gemaltem Textknoten ausgewertet: an einem GEMISCHTEN Träger wie `nav-tab` (eine
+ * Klasse am `<a>` färbt Icon UND 11-px-Label) gibt der kleinste Text die Schwelle vor.
+ * Die geforderte Schwelle steht als `min` an jeder Messung und wird mitgeloggt.
  *
  * Seit P3 kommt eine dritte Sorte dazu: FLÄCHEN, die selbst Information tragen
  * (`kind: 'graphic'`) — der Ungelesen-Punkt und der Aktiv-Indikator der Nav. Bei
@@ -193,6 +210,77 @@ async function measureLoginControls(page: Page): Promise<Measured[]> {
     ).filter((m) => m.label.startsWith('Kante '))
 }
 
+/**
+ * Phase 0b — die KONTEXTZEILE des Login-Sheets (§4.2, `intent.label`).
+ *
+ * **Warum sie hier fehlte und das teuer war:** sie ist der Auslöser dieser ganzen
+ * Phase — orange Kleinschrift auf weißem Sheet, gemessen 4,40:1 gegen die 4,5:1 aus
+ * 1.4.3. Dieser Anker hätte sie aus DREI unabhängigen Gründen nie gefangen, jeder für
+ * sich hinreichend: (1) `flux:text` rendert ein `<p>`, und die Kehrschleife besuchte
+ * nur `span, div, button`; (2) die Einstufung hing am Klassennamen, `text-brand-700`
+ * galt als Icon und wurde gegen 3:1 geprüft — 4,40 wäre auch nach Fix (1) grün
+ * gewesen; (3) keine Phase öffnet das Sheet, und die Zeile existiert nur mit
+ * gesetztem Label (`x-show="label"`). (1) und (2) sind in `support/contrast.ts`
+ * behoben, (3) ist diese Phase.
+ *
+ * **Warum als Gast auf `/nostr-login` und nicht mit einem Tab-Tap:** das Sheet ist
+ * EINMAL im Layout gemountet (`einundzwanzig.blade.php`, außerhalb des `$slot`), liegt
+ * also auf jeder Seite — auch auf dem Login-View. Die einzige Vorbedingung ist ein
+ * GAST, und den gibt es in diesem Test nur vor `loginNsec()`. Ein gegateter Tab-Tap
+ * bräuchte `/spaces`, und dorthin lässt der Server-Gate (`EnsureNostrAuth`) keinen
+ * Gast — er würde auf genau diese Seite zurückwerfen.
+ *
+ * Aufgerufen wird `requireAuth()`, nicht ein handgeschriebenes `open-login-sheet`:
+ * das ist der Weg, den JEDER gegatete Tap dieser App nimmt (`nav-tab` → `gateTap` →
+ * `requireAuth`, Befehlspalette, Raum-Beitritt, Gast-Composer). Ein selbst
+ * gebasteltes Event hätte den Vertrag nachgebaut statt ihn zu prüfen. Bleibt das
+ * Sheet aus, navigiert `requireAuth` hart auf den Login-View — dann läuft die
+ * Erwartung unten in ihren Timeout, und zwar mit der richtigen Aussage.
+ *
+ * Der Selektor greift die Klassen OHNE die Farbe (wie beim Ungelesen-Divider): die
+ * Farbe ist der Prüfgegenstand. Auf `text-brand-800` zu ankern hieße, dass die
+ * Gegenprobe (zurück auf `brand-700`) mit „NICHT GEFUNDEN" fiele statt mit der Zahl,
+ * um die es geht.
+ */
+const SHEET_INTENT = 'Kontextzeilen-Probe'
+const SHEET_ZEILE = '[role="dialog"] [data-flux-text][x-text="label"]'
+
+async function measureLoginSheet(page: Page): Promise<Measured[]> {
+    await page.evaluate((label) => {
+        const alpine = (window as unknown as { Alpine?: { store: (n: string) => unknown } }).Alpine
+        const store = alpine?.store('authGate') as { requireAuth?: (i: { label: string }) => boolean } | undefined
+        if (!store?.requireAuth) {
+            throw new Error('$store.authGate.requireAuth fehlt — bridge.ts nicht geladen? Das Gate ist ungeprüft.')
+        }
+        store.requireAuth({ label })
+    }, SHEET_INTENT)
+    // Auf den TEXT warten, nicht nur auf Sichtbarkeit: `x-show="label"` und `x-text`
+    // sind zwei Schritte, und ein leeres `<p>` misst einen Kontrast gegen nichts.
+    await expect(page.locator(SHEET_ZEILE)).toHaveText(SHEET_INTENT, { timeout: 15_000 })
+    // Auf das ENDE der Einblendung warten (Opazitäts-Transition des Sheets), nicht auf
+    // eine Wartezahl — mitten in der Transition gemessen ist jedes Verhältnis erfunden.
+    // Denselben Guard hat der Umfrage-Dialog weiter unten, und dort hat er real
+    // zugeschlagen (gemessene 0,113).
+    await expect
+        .poll(
+            () =>
+                page.evaluate((s) => {
+                    let el = document.querySelector(s) as HTMLElement | null
+                    let o = 1
+                    while (el) {
+                        o *= Number(getComputedStyle(el).opacity)
+                        el = el.parentElement
+                    }
+                    return Math.round(o * 1000) / 1000
+                }, SHEET_ZEILE),
+            { timeout: 10_000 },
+        )
+        .toBe(1)
+    return (
+        await measure(page, [{ selector: SHEET_ZEILE, label: 'Login-Sheet Kontextzeile', kind: 'text' }])
+    ).filter((m) => m.label.startsWith('Login-Sheet '))
+}
+
 async function measureRoomDivider(page: Page): Promise<Measured[]> {
     await page.goto('/rooms/punkt')
     await expect(page.getByText('Neue Nachrichten', { exact: true })).toBeVisible({ timeout: 30_000 })
@@ -253,7 +341,13 @@ async function measureEmojiPicker(page: Page): Promise<{ measured: Measured[]; t
             // dorthin. Deshalb steht vor dieser Messung ein `blur()`.
             { selector: SEARCH, label: 'Emoji-Suchfeld (Kante)', kind: 'graphic', prop: 'borderTopColor' },
         ])
-    ).filter((m) => m.label.startsWith('Emoji-'))
+    )
+        // `|| kind === 'icon'`: der Emoji-KNOPF im Composer trägt sein `!text-brand-700`
+        // nur, solange das Panel offen ist (`::class="open ? …"`) — er existiert also
+        // genau in diesem Zustand und in keinem anderen. Der alte Filter warf ihn weg,
+        // und damit war einer der sechs legitimen Grafik-Träger des Repos nirgends
+        // gemessen. Er heißt nicht „Emoji-…", weil sein Label aus dem Markup kommt.
+        .filter((m) => m.label.startsWith('Emoji-') || m.kind === 'icon')
 
     // Wirksame Deckkraft eines INAKTIVEN Tabs. `0`, wenn keiner gefunden wird — der
     // Guard im Test schlägt dann an, statt dass eine fehlende Messung durchgeht.
@@ -398,6 +492,10 @@ for (const theme of ['light', 'dark'] as const) {
         // Phase 0 VOR dem Login: das Anmeldeformular ist die einzige Oberfläche mit
         // einem Ankreuzfeld, und nach dem Login ist sie nicht mehr erreichbar.
         const anmeldung = await measureLoginControls(page)
+        // Phase 0b, ebenfalls VOR dem Login: das Sheet öffnet nur für Gäste. NACH
+        // `measureLoginControls`, weil das geöffnete Sheet eine ZWEITE `login-form`
+        // ins Dokument hängt — deren Felder träfen die Kanten-Selektoren dort zuerst.
+        const loginSheet = await measureLoginSheet(page)
         await loginNsec(page, NSEC)
         if (theme === 'dark') {
             await expect(page.locator('html')).toHaveClass(/dark/, { timeout: 15_000 })
@@ -426,7 +524,12 @@ for (const theme of ['light', 'dark'] as const) {
         // Emoji-Panel hängt am Composer und wird deshalb im selben Raum aufgeklappt.
         const spacesUndRaum = [...(await measureAllSurfaces(page)), ...(await measureRoomDivider(page))]
         const picker = await measureEmojiPicker(page)
-        const formulare = [...anmeldung, ...(await measureRoomFormControls(page)), ...(await measureDirectoryFilter(page))]
+        const formulare = [
+            ...anmeldung,
+            ...loginSheet,
+            ...(await measureRoomFormControls(page)),
+            ...(await measureDirectoryFilter(page)),
+        ]
         const measured = [...spacesUndRaum, ...picker.measured, ...formulare]
         console.log(`KONTRAST[${theme}] ` + JSON.stringify(measured, null, 1))
         console.log(`DECKKRAFT[${theme}] inaktiver Emoji-Kategorie-Tab: ${picker.tabDeckkraft}`)
@@ -455,6 +558,43 @@ for (const theme of ['light', 'dark'] as const) {
             measured.some((m) => m.label === 'Ungelesen-Divider (Raum)'),
             'Ungelesen-Divider nicht gemessen — der Selektor greift nicht mehr oder die Grenze entstand nicht',
         ).toBe(true)
+        // Die Kontextzeile des Login-Sheets: EINZELN verlangt, und zwar mit ihrer
+        // Schwelle. Ohne die zweite Zeile wäre der Fall wieder das, was er vorher war —
+        // eine Stelle, die gegen 3:1 durchgewunken wird: 4,40 hätte beide Vorgänger
+        // dieses Ankers passiert.
+        const kontextzeile = measured.find((m) => m.label === 'Login-Sheet Kontextzeile')
+        expect(
+            kontextzeile,
+            'Login-Sheet Kontextzeile nicht gemessen — Sheet nicht aufgegangen, kein Label gesetzt, oder der Selektor greift nicht mehr',
+        ).toBeDefined()
+        expect(
+            kontextzeile?.min,
+            'Login-Sheet Kontextzeile wird nicht als TEXT geprüft — genau diese Fehleinstufung war der blinde Fleck (4,40:1 galt als Icon-Wert)',
+        ).toBe(4.5)
+        // Die GRAFIK-Seite derselben Regel, einzeln verlangt. `text-brand-700` ist im
+        // Repo an sechs Stellen legitim — sie fallen unter 1.4.11 (≥ 3:1) und tragen
+        // dort mit 3,82–4,40. Die schärfere Einstufung (Inhalt statt Klassenname) darf
+        // sie NICHT nach „Text" ziehen; täte sie es, wären sie mit 4,05 rot, und der
+        // billige Ausweg wäre, die Farbe zu ändern. Geankert auf die KLASSEN-Signatur,
+        // nicht auf den Zeilentext: die Klasse ist der Vertrag, der Text ist Seed-Daten.
+        //
+        // Drei der sechs sind hier herstellbar. Die anderen drei hängen an Daten bzw.
+        // Rechten, die dieser Fixture nicht hat, und sind damit UNGEMESSEN — kein
+        // Grund, sie zu verschweigen: `⚡spaces:697` (Antragsräume, `proposalCount() > 0`),
+        // `:752` (Artikel-Zeile, serverseitig `@if ($hasBoard)`) und `:779` (Raum
+        // anlegen, `isAdmin`). Sie tragen dieselbe Klasse an derselben Stelle wie der
+        // gemessene Icon-Chip; wer die Lücke schließen will, braucht Seed-Daten, nicht
+        // eine weitere Messung.
+        for (const [signatur, wo] of [
+            ['<span size-10 text-brand-700>', '⚡spaces — Icon-Chip der Einstiegszeilen'],
+            ['<svg size-4 text-brand-700>', '⚡spaces — Häkchen der Länderauswahl'],
+            ['!text-brand-700>', 'chat-composer — Emoji-Knopf (nur bei offenem Panel)'],
+        ] as const) {
+            expect(
+                measured.some((m) => m.kind === 'icon' && m.label.includes(signatur)),
+                `Grafik-Träger ${wo} (${signatur}) nicht als Grafik gemessen — er rendert nicht, oder er ist in die TEXT-Einstufung gerutscht und wird jetzt gegen 4,5:1 statt 3:1 geprüft`,
+            ).toBe(true)
+        }
         // Emoji-Panel: jede Stelle EINZELN verlangen, aus demselben Grund wie bei den
         // Zähler-Pillen. Der 1:1-Fehler dieses Panels lebte in genau einer davon.
         for (const stelle of [
@@ -513,12 +653,15 @@ for (const theme of ['light', 'dark'] as const) {
             ).toBe(1)
         }
 
+        // Die Schwelle kommt aus der MESSUNG (`min`), nicht mehr aus `kind === 'text'`:
+        // sie kennt die Großschrift-Ausnahme aus 1.4.3, die der Test hier nie sehen
+        // konnte. `kind` steht trotzdem in der Meldung — bei einem Fehlschlag ist die
+        // erste Frage, ob der Träger richtig eingestuft wurde.
         for (const m of measured) {
-            const min = m.kind === 'text' ? 4.5 : 3
             expect(
                 m.ratio,
-                `[${theme}] ${m.label || '(Icon)'} — ${m.fg} auf ${m.bg}, verlangt ${min}:1`,
-            ).toBeGreaterThanOrEqual(min)
+                `[${theme}] ${m.label} (${m.kind}) — ${m.fg} auf ${m.bg}, verlangt ${m.min}:1`,
+            ).toBeGreaterThanOrEqual(m.min)
         }
     })
 }

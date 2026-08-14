@@ -85,9 +85,32 @@ test('P2 Web-Host-Config: group.spaces rendert die 3 Web-Tabs (Chat · Wallet ·
     // Der Brand-Mark lebt weiter im `app-header` — geprüft im Test darunter.
     $res->assertDontSee('aria-label="Zurück zu', false);
     $res->assertDontSee('aria-label="Startseite"', false);
-    // Aktiver Tab trägt den kontrastsicheren brand-700 (≥4.5:1 auf hellem Nav-Grund),
-    // nicht das AA-verletzende brand-500/text-accent (§7.6).
-    $res->assertSee('text-brand-700 dark:text-brand-400', false);
+    // Aktiver Tab trägt `brand-800` — die Klasse am `<a>` färbt das LABEL mit, ist also
+    // TEXT (WCAG 1.4.3, ≥ 4,5:1) und nicht Grafik. Auf dem Nav-Grund `bg-zinc-50/90`
+    // über der zinc-50-Seite misst brand-800 **6,15:1** (gerechnet mit
+    // `docs/plans/2026-08-11T1321-restposten-aus-ux-plan/p2-kontrast.mjs brand-800 zinc-50`,
+    // gerendert bestätigt als `KONTRAST[light]`-Eintrag „Chat" im Anker
+    // `tests/e2e/a11y-contrast.spec.ts`, ebenfalls 6,15).
+    //
+    // Hier stand bis 2026-08-15 `assertSee('text-brand-700 dark:text-brand-400')` mit dem
+    // Kommentar „kontrastsicherer brand-700 (≥4.5:1)". Beides war falsch, und der Test
+    // war TROTZDEM grün: `nav-tab.blade.php` trägt seit der Farbumstellung 0× die
+    // Zeichenkette, aber `⚡spaces.blade.php` trägt sie an seinen Icon-Chips weiter 5× —
+    // und `assertSee` prüft die GANZE Seite. Der Test band den aktiven Tab nicht mehr.
+    // Die Zahl war ohnehin nie richtig: brand-700 liegt auf diesem Grund bei 4,21:1
+    // (`p2-kontrast.mjs brand-700 zinc-50`), reißt die 4,5 also.
+    //
+    // Deshalb auf die Bottom-Bar geankert und ABGEZÄHLT statt „irgendwo": die Bar trägt
+    // drei Tabs, und „in der Bar steht brand-800" beantwortet die Frage „trägt der
+    // AKTIVE Tab die Farbe?" nicht — genau eine Zeile darf sie tragen.
+    $nav = bottomNavHtml($res);
+    expect(substr_count($nav, 'aria-current="page"'))->toBe(1, 'Bottom-Bar markiert nicht genau einen Tab als aktiv');
+    expect(substr_count($nav, 'text-brand-800 dark:text-brand-400'))
+        ->toBe(1, 'genau der aktive Tab trägt die Textfarbe brand-800 (6,15:1) — keiner oder mehrere ist beides falsch');
+    // Der Rückfall auf brand-700 als TEXTfarbe ist der Regress, den diese Phase behoben
+    // hat (4,21:1 < 4,5:1). `bg-brand-700` am Aktiv-Balken bleibt davon unberührt: er ist
+    // ein Grafikobjekt (1.4.11, ≥ 3:1) und trägt dort mit denselben 4,21:1.
+    expect($nav)->not->toContain('text-brand-700');
     $res->assertDontSee('nav-pill absolute inset-x-0 top-0 mx-auto h-1 w-8 rounded-full bg-accent', false);
 });
 
