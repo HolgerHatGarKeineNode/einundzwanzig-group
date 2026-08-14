@@ -4,7 +4,10 @@
 
 @php
     $pageTitle = filled($title ?? null) ? $title.' – '.config('app.name') : config('app.name');
-    $ogDescription ??= 'Die Bitcoin-Community auf Nostr.';
+    // P3: die Beschreibung ist sichtbarer Text, auch wenn sie nur in einem
+    // <meta> steht — sie ist das, was in der Suche und in jeder Link-Vorschau
+    // gelesen wird. Ohne `__()` blieb sie unter jeder Sprache deutsch.
+    $ogDescription ??= __('Die Bitcoin-Community auf Nostr.');
     // B5: per-Raum/-Space OG-Bild (Raum-picture bzw. Space-icon, proxifiziert)
     // wird von den SFCs via View::share('ogImage') gesetzt; Fallback = Marken-OG.
     $ogImageUrl = filled($ogImage ?? null) ? $ogImage : asset('og.png');

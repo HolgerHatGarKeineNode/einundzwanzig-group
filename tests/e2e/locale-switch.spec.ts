@@ -95,3 +95,51 @@ test('P2: die Sprachwahl ist persistent (Cookie), nicht an die Session gebunden 
 
     await freshContext.close()
 })
+
+/**
+ * P3 (Schritt 4) — Zahl- und Datumsformate folgen der GEWÄHLTEN Sprache.
+ *
+ * Bis hierher stand an elf Stellen hart `toLocaleString('de-DE')`; ein englischer
+ * Nutzer las „1.234.567" statt „1,234,567". Die Formatierung passiert im Browser,
+ * die Sprache kennt der Server — die Brücke ist `<html lang>` (vom Layout aus
+ * `app()->getLocale()` gerendert), gelesen von `js/locale.ts`.
+ *
+ * Gemessen wird über die ECHTE `$num`-Magic der Seite, nicht über eine
+ * nachgebaute Formatierung: der Test hängt ein `x-text="$num(…)"` in die laufende
+ * Alpine-Instanz und liest, was herauskommt. Damit prüft er die ganze Kette
+ * (Cookie → Middleware → `<html lang>` → `locale.ts` → Alpine-Ausdruck) und nicht
+ * bloß, dass `Intl` Sprachen kennt.
+ *
+ * `en` und nicht `es`: Spanisch trennt Tausender wie Deutsch mit dem Punkt — die
+ * Assertion sähe grün aus, ohne irgendetwas zu belegen.
+ */
+async function islandNumber(page: Page): Promise<string> {
+    return page.evaluate(async () => {
+        const el = document.createElement('div')
+        el.setAttribute('x-data', '{}')
+        el.setAttribute('x-text', '$num(1234567)')
+        document.body.appendChild(el)
+        ;(window as unknown as { Alpine: { initTree: (el: Element) => void } }).Alpine.initTree(el)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        const out = el.textContent ?? ''
+        el.remove()
+
+        return out
+    })
+}
+
+test('P3: Zahlformate der Insel folgen der gewählten Sprache (de „1.234.567" → en „1,234,567")', async ({ page }) => {
+    await openSettings(page)
+
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de')
+    expect(await islandNumber(page), 'unter Deutsch bleibt das Format bitgleich zu vorher').toBe('1.234.567')
+
+    await page.locator('select[name="locale"]').selectOption('en')
+    await page.getByRole('button', { name: 'Sprache wechseln' }).click()
+    await page.waitForURL('**/settings')
+
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+    expect(await islandNumber(page), 'nach dem Wechsel formatiert die Insel englisch — nicht mehr deutsch').toBe(
+        '1,234,567',
+    )
+})

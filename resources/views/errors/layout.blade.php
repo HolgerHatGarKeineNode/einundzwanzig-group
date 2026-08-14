@@ -17,7 +17,11 @@
 </head>
 <body class="min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
     <main class="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 py-10 pt-safe text-center">
-        <a href="{{ route('home') }}" aria-label="Startseite" class="pressable">
+        {{-- P3: die Hülle trägt zwei eigene sichtbare Texte (Marken-Link und Rückweg).
+             Ohne `__()` hier blieben die Fehlerseiten halb deutsch, obwohl 404/500/503
+             übersetzt sind — die Hülle stand im Plan nicht, gehört aber zur selben
+             Fläche. `Startseite` existiert bereits im Katalog. --}}
+        <a href="{{ route('home') }}" aria-label="{{ __('Startseite') }}" class="pressable">
             <x-group::app-brand-mark class="size-16 shadow-pop" />
         </a>
 
@@ -27,7 +31,7 @@
 
         <a href="{{ route('home') }}"
            class="pressable mt-6 inline-flex items-center gap-2 rounded-tile bg-brand-500 px-4 py-2 font-medium text-white shadow-card">
-            Zurück zur Startseite
+            {{ __('Zurück zur Startseite') }}
         </a>
     </main>
 </body>
