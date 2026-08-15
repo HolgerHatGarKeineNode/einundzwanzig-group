@@ -1,7 +1,8 @@
 import { test, expect, type Page } from './support/fixtures'
 import type { BrowserContext } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { neventEncode } from 'nostr-tools/nip19'
+import { generateSecretKey } from 'nostr-tools'
+import { neventEncode, nsecEncode } from 'nostr-tools/nip19'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 import { cleanupRooms, trackRoom } from './support/rooms'
@@ -405,5 +406,114 @@ test.describe('Beitreten-Karte (P3.1, Raum-Fuß)', () => {
         await expect(page.getByRole('button', { name: 'Beitreten' })).toBeHidden({ timeout: 10_000 })
         await expect(gateHeading(page)).toBeVisible()
         await expect(gateAnmelden(page)).toBeVisible()
+    })
+})
+
+test.describe('Angemeldetes Relay-Nicht-Mitglied auf einem Raum-Link (P11)', () => {
+    /**
+     * Die dritte Zielgruppe nach P4: angemeldet, gültiger Signer, KEIN Mitglied
+     * des Relays. Für sie nimmt der Relay das AUTH an und weist danach JEDE
+     * Lese-Anfrage mit `CLOSED restricted: you are not a member of this relay`
+     * ab (gemessen, p11-messung.md A1/A3 — `restricted:` erreicht den Aufrufer
+     * MIT Grund, anders als `auth-required:`, das der Auth-Buffer verschluckt).
+     *
+     * Bis P11 zeigte die Fläche zwei Unwahrheiten: die Leerzustands-Karte
+     * („Noch keine Nachrichten in diesem Raum.") über einer Bühne, deren einzige
+     * echte Nachricht der Relay nie herausgab, und einen „Beitreten"-Knopf, dessen
+     * `join()` nachweislich mit `restricted:` scheitert (p4-raw-join-nichtmitglied.log).
+     *
+     * An ihrer Stelle: das room-gate („Nur für Mitglieder" / „Dieser Bereich ist
+     * Mitgliedern vorbehalten.") — bewusst dieselbe Sprache wie der Gast-Zweig
+     * des verein-gate, denn aus `restricted:` folgt nur Relay-Mitgliedschaft,
+     * nicht Vereinsmitgliedschaft: keine Aussage über die Person.
+     */
+    test('sieht das Relay-Gate statt Leerkarte und Beitreten — eingeschwungen, nicht vor dem Kippen', async ({ page }) => {
+        test.setTimeout(60_000)
+        const h = `onboard6${Date.now()}`
+        createRoomNak(h, 'Onboard6')
+        const marker = `p11-positivkontrolle-${h}`
+        postRootMessage(h, marker)
+
+        // Frischer Wegwerf-Signer — KEIN Mitglied dieses Relays (nicht NSEC!).
+        await useZooid(page)
+        await loginNsec(page, nsecEncode(generateSecretKey()))
+        await page.goto(`/rooms/${h}`)
+
+        // ERST auf den Wendepunkt warten: `gatedOut` wird durch das restricted-
+        // CLOSED der Live-Sub gesetzt (~0,5 s nach Betreten, p11-05) und `loading`
+        // kippt mit demselben CLOSE — beides Zustände, die vorher UNREICHBAR waren.
+        // Ohne dieses Warten wäre jede Negativ-Assertion grün, BEVOR die Leerkarte
+        // und der Knopf überhaupt entstehen könnten (P4-Vakuitätsfalle).
+        await page.waitForFunction(
+            () => {
+                const el = document.querySelector('[x-data^="nostrRoomChat"]') as any
+                const d = el?._x_dataStack?.[0]
+                return d?.gatedOut === true && d?.loading === false
+            },
+            undefined,
+            { timeout: 20_000 },
+        )
+
+        // 1) Die Ersatzfläche steht da — sichtbar, nicht nur im DOM.
+        await expect(page.getByTestId('room-gate-restricted')).toBeVisible()
+        await expect(page.getByText('Nur für Mitglieder')).toBeVisible()
+        await expect(page.getByText('Dieser Bereich ist Mitgliedern vorbehalten.')).toBeVisible()
+
+        // 2) Die Leerzustands-Karte ist GAR NICHT im DOM (`x-if` + `!gatedOut`):
+        //    der Raum trägt genau eine echte Nachricht (Punkt 4), „Noch keine
+        //    Nachrichten" wäre die Quittung der verweigerten Anfrage, keine
+        //    Aussage über den Raum.
+        await expect(page.getByText('Noch keine Nachrichten in diesem Raum.')).toHaveCount(0)
+        await expect(page.getByText('Schreib die erste.')).toHaveCount(0)
+
+        // 3) Kein „Beitreten", das garantiert scheitert. Raum-Fuß-Karte hängt an
+        //    `x-show` (⇒ `toBeHidden`), Thread-Karte an `x-if` (⇒ nicht im DOM).
+        await expect(page.getByText('Tritt dem Raum bei, um mitzuschreiben.')).toBeHidden()
+        await expect(page.getByText('Tritt dem Raum bei, um zu antworten.')).toHaveCount(0)
+
+        // 4) Positivkontrolle der Negation: die echte Nachricht ist NICHT da —
+        //    ohne sie wäre „Bühne leer" nicht von „Relay verweigert" zu trennen.
+        await expect(page.getByText(marker)).toHaveCount(0)
+
+        // 5) Das verein-gate des Gastes ist nicht im Spiel (`authed` ⇒ `x-if`
+        //    nie erfüllt) — der restricted-Fall hat SEINE eigene Fläche. Über die
+        //    INSEL geprüft, nicht über den Text: „Nur für Mitglieder" steht auch
+        //    auf dem room-gate oben (bewusst dieselbe Sprache).
+        await expect(page.locator('[x-data="nostrVereinGate"]')).toHaveCount(0)
+    })
+
+    /**
+     * Gegenprobe aus der DoD: ein Guard, der eine der anderen Gruppen mitnimmt,
+     * tauscht einen Fehler gegen einen anderen. Mitglied (NSEC) im WIRKLICH
+     * leeren Raum: die Leerkarte MUSS bleiben — sie ist dort eine wahre Aussage
+     * (EOSE des Relays, kein restricted). Und der Beitreten-Knopf bleibt für
+     * Angemeldete MIT Relay-Mitgliedschaft ohne Raum-Mitgliedschaft sichtbar
+     * (sein Join geht durch — festgehalten auch im P3.1-Test oben).
+     */
+    test('Gegenprobe: MITGLIED im wirklich leeren Raum sieht die Leerkarte und den Beitreten-Knopf', async ({ page }) => {
+        test.setTimeout(60_000)
+        const h = `onboard7${Date.now()}`
+        createRoomNak(h, 'Onboard7') // KEINE Nachricht — wirklich leer
+
+        await useZooid(page)
+        await loginNsec(page, NSEC)
+        await page.goto(`/rooms/${h}`)
+
+        // Wendepunkt: Ladevorgang abgeschlossen (EOSE), Nachrichten 0, kein Gate.
+        await page.waitForFunction(
+            () => {
+                const el = document.querySelector('[x-data^="nostrRoomChat"]') as any
+                const d = el?._x_dataStack?.[0]
+                return d?.loading === false && d?.gatedOut === false
+            },
+            undefined,
+            { timeout: 20_000 },
+        )
+
+        await expect(page.getByText('Noch keine Nachrichten in diesem Raum.')).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Schreib die erste.' })).toBeVisible()
+        await expect(page.getByTestId('room-gate-restricted')).toHaveCount(0)
+        // Relay-Mitglied ohne Raum-Mitgliedschaft: der Knopf, dessen Join durchgeht.
+        await expect(page.getByText('Tritt dem Raum bei, um mitzuschreiben.')).toBeVisible()
     })
 })

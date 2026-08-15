@@ -65,7 +65,12 @@ test('Leerer Raum: genau EIN CTA, Fokus-Kaskade nach Zustand (Mitglied → Compo
     // Der Leerzustand selbst.
     expect($html)->toContain('Noch keine Nachrichten in diesem Raum.');
 
-    $block = extractBetween($html, '<template x-if="!loading && messages.length === 0 && $store.authGate?.authed">', '</template>');
+    // P11: `&& !gatedOut` kam dazu — wurde der Read vom Relay abgewiesen
+    // (`CLOSED restricted:`), ist „Noch keine Nachrichten" die Quittung der
+    // verweigerten Anfrage, keine Aussage über den Raum (p11-messung.md A3:
+    // Messraum trug genau eine echte Nachricht, die Karte behauptete trotzdem
+    // „Noch keine"). E2E-gedeckt in tests/e2e/onboarding.spec.ts (P11-Block).
+    $block = extractBetween($html, '<template x-if="!loading && messages.length === 0 && $store.authGate?.authed && !gatedOut">', '</template>');
     expect($block)->not->toBeNull();
 
     // Genau EIN Bedienelement in diesem Leerzustand-Block.
@@ -424,8 +429,15 @@ test('Gast im Thread: dasselbe verein-gate wie im Raum — mit threadRootId in d
     // Genau zwei Einhängungen im Markup: Raum-Fuß und Thread-Fuß, keine dritte.
     expect(substr_count($html, 'x-data="nostrVereinGate"'))->toBe(2);
 
-    // Beitreten-Hinweis im Thread nur für ANGEMELDETE Nicht-Mitglieder, nicht für Gäste.
-    expect($html)->toContain('x-if="!joined && $store.authGate?.authed"');
+    // Beitreten-Hinweis im Thread nur für ANGEMELDETE Nicht-Mitglieder, nicht für
+    // Gäste — und seit P11 nicht für Relay-Nicht-Mitglieder: deren `join()` scheitert
+    // nachweislich (`restricted:`), der Knopf würde garantiert ins Leere zeigen.
+    expect($html)->toContain('x-if="!joined && $store.authGate?.authed && !gatedOut"');
+
+    // P11: das Relay-Gate hängt an derselben Stelle wie das Gast-Gate — der Thread
+    // ist ein eigener teilbarer Landeplatz, auch er braucht die Aussage für den,
+    // dessen Read der Relay abwies. Genau zwei Einhängungen (Raum-Fuß + Thread-Fuß).
+    expect(substr_count($html, 'data-testid="room-gate-restricted"'))->toBe(2);
 
     // Der Thread-Composer selbst bleibt Mitgliedern vorbehalten — er ist nicht das,
     // was der Gast hier sieht.
