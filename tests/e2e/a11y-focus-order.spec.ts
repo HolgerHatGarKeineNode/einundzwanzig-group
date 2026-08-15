@@ -71,23 +71,82 @@ test.describe('Leerer Raum: Fokus-Kaskade nach Zustand (P3.1/P3.5)', () => {
         await expect(page.getByRole('button', { name: 'Beitreten' })).toBeFocused({ timeout: 5_000 })
     })
 
-    test('Gast → Fokus auf den Gast-Composer', async ({ page }) => {
+    /**
+     * P4: die DRITTE Stufe der Kaskade (Gast → Gast-Composer) ist mit dem
+     * Gast-Composer entfallen. Was an ihre Stelle tritt, ist NICHT „der Gast
+     * erreicht die Karte nicht mehr" — das war die Annahme der Übergabe und sie
+     * ist am laufenden Client widerlegt (Messung s. u.). Der Gast erreicht die
+     * Karte sehr wohl; nur ihr Fokusziel (`$refs.joinButton`) ist für ihn
+     * verborgen, und `.focus()` auf ein per `x-show` verborgenes Element ist ein
+     * stiller No-Op (so steht es auch im Blade-Kommentar an dieser Kaskade).
+     *
+     * ── FUND, 2026-08-15, test-engineer (gemessen, nicht erschlossen) ──────────
+     * Sonde: Gast auf einem frischen Raum, Alpine-`$data` der Raum-Insel alle
+     * 500 ms gelesen. `loading` ist beim Mount `true` und kippt nach **~3,5 s**
+     * auf `false`, obwohl der Relay dem signerlosen Client jeden REQ mit
+     * `auth-required` schließt und nie ein EOSE schickt. Im selben Moment
+     * erscheint die Leerzustands-Karte samt sichtbarem CTA „Schreib die erste.".
+     * Rohausgabe: `p4-messung.md`, Abschnitt 20.
+     *
+     * ── ENTSCHIEDEN am 2026-08-15 (QS-Gate REJECT, Mangel 1) ─────────────────
+     * Der obige Fund ist behoben, und dieser Test ist wie angekündigt mitgezogen.
+     * Die Leerzustands-Karte hängt jetzt zusätzlich an `$store.authGate?.authed`.
+     * Grund: der Messraum trug GENAU EINE echte Nachricht, und der Gast bekam
+     * „Noch keine Nachrichten in diesem Raum." zu lesen — dieselbe Unwahrheit wie
+     * das zurückgebaute „Du liest mit", nur andersherum. Ohne Signer ist
+     * `messages.length === 0` keine Aussage über den Raum, sondern die Quittung
+     * einer verweigerten Leseanfrage (`CLOSED auth-required`, vom welshman-
+     * Auth-Buffer verschluckt). Für Angemeldete ist die Karte unverändert.
+     *
+     * Der Test prüft deshalb jetzt die Gegenrichtung: der Gast bekommt GAR KEINE
+     * Aussage über den Raumzustand, und sein Fuß ist das Vereins-Gate.
+     * Rohausgabe: `p4-messung.md`, Abschnitt 20.1.
+     */
+    test('Gast → keine Aussage über den Raumzustand (Leerkarte entfällt für ihn); sein Fuß ist das Vereins-Gate', async ({
+        page,
+    }) => {
         const h = `focus3${Date.now()}`
         createRoomNak(h, 'Focus3')
 
         await useZooid(page)
         await loginNsec(page, NSEC)
         await page.goto(`/rooms/${h}`)
-        await page.evaluate(() => localStorage.removeItem('pubkey'))
+        await page.evaluate(() => {
+            localStorage.removeItem('pubkey')
+            localStorage.removeItem('sessions')
+        })
         await page.reload()
         expect(await page.evaluate(() => (window as any).Alpine?.store('authGate')?.authed)).toBe(false)
 
-        const cta = page.getByRole('button', { name: 'Schreib die erste.' })
-        await expect(cta).toBeVisible({ timeout: 15_000 })
-        await cta.click()
-        await expect(page.getByRole('button', { name: /Nachricht schreiben…\s*,\s*anmelden erforderlich/ })).toBeFocused({
-            timeout: 5_000,
-        })
+        // Die Fläche, die der Rückbau ihm gibt.
+        await expect(page.getByTestId('verein-gate-anmelden')).toBeVisible({ timeout: 15_000 })
+
+        // ERST den Wendepunkt abwarten: `loading` kippt für den Gast nach ~3,4 s
+        // auf `false` (welshmans `load()`-Timeout resolved LEER). Vorher wäre die
+        // folgende Assertion grün, bevor die Karte überhaupt erscheinen könnte —
+        // also wertlos. Genau in diesem Moment stand hier vorher der CTA.
+        await page.waitForFunction(
+            () => {
+                const el = document.querySelector('[x-data^="nostrRoomChat"]') as any
+                return el?._x_dataStack?.[0]?.loading === false
+            },
+            undefined,
+            { timeout: 20_000 },
+        )
+
+        // Die Leerzustands-Karte ist für ihn gar nicht erst da — weder Text noch CTA.
+        await expect(page.getByRole('button', { name: 'Schreib die erste.' })).toHaveCount(0)
+        await expect(page.getByText('Noch keine Nachrichten in diesem Raum.')).toHaveCount(0)
+
+        // Und die beiden Ziele der Kaskade bleiben verborgen: der Composer (nicht
+        // beigetreten) UND der Beitreten-Knopf (nicht angemeldet).
+        await expect(page.getByRole('button', { name: 'Beitreten' })).toBeHidden()
+        await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeHidden()
+
+        // Keine Lade-Ansage und keine sichtbaren Skeletons: die `aria-live`-Zeile
+        // sitzt im Skeleton-Block, der seit P4 zusätzlich an `authed` hängt.
+        await expect(page.getByText('Verlauf wird geladen…')).toBeHidden()
+        await expect(page.locator('.skeleton:visible')).toHaveCount(0)
     })
 })
 

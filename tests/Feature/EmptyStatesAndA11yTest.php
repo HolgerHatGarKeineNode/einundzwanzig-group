@@ -56,7 +56,7 @@ function responseHtml(TestResponse $res): string
 
 // ─── 1. Fünf Leerzustände: genau eine Handlung (oder bewusst keine) ──────────
 
-test('Leerer Raum: genau EIN CTA, Fokus-Kaskade nach Zustand (Mitglied → Composer, angemeldet → Beitreten, Gast → Gast-Composer)', function () {
+test('Leerer Raum: genau EIN CTA, Fokus-Kaskade nach Zustand (Mitglied → Composer, angemeldet → Beitreten) — der dritte Zweig ist mit P4 entfallen, nicht gestrichen', function () {
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.room', ['h' => 'anyroom']))
         ->assertOk();
@@ -65,13 +65,38 @@ test('Leerer Raum: genau EIN CTA, Fokus-Kaskade nach Zustand (Mitglied → Compo
     // Der Leerzustand selbst.
     expect($html)->toContain('Noch keine Nachrichten in diesem Raum.');
 
-    $block = extractBetween($html, '<template x-if="!loading && messages.length === 0">', '</template>');
+    $block = extractBetween($html, '<template x-if="!loading && messages.length === 0 && $store.authGate?.authed">', '</template>');
     expect($block)->not->toBeNull();
 
     // Genau EIN Bedienelement in diesem Leerzustand-Block.
     expect(substr_count($block, 'data-flux-button='))->toBe(1);
-    expect($block)->toContain('(joined ? $refs.composer : ($store.authGate?.authed ? $refs.joinButton : $refs.guestComposer))?.focus()');
+    expect($block)->toContain('(joined ? $refs.composer : $refs.joinButton)?.focus()');
     expect($block)->toContain('Schreib die erste.');
+
+    // P4: die dritte Stufe (Gast → Gast-Composer) ist mit dem Gast-Composer
+    // entfallen. Die Assertion steht auf der GANZEN Seite, nicht nur auf dem
+    // Block: ein `$refs.guestComposer` irgendwo im Markup wäre nach dem Rückbau
+    // ein Verweis ins Leere (`undefined?.focus()` — still, aber wirkungslos).
+    expect($html)->not->toContain('$refs.guestComposer');
+
+    // Warum an BEIDEN Karten ein `authed`-Term hängt, gemessen: die ursprüngliche
+    // Annahme „ein Gast erreicht die Leerkarte gar nicht, weil `loading` für ihn nie
+    // falsch wird" ist WIDERLEGT. `loading` kippt nach ~3,4 s auch für ihn — nicht
+    // durch ein EOSE, sondern weil welshmans `load()` in seinen 3-s-Timeout läuft
+    // und leer resolved (`@welshman/net/…/request.js:226`), während das
+    // `CLOSED auth-required` den Aufrufer nie erreicht (`…/policy.js:62-67`).
+    // Für einen Gast trägt `messages.length === 0` damit NULL Information: der Relay
+    // hat jede Leseanfrage abgelehnt, nicht eine leere Antwort geliefert. Ohne den
+    // Guard stand deshalb „Noch keine Nachrichten in diesem Raum. / Schreib die
+    // erste." neben dem Mitglieder-Gate — in einem Raum MIT Nachricht. Dieselbe
+    // Unwahrheit wie das entfernte „Du liest mit", nur andersherum.
+    //
+    // Der `authed`-Guard am Skeleton deckt das Fenster BIS zu diesem Kippen ab
+    // (sonst stünde der Gast erst vor 18 Skeleton-Zeilen und dann vor einer leeren
+    // Bühne). Das Verhalten hängt als Test in tests/e2e/a11y-focus-order.spec.ts und
+    // tests/e2e/onboarding.spec.ts — beide warten auf den Wendepunkt, bevor sie
+    // prüfen; hier steht nur das Markup.
+    expect($html)->toContain('x-show="loading && messages.length === 0 && $store.authGate?.authed"');
 });
 
 test('Leere Mitgliederliste: Einladen-CTA existiert NUR unter isAdmin, sonst handlungslos', function () {
@@ -81,7 +106,7 @@ test('Leere Mitgliederliste: Einladen-CTA existiert NUR unter isAdmin, sonst han
     $html = responseHtml($res);
 
     expect($html)->toContain('Noch keine Mitglieder in diesem Space.');
-    $block = extractBetween($html, 'x-if="profilesReady && members.length === 0 && !gatedOut"', '</template>');
+    $block = extractBetween($html, 'x-if="profilesReady && members.length === 0 && !gatedOut && $store.authGate?.authed"', '</template>');
     expect($block)->not->toBeNull();
     expect($block)->toContain('x-show="isAdmin"');
     expect($block)->toContain('Mitglied einladen');
@@ -265,6 +290,18 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // Die neuen Zahlen hier eintragen UND im selben Commit begründen, WELCHES
     // Attribut dazukam/wegfiel — sonst ist „38 → 41" so wenig nachrechenbar wie
     // die dynamische Fassung, die das hier ersetzt.
+    //
+    // P4 (2026-08-15, Rückbau der Gast-Fläche): NACHGEMESSEN, Ergebnis 'room'
+    // 35 → 35, also unverändert. Das ist kein Übersehen, sondern ein Ergebnis:
+    // per Multiset-Diff der sortierten Träger-Listen (`git show
+    // HEAD:…⚡room.blade.php` gegen den Arbeitsbaum, beide Richtungen leer) ist
+    // KEIN Träger weggefallen und keiner dazugekommen. Entfernt wurden aus dieser
+    // Datei nur ein `aria-label="Hinweis schließen"` (aria-label ist hier
+    // ausdrücklich AUSGESCHLOSSEN, s. Doc-Block oben) und — in der gelöschten
+    // Komponente `guest-composer.blade.php` — ein `<span class="sr-only">`; eine
+    // sr-only-Klasse ist kein ARIA-Attribut. Die neue Fläche (`verein-gate`)
+    // bringt ihre eigenen Träger (2× `aria-hidden="true"`) mit, steht aber in
+    // einer Datei, die diese Liste bewusst nicht enthält.
     $expected = [
         'room' => 35,
         'directory' => 2,
@@ -302,38 +339,98 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     expect($countInRendered($spaces, ariaCarriersFromSource($ariaFiles['spaces'])))->toBe($expected['spaces']);
 });
 
-// ─── Gast-Markup (P3.2/P3.3): mobile Bypass, kein Server-Login ───────────────
+// ─── Gast-Markup (P4, vorher P3.2/P3.3): mobile Bypass, kein Server-Login ────
 
-test('Gast (Mobile-Bypass, keine Session): Gast-Composer im Raum, Einstiegszeile, konditionale Beitreten-Karte', function () {
+/**
+ * Die Aussage dieses Tests ist dieselbe geblieben — „ein Gast bekommt am Raum-Fuß
+ * SEINE eigene Fläche, und die Beitreten-Karte gehört ihm nicht" —, nur die Fläche
+ * ist eine andere. Bis P4 waren das Gast-Composer plus Einstiegszeile („Du liest
+ * mit."); beide behaupteten ein Mitlesen, das es nicht gibt: ohne Signer kein
+ * NIP-42-AUTH, ohne AUTH kein Read, der Relay schließt jeden REQ mit
+ * `auth-required` (gemessen 2026-08-15 lokal UND auf beiden Prod-Relays,
+ * `docs/plans/2026-08-11T1321-restposten-aus-ux-plan/p4-messung.md`).
+ *
+ * An ihrer Stelle steht der GAST-Zweig des verein-gate. Er sagt bewusst NICHT „du
+ * bist kein Mitglied" — vom Gast wissen wir das nicht, er kann Vereinsmitglied und
+ * nur nicht angemeldet sein. Das ist der Unterschied zum angemeldeten
+ * Nicht-Mitglied, von dem wir es belegt wissen (13534), und deshalb prüft dieser
+ * Test BEIDE Zweige: dass es zwei sind, ist die Aussage.
+ */
+test('Gast (Mobile-Bypass, keine Session): verein-gate mit der Mitglieder-Aussage statt Gast-Composer und Einstiegszeile', function () {
     config()->set('nativephp-internal.running', true);
 
     $html = responseHtml($this->get(route('group.room', ['h' => 'anyroom']))->assertOk());
 
-    // Gast-Composer statt echtem Composer.
-    expect($html)->toContain('anmelden erforderlich');
+    // 1) Die Einhängung am Raum-Fuß ist GAST-EXKLUSIV und `x-if` (nicht `x-show`):
+    //    die Gate-Insel startet beim Mount einen eigenen Directory-Sub, der sonst
+    //    bei JEDEM Raumbesuch mitliefe — auch für Mitglieder, die die Fläche nie sehen.
+    expect($html)->toContain('<template x-if="! $store.authGate?.authed">');
+    expect($html)->toContain('x-data="nostrVereinGate"');
+
+    // 2) Der Gast-Zweig trägt genau das, was ohne Pubkey feststeht, und der Knopf
+    //    geht über `requireAuth` — nicht über einen handgeschriebenen
+    //    `open-login-sheet`-Dispatch. Daran hängt der `pendingReturn`-Rückweg
+    //    (Verhalten: tests/e2e/onboarding.spec.ts).
+    expect($html)->toContain('x-show="isGuest"');
+    expect($html)->toContain('Anmeldung nötig');
+    expect($html)->toContain('Nur für Mitglieder');
+    expect($html)->toContain('Dieser Bereich ist Mitgliedern vorbehalten.');
+    expect($html)->toContain('data-testid="verein-gate-anmelden"');
     expect($html)->toContain('$store.authGate.requireAuth(');
 
-    // Einstiegszeile: liest NICHT aus membershipReady, Zustand in localStorage.
-    expect($html)->toContain("localStorage.getItem('e21:guest-hint')");
-    expect($html)->toContain("localStorage.setItem('e21:guest-hint', 'closed')");
-    expect($html)->toContain('Du liest mit. Zum Mitschreiben anmelden.');
+    // 3) Das angemeldete Nicht-Mitglied bekommt einen ANDEREN Satz — die belegte
+    //    Aussage plus den Weg zum Vereinsbeitritt. Zwei Zweige, nicht einer.
+    expect($html)->toContain('x-show="!isGuest"');
+    expect($html)->toContain('Noch kein Vereinsmitglied');
 
-    // Beitreten-Karte ist an $store.authGate?.authed gekoppelt (kein Signer-loser
-    // join()-Versuch möglich) — beide Zweige (angemeldet/Gast) müssen im Markup stehen.
+    // 4) Was der Rückbau entfernt hat, ist wirklich weg — inklusive des
+    //    localStorage-Schlüssels der Einstiegszeile (DoD: `e21:guest-hint` kommt
+    //    im Code nicht mehr vor).
+    expect($html)->not->toContain('Du liest mit. Zum Mitschreiben anmelden.');
+    expect($html)->not->toContain('anmelden erforderlich');
+    expect($html)->not->toContain('e21:guest-hint');
+
+    // 5) Die Beitreten-Karte bleibt an `$store.authGate?.authed` gekoppelt (ein
+    //    signerloser `join()` würde ein kind 9021 signieren wollen und im Nichts
+    //    enden). Ihr Gast-Gegenstück ist jetzt das Gate — also darf der frühere
+    //    zweite `x-show`-Zweig an derselben Bedingung NICHT mehr dastehen.
     expect($html)->toContain('membershipReady && !joined && $store.authGate?.authed');
-    expect($html)->toContain('membershipReady && !joined && ! $store.authGate?.authed');
+    expect($html)->not->toContain('membershipReady && !joined && ! $store.authGate?.authed');
+
+    // 6) Und kein Ladeversprechen für den Gast: der Skeleton-Block hängt seit P4
+    //    zusätzlich an `authed`. (Er deckt das Fenster ab, bis `loading` kippt —
+    //    gemessen ~3,5 s, s. Kaskaden-Test oben; ohne den Guard stünde der Gast
+    //    solange vor 18 Skeleton-Zeilen.)
+    expect($html)->toContain('x-show="loading && messages.length === 0 && $store.authGate?.authed"');
 });
 
-test('Gast im Thread: derselbe Gast-Composer wie im Raum (Thread ist ein eigener, teilbarer Landeplatz)', function () {
+test('Gast im Thread: dasselbe verein-gate wie im Raum — mit threadRootId in der Bedingung', function () {
     config()->set('nativephp-internal.running', true);
 
     $html = responseHtml($this->get(route('group.room.thread', ['h' => 'anyroom', 'nevent' => 'nevent1qqs0dummy']))
         ->assertOk());
 
-    expect($html)->toContain('Im Thread antworten…');
-    expect($html)->toContain('!joined && ! $store.authGate?.authed');
+    // Der Thread ist ein eigener, teilbarer Landeplatz (`/rooms/{h}/thread/{nevent}`)
+    // und bekommt denselben Gast-Fuß — sonst bliebe genau dort wieder eine wortlose
+    // leere Fläche.
+    //
+    // `threadRootId` MIT in der Bedingung: das Thread-Panel hängt an einem `x-show`,
+    // die Gate-Insel startet aber beim Mount einen eigenen Directory-Sub. Ohne den
+    // Zusatz stünde auf JEDER Raumseite eines Gastes eine zweite, unsichtbare
+    // Gate-Karte samt zweitem Sub. (Wie viele Inseln zur LAUFZEIT entstehen, misst
+    // tests/e2e/onboarding.spec.ts; hier steht die Bedingung selbst.)
+    expect($html)->toContain('<template x-if="threadRootId && !joined && ! $store.authGate?.authed">');
+
+    // Genau zwei Einhängungen im Markup: Raum-Fuß und Thread-Fuß, keine dritte.
+    expect(substr_count($html, 'x-data="nostrVereinGate"'))->toBe(2);
+
     // Beitreten-Hinweis im Thread nur für ANGEMELDETE Nicht-Mitglieder, nicht für Gäste.
-    expect($html)->toContain('!joined && $store.authGate?.authed');
+    expect($html)->toContain('x-if="!joined && $store.authGate?.authed"');
+
+    // Der Thread-Composer selbst bleibt Mitgliedern vorbehalten — er ist nicht das,
+    // was der Gast hier sieht.
+    expect($html)->toContain('Im Thread antworten…');
+    expect($html)->not->toContain('anmelden erforderlich');
 });
 
 /**
