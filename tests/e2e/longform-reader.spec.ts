@@ -150,6 +150,153 @@ test('Reader: ein syntaktisch gültiger naddr auf einen NIE publizierten Artikel
     await expect(page.getByText('Diesen Artikel gibt es nicht.', { exact: true })).toBeVisible({ timeout: 20_000 })
 })
 
+// ── Schweigender Relay: Fehler-Callout, nicht „gibt es nicht" (Restposten P7 Punkt 2) ─
+//
+// `missing` („Diesen Artikel gibt es nicht.") ist eine Aussage ÜBER den Relay und nur
+// gedeckt, wenn er wirklich geantwortet hat (`LoadOutcome.complete`, `longformFeed.ts`).
+// `error` („gerade nicht erreichbar" + „Erneut laden") ist der Zustand für Schweigen.
+// Diese zwei Tests bewachen genau diese Trennung — vorher hatte keiner sie im Netz.
+
+/** Port, auf dem kein Relay dieser Suite lauscht — außerhalb aller belegten Bereiche
+ *  (serve 8137+, board-serve 8437+, zooid 3335+, buzz 3001+, siehe support/fixtures.ts
+ *  und board-fixtures.ts). `routeWebSocket` fängt die Verbindung ab, BEVOR gewählt
+ *  wird — der Port muss nur eindeutig und von nichts belegt sein. */
+const SILENT_BOARD_PORT = 3999
+
+/** Zwei Zähler über dem stummen Relay: Transport (Sockets) und Anfragen (REQ-Rahmen). */
+type SilenceProbe = {
+    /** Verbindungsaufbauten zum stummen Relay. Erwartungsgemäß 1 — welshman hält den
+     *  Socket im Pool offen; ein zweiter Versuch braucht keinen zweiten Socket. */
+    dials: () => number
+    /** Abgesendete REQ-Rahmen — JEDER `load()` fragt genau einmal an, auch wenn er
+     *  über den gepoolten Socket läuft. Das ist der Versuchszähler des Retry-Tests. */
+    reqs: () => number
+}
+
+/**
+ * Macht NUR den Artikel-Relay stumm — der Space-Relay (Login, App-Shell) läuft auf
+ * seinem eigenen Port weiter. Zwei Hebel:
+ *
+ *  - `addInitScript` setzt `window.__nostrBoard`, bevor irgendein Seitenscript läuft;
+ *    das `??` im Head-Partial (`partials/head.blade.php:30`) lässt den Test gewinnen
+ *    (derselbe dokumentierte Eingriff wie `__nostrSpace` in `support/zooid.ts`).
+ *  - `routeWebSocket` OHNE `connectToServer` macht die Verbindung zum schwarzen Loch
+ *    (Muster `unread-dot.spec.ts:260`): kein EOSE, `load()` löst mit `complete: false`
+ *    auf — das ist exakt der Zustand „Relay hat nicht geantwortet".
+ *
+ * Gezählt wird auf BEIDEN Ebenen (Muster `room.spec.ts:1382`, Frame-Sniffing im
+ * Route-Handler): Sockets und REQ-Rahmen. Gemessen am 2026-08-15: der Retry-`load`
+ * wählt KEINEN zweiten Socket — welshman verwaltet die Verbindung im Pool und sendet
+ * den zweiten REQ über dieselbe (stumme) Leitung. Der Versuchsbeweis kann deshalb
+ * nicht am Socket hängen, er hängt am REQ.
+ */
+async function silenceArticleRelay(page: Page): Promise<SilenceProbe> {
+    let dialCount = 0
+    let reqCount = 0
+    await page.routeWebSocket(new RegExp(`localhost:${SILENT_BOARD_PORT}`), (ws) => {
+        dialCount++
+        ws.onMessage((raw) => {
+            const s = typeof raw === 'string' ? raw : raw.toString()
+            try {
+                const parsed = JSON.parse(s) as unknown[]
+                if (parsed[0] === 'REQ') {
+                    reqCount++
+                }
+            } catch {
+                // Kein JSON → kein Nostr-Rahmen, zählt nicht.
+            }
+        })
+    })
+    await page.addInitScript((url) => {
+        ;(window as unknown as { __nostrBoard?: string }).__nostrBoard = url
+    }, `ws://localhost:${SILENT_BOARD_PORT}/`)
+
+    return { dials: () => dialCount, reqs: () => reqCount }
+}
+
+test('Reader: schweigender Relay zeigt Fehler-Callout und Erneut laden — NICHT „gibt es nicht"', async ({
+    page,
+    baseURL,
+}) => {
+    test.setTimeout(60_000) // EOSE-Timeout des schwarzen Lochs (~3 s) + Login — äußerer Deckel
+
+    const ws = boardWs(baseURL as string)
+    const identifier = `lf-silent-${rnd()}`
+
+    // Der Artikel EXISTIERT auf dem Relay (`publishArticle` requiriert ihn zurück) —
+    // jede „gibt es nicht"-Aussage wäre damit nachweislich falsch. Genau diese Lüge
+    // ist es, die die error/missing-Trennung verhindern soll: der Client weiß nichts
+    // über den Relay, und „kennt ihn nicht" behauptet trotzdem etwas über ihn.
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier,
+        title: `LFSilent-${rnd()}`,
+        content: 'Ein Artikel, den der Relay kennt, aber gerade nicht herausrückt.',
+        publishedAt: 1_700_000_003,
+    })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier, relays: [] })
+
+    await loginToBoard(page)
+    const probe = await silenceArticleRelay(page)
+    await page.goto(`/articles/${naddr}`)
+
+    await expect(page.getByText('Der Artikel ist gerade nicht erreichbar.', { exact: true })).toBeVisible({
+        timeout: 20_000,
+    })
+    await expect(page.getByRole('button', { name: 'Erneut laden' })).toBeVisible()
+
+    // Die Unterscheidung selbst: Schweigen darf keine Relay-Aussage produzieren. Erst
+    // NACH dem Callout geprüft — zu diesem Zeitpunkt ist `loading` vorbei, der Zustand
+    // hat sich eingeschwungen, die Prüfung kann nicht auf einem Übergang bestehen.
+    await expect(page.getByText('Diesen Artikel gibt es nicht.', { exact: true })).toBeHidden()
+    await expect(page.getByText('Dieser Link führt zu keinem Artikel.', { exact: true })).toBeHidden()
+
+    // Das Schweigen wurde wirklich befragt (belegt den Hebel, nicht nur die Aussage):
+    expect(probe.reqs(), 'mindestens ein REQ gegen das stumme Relay').toBeGreaterThanOrEqual(1)
+})
+
+test('Reader: „Erneut laden" wählt den Relay neu an — am Verbindungszähler belegt', async ({ page, baseURL }) => {
+    test.setTimeout(60_000) // zwei EOSE-Timeouts des schwarzen Lochs + Login
+
+    const ws = boardWs(baseURL as string)
+    const identifier = `lf-retry-${rnd()}`
+
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier,
+        title: `LFRetry-${rnd()}`,
+        content: 'Ein Artikel für den zweiten Versuch.',
+        publishedAt: 1_700_000_004,
+    })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier, relays: [] })
+
+    await loginToBoard(page)
+    const probe = await silenceArticleRelay(page)
+    await page.goto(`/articles/${naddr}`)
+
+    await expect(page.getByText('Der Artikel ist gerade nicht erreichbar.', { exact: true })).toBeVisible({
+        timeout: 20_000,
+    })
+    // Steht das Callout, ist der erste `load()` aufgelöst — die Zähler ruhen.
+    const before = probe.reqs()
+    expect(before, 'erster Versuch muss angefragt haben').toBeGreaterThanOrEqual(1)
+
+    await page.getByRole('button', { name: 'Erneut laden' }).click()
+
+    // Der Netzwerkbeweis: der Klick führt zu einer NEUEN Anfrage, nicht nur zu einem
+    // UI-Toggle — am REQ-Zähler des schwarzen Lochs, ohne Timing. (Sockets reichen
+    // hier nicht: der Pool hält die stumme Leitung offen, siehe silenceArticleRelay.)
+    await expect.poll(() => probe.reqs() - before, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
+
+    // Nach dem zweiten scheiternden Versuch steht derselbe ehrliche Satz wieder da …
+    await expect(page.getByText('Der Artikel ist gerade nicht erreichbar.', { exact: true })).toBeVisible({
+        timeout: 20_000,
+    })
+    // … und wieder kein „gibt es nicht" (auch nicht nach dem Retry).
+    await expect(page.getByText('Diesen Artikel gibt es nicht.', { exact: true })).toBeHidden()
+
+    // Rohbeweis fürs Protokoll: beide Zählerstufen nach dem Lauf.
+    console.log(`[p7-retry] Sockets=${probe.dials()} REQs=${probe.reqs()} (vor dem Retry: REQs=${before})`)
+})
+
 // ── Einstiege: /spaces-Zeile, Rail (Desktop), Befehlspalette ────────────────────────
 
 test('Einstieg: /spaces zeigt die Zeile "Artikel lesen" und führt zu /articles', async ({ page }) => {
