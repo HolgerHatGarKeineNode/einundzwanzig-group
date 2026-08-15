@@ -1,4 +1,10 @@
-import { test, expect, type Page } from './support/fixtures'
+// Seit P9.2 über `board-fixtures` statt direkt über `fixtures`: das dortige
+// worker-scoped `boardServer`-Fixture fährt einen ZWEITEN `php artisan serve`
+// mit `NOSTR_BOARD_URL` auf demselben worker-eigenen zooid (P7-Muster). Nur so
+// rendert der Server `@if ($hasBoard)` die Artikel-Zeile (`⚡spaces:757`) —
+// einer der bis P9 ungerendert gebliebenen Grafik-Träger. Der Space-Relay ist
+// derselbe wie vorher, Login/Ungelesen/Raumphasen laufen unverändert.
+import { test, expect, type Page } from './support/board-fixtures'
 import { execFileSync } from 'node:child_process'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
@@ -91,6 +97,64 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 
+/**
+ * P9.2 — Fixture-Erweiterung: die zwei Räume, die die bislang ungerenderten
+ * Meetup- und Antrags-Träger auf den Bildschirm bringen. Bewusst aus der SPEC
+ * gepublisht (nak, wie der Ungelesen-Marker oben) und nicht im geteilten
+ * `zooid-testserver.sh`: sie sind Kontrast-Präparate, kein Seed, den andere
+ * Specs als gegeben voraussetzen. Idempotent über Läufe hinweg — kind 9007 ist
+ * über `h` replaceable (UpdateMetadata), ein wiederholter 9021-Join antwortet
+ * „duplicate" und wird ignoriert (beides so im Seed-Skript belegt).
+ *
+ * - `h=meetxenon` (t=meetup, Slug `meetup-xenon-e2e`): kommt in KEINEM Portal-
+ *   Join-Datensatz vor → ohne Flagge → die Kachel rendert die INITIALE
+ *   (`meetup-tile:45`, brand-800). Der Name beginnt mit X, damit die Initiale
+ *   als Beschriftung eindeutig greifbar ist (kein anderer Träger malt ein „X").
+ * - `h=propsupport` (t=project-support) + Join des TEST-USERS: ein EIGENER
+ *   Antragsraum reicht für `proposalCount() > 0` — die Entdecken-Zeile
+ *   (`⚡spaces:700`) rendert auch ohne Admin, denn `_proposalPool()` nimmt
+ *   `mine` immer auf; nur FREMDE Anträge brauchen isAdmin.
+ */
+function seedKontrastTraeger(): void {
+    execFileSync(
+        NAK,
+        ['event', '--auth', '--sec', ADMIN, '-k', '9007', '-t', 'h=propsupport', '-t', 'name=Antragsraum Probe', '-t', 'about=P9-Anker', '-t', 't=project-support', '-t', 'i=proposal:a11y-probe', ZOOID_WS],
+        { stdio: 'ignore' },
+    )
+    execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '9021', '-t', 'h=propsupport', ZOOID_WS], { stdio: 'ignore' })
+    execFileSync(
+        NAK,
+        ['event', '--auth', '--sec', ADMIN, '-k', '9007', '-t', 'h=meetxenon', '-t', 'name=Xenon-Runde', '-t', 'about=P9-Anker', '-t', 't=meetup', '-t', 'i=meetup:e2e-xenon', '-t', 'meetup_slug=meetup-xenon-e2e', ZOOID_WS],
+        { stdio: 'ignore' },
+    )
+}
+
+/**
+ * P9.2 — Meetup-Join STATT des Standard-Stubs aus `support/zooid.ts`: dieselben
+ * drei Records, aber Berlin bekommt einen Termin in +3 Tagen. `isEventSoon`
+ * (≤ 7 Tage) schaltet der Kachel den Datum-Wrapper (`meetup-tile:78`) auf
+ * brand-800; +3 statt +1/+2 Tage hält Abstand zu „Heute"/„Morgen", deren Labels
+ * (übersetzt) eine zweite Regex-Ebene kosten würden. Der Xenon-Slug fehlt
+ * bewusst weiter hier — ohne Join-Datensatz bleibt die Initiale.
+ *
+ * Muss NACH `useZooid()` registriert werden: Playwright befragt Routes in
+ * umgekehrter Registrierungsordnung, die spätere gewinnt (Muster wie der
+ * `__nostrWorkspace`-Override in workspaces.spec.ts).
+ */
+const MEETUP_API = 'https://portal.einundzwanzig.space/api/mobile/meetups'
+
+async function stubMeetupJoinMitTermin(page: Page): Promise<void> {
+    const termin = new Date(Date.now() + 3 * 86400000).toISOString()
+    const records = [
+        { name: 'Meetup Berlin', slug: 'meetup-berlin-e2e', city: 'Berlin', country: 'DE', logo: null, next_event_start: termin },
+        { name: 'Meetup Wien', slug: 'meetup-wien-e2e', city: 'Wien', country: 'AT', logo: null, next_event_start: null },
+        { name: 'Meetup Hamburg', slug: 'meetup-hamburg-e2e', city: 'Hamburg', country: 'DE', logo: null, next_event_start: null },
+    ]
+    await page.route(MEETUP_API, (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(records) }),
+    )
+}
+
 // Farb-Parser, `measure()` und die Typen `Measured`/`Extra` wurden am 2026-08-06
 // nach `support/contrast.ts` verschoben (importiert oben), damit auch andere Specs
 // Kontrast messen können. Herleitung des Parsers, Fail-closed-Verhalten von
@@ -107,6 +171,12 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     // Phase 1 — Standardansicht. Ohne geladene Raumliste ist das Tab-Badge
     // (standardCount() > 0) nicht da, und die Messung ginge am Ursprungsbefund vorbei.
     await expect(page.getByText('Willkommen', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    // P9.2: Der eigene Antragsraum (seedKontrastTraeger) macht die Projektunterstützungs-
+    // Zeile sichtbar — ihr Icon-Chip (⚡spaces:700) ist einer der bis P9 ungerenderten
+    // Grafik-Träger. Gewartet wird auf die ZEILE, nicht auf den Chip: die Zeile ist der
+    // Zustand, der Chip sein Symptom — und ein Join, der noch nicht durch ist, würde
+    // hier laut rot statt unten mit einer Zahl, die nichts aussagt.
+    await expect(page.getByText('Projektunterstützung entdecken')).toBeVisible({ timeout: 20_000 })
     // npub-Chip und Signer-Badge leben im Profil-Popover.
     const profile = page.locator('button[aria-haspopup="true"]').first()
     await profile.click()
@@ -145,7 +215,66 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     }
     await country.click()
     await page.waitForTimeout(400)
-    return [...phase1, ...(await measure(page))]
+
+    // Zustand A — Popover offen, KEIN Land gewählt (bis P9 der EINZIGE gemessene
+    // Zustand dieses Filters): „Alle Länder"-Zeile (brand-800) + Häkchen (brand-700).
+    // Seit P9.2 rendert die Liste darunter zusätzlich die Kachel-Träger: die
+    // Xenon-INITIALE (meetup-tile:45 — Raum ohne Join-Datensatz im Stub) und das
+    // Berlin-DATUM (meetup-tile:78 — isEventSoon über den Stub-Termin). Beide
+    // verschwinden, sobald ein Land gewählt ist (Räume ohne Land fallen aus dem
+    // Filter) — deshalb werden sie genau HIER gemessen, nicht in Zustand B/C.
+    const zustandA = await measure(page)
+
+    // Zustand B — Land gewählt, über den echten Nutzerpfad (Zeile im Popover
+    // antippen). Land-Knopf (⚡spaces:340) und Filter-Chip (:410) tragen brand-800
+    // NUR mit gesetztem Filter. Markiert wie die Hover-Messung in Phase 1b, damit
+    // die Guards unten je Zustand zählen können statt global „irgendwo".
+    //
+    // Auf das ENDE der chip-in-Transition warten (Opazität, Muster wie beim
+    // Login-Sheet und im Umfrage-Dialog): der Chip blendet ein, und mitten darin
+    // gemessen ist jedes Verhältnis erfunden — der Lauf 1 dieser Phase fing ihn
+    // bei opacity 0.524 ein.
+    const popover = page.locator('div.surface-card.absolute')
+    await popover.getByRole('button', { name: /Deutschland/ }).click()
+    await expect(page.getByRole('button', { name: 'Filter leeren' })).toBeVisible({ timeout: 10_000 })
+    const chip = page.locator('button.chip-in')
+    await expect
+        .poll(
+            () =>
+                page.evaluate((sel) => {
+                    let o = 1
+                    let el = document.querySelector(sel) as HTMLElement | null
+                    while (el) {
+                        o *= Number(getComputedStyle(el).opacity)
+                        el = el.parentElement
+                    }
+                    return Math.round(o * 1000) / 1000
+                }, 'button.chip-in'),
+            { timeout: 10_000 },
+        )
+        .toBe(1)
+    expect(await chip.count(), 'mit gesetztem Land, ohne Suchtext muss GENAU der Land-Chip stehen').toBe(1)
+    const zustandB = (await measure(page)).map((m) => ({ ...m, label: `${m.label} (Filter DE)` }))
+
+    // Zustand C — Popover erneut öffnen, MIT gewähltem Land: die gewählte
+    // Länderzeile (⚡spaces:375) trägt brand-800 nur in diesem Zustand (und die
+    // „Alle Länder"-Zeile dafür nicht mehr — deshalb ist Zustand A vorher gemessen).
+    // Auf DIESE Zeile warten, nicht auf den Knopf: erst ihr Sichtbarsein beweist,
+    // dass das Popover offen ist — der Toggle hat hier zwei Handler (x-on:click
+    // am Knopf, x-on:click.outside am Popover), und ein blindes 400-ms-Warten
+    // hätte einen geschlossenen Zustand wie einen gemessenen aussehen lassen
+    // (genau die Fehlerklasse, deretwegen dieser Anker existiert).
+    const landKnopf = page.getByRole('button', { name: /Deutschland/ }).first()
+    await landKnopf.click()
+    await expect(
+        popover.getByRole('button', { name: /Deutschland/ }),
+        'Länder-Popover öffnet nicht — die gewählte Zeile (⚡spaces:375) wäre ungemessen',
+    ).toBeVisible({ timeout: 10_000 })
+    await page.waitForTimeout(300)
+    const zustandC = (await measure(page)).map((m) => ({ ...m, label: `${m.label} (Popover DE)` }))
+    await page.keyboard.press('Escape')
+
+    return [...phase1, ...zustandA, ...zustandB, ...zustandC]
 }
 
 /**
@@ -481,6 +610,11 @@ async function measureDirectoryFilter(page: Page): Promise<Measured[]> {
 for (const theme of ['light', 'dark'] as const) {
     test(`A11y: gerenderter Kontrast der Brand-Farben erfüllt WCAG (${theme})`, async ({ page }) => {
         await useZooid(page)
+        // P9.2 — die beiden Präzisionsräume (Antragsraum + Join, Meetup ohne Join)
+        // und der Meetup-Stub mit Termin. Muss vor der ersten Navigation passieren:
+        // der Join wird beim Space-Mount geladen, die Route vor dem Fetch registriert.
+        seedKontrastTraeger()
+        await stubMeetupJoinMitTermin(page)
         // Theme VOR dem Login setzen, damit die erste Seite schon richtig rendert.
         await page.addInitScript((t) => {
             try {
@@ -578,16 +712,18 @@ for (const theme of ['light', 'dark'] as const) {
         // billige Ausweg wäre, die Farbe zu ändern. Geankert auf die KLASSEN-Signatur,
         // nicht auf den Zeilentext: die Klasse ist der Vertrag, der Text ist Seed-Daten.
         //
-        // Drei der sechs sind hier herstellbar. Die anderen drei hängen an Daten bzw.
-        // Rechten, die dieser Fixture nicht hat, und sind damit UNGEMESSEN — kein
-        // Grund, sie zu verschweigen: `⚡spaces:697` (Antragsräume, `proposalCount() > 0`),
-        // `:752` (Artikel-Zeile, serverseitig `@if ($hasBoard)`) und `:779` (Raum
-        // anlegen, `isAdmin`). Sie tragen dieselbe Klasse an derselben Stelle wie der
-        // gemessene Icon-Chip; wer die Lücke schließen will, braucht Seed-Daten, nicht
-        // eine weitere Messung.
+        // Seit P9.2 sind ALLE sechs gerendert. Die bis dahin ungerenderten drei:
+        // `⚡spaces:700` (Antragsräume) — der eigene Antragsraum aus seedKontrastTraeger
+        // genügt, denn _proposalPool() nimmt `mine` ohne Admin auf; `:757` (Artikel-
+        // Zeile) — serverseitig `@if ($hasBoard)`, hergestellt über den board-serve
+        // aus support/board-fixtures.ts; `:784` (Raum anlegen, isAdmin) — eigener
+        // Test unten, der Login als zooid-Admin. Die Zeilen-UMFELDE sind hier je
+        // EINZELN verlangt, weil die Klassen-Signatur aller vier Chips identisch ist:
+        // eine Sammelabfrage über die Signatur allein prüfte nur „mindestens einer
+        // von vieren" — und genau der ungemessene wäre erfahrungsgemäß der rote.
         for (const [signatur, wo] of [
             ['<span size-10 text-brand-700>', '⚡spaces — Icon-Chip der Einstiegszeilen'],
-            ['<svg size-4 text-brand-700>', '⚡spaces — Häkchen der Länderauswahl'],
+            ['<svg size-4 text-brand-700>', '⚡spaces — Häkchen der Länder-Auswahl'],
             ['!text-brand-700>', 'chat-composer — Emoji-Knopf (nur bei offenem Panel)'],
         ] as const) {
             expect(
@@ -595,6 +731,40 @@ for (const theme of ['light', 'dark'] as const) {
                 `Grafik-Träger ${wo} (${signatur}) nicht als Grafik gemessen — er rendert nicht, oder er ist in die TEXT-Einstufung gerutscht und wird jetzt gegen 4,5:1 statt 3:1 geprüft`,
             ).toBe(true)
         }
+        for (const umfeld of ['Projektunterstütz', 'Artikel lesen']) {
+            expect(
+                measured.some((m) => m.kind === 'icon' && m.label.includes(umfeld)),
+                `Grafik-Träger „${umfeld}…" nicht gemessen — der Raum/die Config fehlt (seedKontrastTraeger? board-serve?), oder der Chip rendert nicht`,
+            ).toBe(true)
+        }
+        // P9.2 — die bislang ungerendert gebliebenen TEXT-Träger, je Zustand einzeln
+        // gezählt statt „irgendwo": Knopf und Chip heißen beide „🇩🇪 Deutschland",
+        // die Popover-Zeile ebenso — unterscheidbar sind sie nur über den Zustand,
+        // in dem gemessen wurde (Marker siehe measureAllSurfaces, Muster Phase 1b).
+        const filterDe = measured.filter((m) => m.kind === 'text' && m.label.includes('Deutschland') && m.label.includes('(Filter DE)'))
+        expect(
+            filterDe.length,
+            'Land-Knopf (⚡spaces:340) und Filter-Chip (:410) müssen mit gesetztem Land gemessen sein — 2 Einträge erwartet',
+        ).toBeGreaterThanOrEqual(2)
+        const popoverDe = measured.filter((m) => m.kind === 'text' && m.label.includes('Deutschland') && m.label.includes('(Popover DE)'))
+        expect(
+            popoverDe.length,
+            'Land-Knopf + Chip + GEWÄHLTE Länderzeile (⚡spaces:375) müssen im offenen Popover gemessen sein — 3 Einträge erwartet',
+        ).toBeGreaterThanOrEqual(3)
+        // Die beiden Meetup-Kachel-Träger — der Zustand A ist der gemeinsame Nenner:
+        // die Xenon-INITIALE verschwindet bei gesetztem Landfilter (der Raum hat kein
+        // Land), das Berlin-DATUM bliebe sichtbar — gemeint ist, dass A beide
+        // garantiert hält (siehe measureAllSurfaces, Zustand A). Die Regex akzeptiert
+        // beide realen Formate von `fmtEventDate` („Di, 4. Feb" und „Mo., 17. Aug."),
+        // NICHT „Heute"/„Morgen" — der Stub-Termin liegt bewusst jenseits beider.
+        expect(
+            measured.some((m) => m.kind === 'text' && m.label === 'X'),
+            'Meetup-Initiale (meetup-tile:45) nicht gemessen — der Raum ohne Join-Datensatz fehlt, oder der Stub liefert doch eine Flagge für ihn',
+        ).toBe(true)
+        expect(
+            measured.some((m) => m.kind === 'text' && /^(Mo|Di|Mi|Do|Fr|Sa|So)[a-z]*\.?, \d{1,2}\. [A-ZÄÖÜ][a-zäöü]{2,3}\.?/.test(m.label)),
+            'Meetup-Datum (meetup-tile:78) nicht gemessen — der Stub-Termin fehlt, oder isEventSoon hat den brand-800-Zweig nicht geschaltet',
+        ).toBe(true)
         // Emoji-Panel: jede Stelle EINZELN verlangen, aus demselben Grund wie bei den
         // Zähler-Pillen. Der 1:1-Fehler dieses Panels lebte in genau einer davon.
         for (const stelle of [
@@ -665,6 +835,101 @@ for (const theme of ['light', 'dark'] as const) {
         }
     })
 }
+
+/**
+ * P9.2 — der letzte ungerenderte Grafik-Träger: „Neuen Raum anlegen"
+ * (`⚡spaces:784`), gegated hinter `isAdmin`. Der Haupttest loggt den Wegwerf-
+ * User, und `_proposalPool()`-/Entdecken-Zeilen dieses Users brauchen kein
+ * Admin — aber DIESE Zeile genau das. `isAdmin` ist am zooid die NIP-86-
+ * `supportedmethods`-Probe des EINGELOGGTEN Keys (members.ts), also führt kein
+ * Seed an ihr vorbei: nur der Login als zooid-Admin (ADMIN-Konstante oben,
+ * identisch mit dem Seed-Skript) schaltet sie frei. Eigener Test statt
+ * zweitem Login im Haupttest: ein Re-Login mitten im Lauf veränderte den
+ * Raumzustand unter den laufenden Phasen — die Admin-Fläche ist eine eigene
+ * Messung mit eigenem Guard, nicht ein Anhängsel.
+ */
+for (const theme of ['light', 'dark'] as const) {
+    test(`A11y: Admin-gate Zeilen erfüllen WCAG (${theme})`, async ({ page }) => {
+        await useZooid(page)
+        await page.addInitScript((t) => {
+            try {
+                localStorage.setItem('flux.appearance', t as string)
+            } catch {
+                /* kein localStorage → Test misst dann das Default-Theme */
+            }
+        }, theme)
+        await loginNsec(page, ADMIN)
+        // Die Zeile selbst ist der Beleg, dass der NIP-86-Roundtrip durch ist —
+        // `isAdmin` läuft asynchron nach dem Login an; ohne dieses Warten wäre ein
+        // Rennen von einem Markup-Defekt nicht unterscheidbar (dasselbe Argument
+        // wie beim Punktprobe-Warten im Haupttest).
+        await expect(page.getByRole('button', { name: 'Neuen Raum anlegen' })).toBeVisible({ timeout: 20_000 })
+        // Auf das ENDE der Eingangs-Animationen warten (kleinste wirksame Deckkraft
+        // aller bg-brand-700-Flächen === 1): der Nav-Indikator blendet nach dem
+        // Login ein, und Lauf 2 fing ihn bei 0.999 — der Opazitäts-Guard unten
+        // meldet so einen Zustand zu Recht, aber er würde einen Übergang bemängeln,
+        // nicht einen Zustand. Kein sleep: das Pollen auf den ENDE-Zustand ist
+        // deterministisch, eine feste Wartezeit wäre es nicht.
+        await expect
+            .poll(
+                () =>
+                    page.evaluate(() => {
+                        const spans = Array.from(document.querySelectorAll('span.bg-brand-700')) as HTMLElement[]
+                        if (spans.length === 0) {
+                            return 1
+                        }
+                        return Math.min(
+                            ...spans.map((el) => {
+                                let o = 1
+                                let node: HTMLElement | null = el
+                                while (node) {
+                                    o *= Number(getComputedStyle(node).opacity)
+                                    node = node.parentElement
+                                }
+                                return Math.round(o * 1000) / 1000
+                            }),
+                        )
+                    }),
+                { timeout: 10_000 },
+            )
+            .toBe(1)
+        const measured = await measure(page)
+        console.log(`KONTRAST[${theme}:admin] ` + JSON.stringify(measured, null, 1))
+        expect(
+            measured.some((m) => m.kind === 'icon' && m.label.includes('Neuen Raum anlegen')),
+            'Admin-Chip (⚡spaces:784) nicht als Grafik gemessen — die Zeile rendert nicht, oder der Chip ist in die TEXT-Einstufung gerutscht',
+        ).toBe(true)
+        for (const m of measured) {
+            expect(m.opacity, `[${theme}:admin] ${m.label || '(Icon)'} unter opacity ${m.opacity} — Verhältnis ${m.ratio}:1 wäre erfunden`).toBe(1)
+            expect(m.ratio, `[${theme}:admin] ${m.label} (${m.kind}) — ${m.fg} auf ${m.bg}, verlangt ${m.min}:1`).toBeGreaterThanOrEqual(m.min)
+        }
+    })
+}
+
+/**
+ * P9.2 — Aufräumen: die beiden Präzisionsräume wieder ENTFERNEN, sobald diese Datei
+ * auf dem Worker fertig ist. kind 9008 ist der NIP-29-Raum-Tombstone (welshman
+ * `ROOM_DELETE`); zooid löscht dabei die 39000 (`GroupStore.DeleteGroup`), am Live-
+ * Relay verifiziert (anlegen → 1 Treffer, 9008 → 0).
+ *
+ * Warum Pflicht und nicht Kür: die Räume bleiben sonst über die Datei hinaus auf dem
+ * worker-eigenen zooid liegen und brechen die PRÄMISSE anderer Specs — die Vollsuite
+ * hat das real gezeigt: `command-palette.spec.ts:313` erwartet für `p:` den LEER-
+ * zustand mit der ausdrücklichen Begründung „der Seed trägt keinen solchen Raum",
+ * und genau dieser Antragsraum machte die Zeile sichtbar. Nach jedem Worker-Lauf
+ * dieser Datei ist der Zustand damit wieder der des Seeds. Ein Absturz MITTLERIN
+ * kann Räume hinterlassen (wie jede Wegwerf-Raum-Spec auch) — dann räumt der
+ * Room-Cap-Guard des Seed-Skripts beim nächsten Lauf.
+ */
+test.afterAll(() => {
+    for (const h of ['propsupport', 'meetxenon']) {
+        try {
+            execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9008', '-t', `h=${h}`, ZOOID_WS], { stdio: 'ignore' })
+        } catch {
+            /* Raum existiert auf diesem Worker nicht (kein Theme-Test gelaufen) — doppeltes Aufräumen ist harmlos. */
+        }
+    }
+})
 
 /**
  * P6 — Regression: `measure()`s `prop: 'backgroundColor'` muss eine FLÄCHE gegen
