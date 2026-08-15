@@ -528,6 +528,83 @@ test.describe('Pin/Unpin (D, Buzz — nur E2E_RELAY=buzz)', () => {
         await expect(page.getByRole('button', { name: 'Verstanden' })).toHaveCount(0, { timeout: 5_000 })
         await expect(page.locator('#room-pin-list li', { hasText: marker })).toHaveCount(0, { timeout: 10_000 })
     })
+
+    // ── P6 Punkt 2: der Spät-NIP-11-Pfad ────────────────────────────────────────
+    //
+    // Der Fehler (Vorzustand von Paket-Commit 8155f8a): `roomPins.ts` las die Relay-Art
+    // beim Mount EINMAL SYNCHRON (`spaceIsBuzz(url)`), und genau diese Funktion liefert
+    // dokumentiert `false`, solange das NIP-11-Dokument unterwegs ist (`buzzAdmin.ts`) —
+    // der Buzz-Pin war damit für jedes normale Mitglied unbenutzbar, der Menüpunkt
+    // „Anpinnen" erschien nie. Der Fix abonniert `deriveRelay` reaktiv. Dieser Test ist
+    // der ausgelieferte Regressionsschutz für genau diesen Pfad; die Wegwerf-Sonde aus
+    // dem Fix-Commit zählt laut Plan nicht mehr.
+    test('Spätes NIP-11: normales Mitglied sieht und trifft „Anpinnen" trotzdem', async ({ page, browser, baseURL }) => {
+        test.setTimeout(120_000)
+        const marker = `PB4-${rnd()}`
+        publishBuzzRaw(BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, marker)
+
+        // Das NIP-11-Dokument künstlich verzögern (Rekonstruktion der Original-Sonde:
+        // 6 s, `page.route`). welshman holt es per fetchJson von der ws→http-URL mit
+        // `Accept: application/nostr+json` (`relays.js` fetchRelay) — nur solche Aufrufe
+        // verzögern, alles andere an dieser URL läuft unverzögert durch. Installiert VOR
+        // dem Login: auch die Login-Seite bootet den Client und stößt den Fetch schon an.
+        // Der WebSocket selbst ist von page.route unberührt — der Raum-Feed bleibt sofort
+        // da, nur die Relay-ART trifft später ein.
+        let nip11Delayed = 0
+        await page.route(`http://localhost:${BUZZ_PORT}/`, async (route) => {
+            if ((route.request().headers().accept ?? '').includes('nostr+json')) {
+                nip11Delayed++
+                await new Promise((resolve) => setTimeout(resolve, 6_000))
+            }
+            await route.continue()
+        })
+
+        // PB1-Muster: Aufräumen im finally — ein liegen gebliebener Pin im geteilten
+        // Welcome-Raum kippt sonst den nächsten Test dieser Datei.
+        try {
+            // Das REGULÄRE Mitglied (kein Admin) — das Original-Opfer: unter dem
+            // Einmal-Snapshot bleibt mayPin(isBuzz=false, isAdmin=false, …) dauerhaft
+            // falsch, der Menüpunkt erscheint nie.
+            await openBuzzWelcomeAs(page, BUZZ_USER_NSEC)
+            const row = page.locator('div.group', { hasText: marker })
+            await expect(row).toBeVisible({ timeout: 20_000 })
+
+            // Riegel gegen Schein-Abdeckung: hätte die Route nie gegriffen, wäre der Test
+            // stimmhaft grün und bewachte nichts (ein lokaler Docker-Relay antwortet in
+            // Millisekunden — ohne Verzögerung gewänne sogar der Snapshot das Rennen
+            // manchmal, der Test wäre ein Münzwurf).
+            await expect
+                .poll(() => nip11Delayed, { timeout: 5_000, message: 'page.route muss das NIP-11-Dokument tatsächlich verzögern' })
+                .toBeGreaterThan(0)
+
+            await openRowMenu(page, row)
+            // Der Springpunkt: 20 s > 6 s Verzögerung + Puffer. Der reaktive Fix liefert
+            // die Relay-Art nach (Menüpunkt erscheint ~6–7 s nach Mount); der Einmal-
+            // Snapshot liefert sie NIE — genau dieser Unterschied ist die Aussage.
+            await expect(page.getByRole('menuitem', { name: 'Anpinnen' })).toBeVisible({ timeout: 20_000 })
+            await page.getByRole('menuitem', { name: 'Anpinnen' }).click()
+
+            await expect(page.locator('#room-pin-list li', { hasText: marker })).toBeVisible({ timeout: 10_000 })
+        } finally {
+            // Frischer Context (nicht page.context().newPage() — Begründung und Messung
+            // stehen bei PB1), Owner als Kanal-Admin: darf auch fremde Pins lösen.
+            const cleanupCtx = await browser.newContext({ baseURL: baseURL ?? undefined })
+            try {
+                const cleanup = await cleanupCtx.newPage()
+                await openBuzzWelcomeAs(cleanup, BUZZ_OWNER_NSEC)
+                const cleanupRow = cleanup.locator('div.group', { hasText: marker })
+                await expect(cleanupRow).toBeVisible({ timeout: 20_000 })
+                await openRowMenu(cleanup, cleanupRow)
+                const unpinBtn = cleanup.getByRole('menuitem', { name: 'Loslösen' })
+                if (await unpinBtn.count()) {
+                    await unpinBtn.click()
+                    await expect(cleanup.locator('#room-pin-list li', { hasText: marker })).toHaveCount(0, { timeout: 10_000 })
+                }
+            } finally {
+                await cleanupCtx.close()
+            }
+        }
+    })
 })
 
 // ════════════════════════════════════════════════════════════════════════════════════
