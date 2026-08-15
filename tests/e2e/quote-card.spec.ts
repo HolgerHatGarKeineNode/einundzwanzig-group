@@ -336,15 +336,39 @@ test('Einstellungen: Zitat-/Profilkarten abschaltbar — aus heißt keine Karte,
     // … und der Span ist deshalb weg (P5.3).
     await expect(row.locator('.chat-content span.mention')).toHaveCount(0)
 
-    await page.goto('/settings/space')
+    // SPA-Navigation statt `page.goto`: Der reale Nutzer schaltet in LEBENDER Session
+    // um (wire:navigate), und genau dann ist der `htmlCache` (Modul-Map in feeds.ts)
+    // noch warm. Ein voller Reload leert jede Modul-Map und machte diesen Test blind
+    // für die Klasse, die er bewachen soll — gemessen in P5: unter der Mutation
+    // `cacheKey = event.id` (Chip-pubkey aus dem Schlüssel gestrichen) blieb die
+    // goto-Fassung GRÜN, obwohl der Cache dann die Chip-Fassung festhält und der
+    // zurück erwartete Mention-Span nach dem Umschalten fehlt. Der Fenster-Marker
+    // unten beweist, dass beide Navigationen denselben JS-Kontext benutzten.
+    await page.evaluate(() => {
+        const w = window as unknown as {
+            __p12Qc7SpaKontext?: string
+            Livewire?: { navigate: (url: string) => Promise<unknown> }
+        }
+        w.__p12Qc7SpaKontext = 'qc7-umweg'
+        void w.Livewire?.navigate('/settings/space')
+    })
     await expect(page.getByRole('heading', { name: 'Darstellung' })).toBeVisible()
     const toggle = page.getByRole('switch', { name: 'Zitat- und Profilkarten' })
     await expect(toggle).toBeVisible()
     await toggle.click()
     expect(await page.evaluate(() => localStorage.getItem('e21:quote-cards'))).toBe('0')
 
-    await page.goto(`/rooms/${h}`)
+    // Auch der Rückweg ist SPA — hier entscheidet sich, ob der warme `htmlCache` die
+    // abgeschaltete Fassung überschreibt (Soll) oder die Chip-Fassung einfriert
+    // (Mutation). `goto` würde die Prämisse ( warmer Cache) selbst zerstören.
+    await page.evaluate((room: string) => {
+        const w = window as unknown as { Livewire?: { navigate: (url: string) => Promise<unknown> } }
+        void w.Livewire?.navigate(`/rooms/${room}`)
+    }, h)
     await expect(page.getByText(refMarker, { exact: false })).toBeVisible({ timeout: 15_000 })
+    // Kontext-Beweis: der Marker hat beide Navigationen überlebt — kein heimlicher
+    // Reload ist passiert, der Cache war während des Umschaltens wirklich warm.
+    expect(await page.evaluate(() => (window as unknown as { __p12Qc7SpaKontext?: string }).__p12Qc7SpaKontext)).toBe('qc7-umweg')
     // `/Profil anzeigen: /` (mit Doppelpunkt) ist der CHIP — nicht die Autor-Avatar-
     // Schaltfläche der Zeile, deren aria-label exakt „Profil anzeigen" ohne Namen ist.
     await expect(row.getByRole('button', { name: /Profil anzeigen: / })).toHaveCount(0)
@@ -353,7 +377,10 @@ test('Einstellungen: Zitat-/Profilkarten abschaltbar — aus heißt keine Karte,
     // hätte seinen Bezug verloren, ohne dass irgendwo etwas an seine Stelle tritt.
     await expect(row.locator('.chat-content span.mention')).toHaveText(['@Relay Admin'])
 
-    // Reload: die Abwahl überlebt (localStorage), keine Karte kommt zurück.
+    // Reload als BEWUSSTES Persistenz-Bein: Hier ist der volle Kontextverlust die
+    // Aussage — die Abwahl überlebt in localStorage, nicht im Modulzustand. (Das
+    // SPA-Bein oben trägt die Cache-Kopplung; der Reload leert den htmlCache, was
+    // hier richtig ist, weil Persistenz genau das verlangt.)
     await page.reload()
     await expect(page.getByText(refMarker, { exact: false })).toBeVisible({ timeout: 15_000 })
     // `/Profil anzeigen: /` (mit Doppelpunkt) ist der CHIP — nicht die Autor-Avatar-

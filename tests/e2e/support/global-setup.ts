@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 /**
  * Läuft EINMAL vor allen Workern. Baut die geteilten Artefakte, die sonst mehrere
@@ -11,27 +11,53 @@ import { existsSync } from 'node:fs'
  */
 
 const MANIFEST = 'public/build/manifest.json'
+/** Content-Abzug des Build-Inputs — siehe `sourcesHash()`. Wird nach jedem Build neu geschrieben. */
+const SOURCES_STAMP = 'public/build/.sources-stamp'
 
 /**
- * Vite nur bauen, wenn nötig: fehlt das Manifest ODER ist irgendeine Frontend-Quelle
- * neuer als das Manifest. Bei unveränderten Assets (häufiger Fall bei wiederholten
- * Test-Läufen) spart das den ~mehrsekündigen Rebuild. `E2E_SKIP_BUILD=1` erzwingt Skip.
+ * Hash über EXAKT die Roots, die das bisherige mtime-Kriterium beobachtete (nichts
+ * dazugekommen, nichts weggelassen): Determinismus über `LC_ALL=C sort`, damit kein
+ * Wechsel der Shell-Locale die Reihenfolge und damit den Hash kippt.
  */
-function needsBuild(): boolean {
+const SOURCES_HASH_CMD =
+    `find resources packages/*/resources packages/*/js package.json vite.config.* -type f 2>/dev/null ` +
+    `| LC_ALL=C sort | xargs -r sha256sum | sha256sum | cut -d' ' -f1`
+
+function sourcesHash(): string {
+    return execFileSync('bash', ['-c', SOURCES_HASH_CMD]).toString().trim()
+}
+
+/**
+ * Vite nur bauen, wenn nötig — INHALTSbasiert, nicht mtime-basiert. Bei unveränderten
+ * Assets (häufiger Fall bei wiederholten Test-Läufen) spart das den ~mehrsekündigen
+ * Rebuild. `E2E_SKIP_BUILD=1` erzwingt Skip.
+ *
+ * WARUM CONTENT STATT MTIME (P12, 2026-08-15): `mutprobe restore` spielt eine mutierte
+ * Frontend-Quelle mit `cp -p` zurück — byte-gleich, aber mit der ALTEN mtime. Das alte
+ * Kriterium („Quelle neuer als Manifest?") sah danach keinen Buildbedarf und der nächste
+ * Lauf maß weiter gegen das WÄHREND DER MUTATION gebaute Bundle: git sauber, md5 gleich,
+ * jede äußere Verifikation grün (gemessen: p12-03/p12-05 — Restore 21:57, Manifest 22:57,
+ * Build geskippt, Test blieb rot wie unter der Mutation). Ein Content-Hash des
+ * Quellstands im Vergleich zum Stamp des letzten Builds kann diese Falle nicht
+ * übersehen: egal welche mtime die Quelle trägt, anderer Inhalt ⇒ anderer Hash ⇒ Rebuild.
+ */
+function needsBuild(): { build: boolean; reason: string } {
     if (process.env.E2E_SKIP_BUILD === '1') {
-        return false
+        return { build: false, reason: 'E2E_SKIP_BUILD=1' }
     }
     if (!existsSync(MANIFEST)) {
-        return true
+        return { build: true, reason: 'Manifest fehlt' }
     }
-    // Frontend-Quellen (Haupt + Package) + Build-Konfig gegen die Manifest-mtime prüfen.
-    const changed = execFileSync('bash', [
-        '-c',
-        `find resources packages/*/resources packages/*/js package.json vite.config.* -type f -newer ${MANIFEST} 2>/dev/null | head -1`,
-    ])
-        .toString()
-        .trim()
-    return changed.length > 0
+    if (!existsSync(SOURCES_STAMP)) {
+        // Einmaliger Übergang nach Einführung des Stamps (oder frisch geleertes
+        // public/build mit überlebendem Manifest-Neuaufbau): sicherheitshalber bauen.
+        return { build: true, reason: 'Quell-Stamp fehlt (Content-Kriterium neu)' }
+    }
+    const stamped = readFileSync(SOURCES_STAMP, 'utf8').trim()
+    if (stamped !== sourcesHash()) {
+        return { build: true, reason: 'Quell-Hash ≠ Stamp (Inhalt geändert — mtime egal)' }
+    }
+    return { build: false, reason: 'Quell-Hash == Stamp' }
 }
 
 /** `E2E_RELAY=buzz|zooid` (Default zooid) — siehe playwright.config.ts + fixtures.ts. */
@@ -61,9 +87,18 @@ export default function globalSetup(): void {
             { stdio: 'inherit' },
         )
     }
-    if (needsBuild()) {
+    const decision = needsBuild()
+    if (decision.build) {
+        console.log(`[global-setup] Vite-Build läuft (${decision.reason})`)
+        // Hash VOR dem Build ziehen und erst NACH erfolgreichem Build als Stamp schreiben:
+        // ändert sich eine Quelle während des Builds, passt der Stamp nicht mehr zum
+        // gebauten Stand und der nächste Lauf baut erneut — falsch grün ist teurer als
+        // ein doppelter Build. Schlägt der Build fehl, wirft execFileSync und es bleibt
+        // kein trügerischer Stamp stehen.
+        const preBuildHash = sourcesHash()
         execFileSync('npm', ['run', 'build'], { stdio: 'inherit' })
+        writeFileSync(SOURCES_STAMP, `${preBuildHash}\n`)
     } else {
-        console.log('[global-setup] Vite-Assets aktuell → Build übersprungen (E2E_SKIP_BUILD/Manifest neuer als Quellen)')
+        console.log(`[global-setup] Vite-Assets aktuell → Build übersprungen (${decision.reason})`)
     }
 }
