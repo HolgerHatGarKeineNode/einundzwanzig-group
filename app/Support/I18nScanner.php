@@ -33,7 +33,7 @@ use RuntimeException;
  *     Aufruf gar nicht erst auf.
  *   - Blade-Dateien werden mit `Blade::compileString()` IM SPEICHER kompiliert,
  *     nie aus `storage/framework/views/` gelesen. Damit fallen
- *     `{{-- … --}}`-Kommentare heraus, wie Blade sie auch zur Laufzeit fallen
+ *     `{{-- … --}}`-Kommentare heraus, wie Blade sie zur Laufzeit fallen
  *     lässt.
  *   - Erfasst werden `__(…)` und `trans(…)`. `@lang`/`Lang::get` kommen im
  *     Bestand nicht vor (geprüft per grep über alle .php).
@@ -41,6 +41,17 @@ use RuntimeException;
  *     verkettete (`__('In ') . $x`) Argumente werden getrennt gemeldet, nicht
  *     still verschluckt: die Verkettung ist die Fehlerklasse, die P3 des
  *     Restposten-Plans abgestellt hat.
+ *   - Die TypeScript-Insel (`packages/einundzwanzig-group/js`) hat keinen
+ *     PHP-Tokenizer. Dort hebt eine kleine Zustandsmaschine zuerst `//`- und
+ *     Block-Kommentare heraus heraus (Strings bleiben stehen, Zeilennummern
+ *     bleiben stimmen) und ein Parser liest danach nur `t(…)`-Aufrufe mit
+ *     Wortanfang — `.split(`, `x.t(` oder `tPlural(` sind keine. Ausgeschlossen
+ *     sind `*.test.ts` (sie rufen `t()` mit absichtlich fehlenden Schlüsseln
+ *     und prüfen damit die RÜCKFALL-Mechanik — sie sind keine Aufrufstelle)
+ *     und `*.d.ts` (Typdeklarationen ohne Laufzeitcode). Kein Filter auf den
+ *     i18n-Import: im Bestand ruft kein `t(` außerhalb des Imports (gemessen);
+ *     eine künftige fremde `t()` fiele als fehlender Schlüssel LAUT auf,
+ *     nicht still.
  *
  * STILLE FEHLSCHLÄGE SIND HIER BLOCKER: fehlt eine Scan-Wurzel, das
  * Sprachverzeichnis oder eine einzelne Sprachdatei, wirft der Scanner mit
@@ -54,6 +65,10 @@ final class I18nScanner
      * Jedes MUSS existieren — ein stillschweigend übersprungenes Verzeichnis
      * senkt die Fundmenge, ohne dass irgendetwas rot wird.
      *
+     * Die letzte Wurzel ist die TypeScript-Insel (`t()` aus `js/i18n.ts`): dieselbe
+     * Fehlerklasse wie `__()`, eine Sprachwelt weiter — ein `t('…')` ohne
+     * Katalogeintrag fiele sonst STILL auf Deutsch zurück (P10, Punkt 1).
+     *
      * @var list<string>
      */
     public const SCAN_ROOTS = [
@@ -61,6 +76,7 @@ final class I18nScanner
         'packages/einundzwanzig-group/src',
         'packages/einundzwanzig-group/config',
         'packages/einundzwanzig-group/routes',
+        'packages/einundzwanzig-group/js',
         'app',
         'resources',
         'routes',
@@ -147,7 +163,14 @@ final class I18nScanner
     }
 
     /**
-     * Sammelt alle `.php`-Dateien der Scan-Wurzeln, relativ zur Repo-Wurzel.
+     * Sammelt alle `.php`-Dateien der Scan-Wurzeln sowie die `.ts`-Dateien der
+     * TypeScript-Insel, relativ zur Repo-Wurzel.
+     *
+     * `.test.ts` und `.d.ts` sind ausgenommen (Begründung im Klassen-Docblock):
+     * Test-Dateien prüfen die Rückfall-Mechanik mit absichtlich fehlenden
+     * Schlüsseln, `.d.ts` tragen keine Laufzeitaufrufe. Eine Wurzel, die
+     * NUR ausgeschlossene Dateien enthält, ist kein Fehler — `src`/`config`
+     * der Insel liegen ohnehin in eigenen Wurzeln.
      *
      * @return list<string>
      */
@@ -167,10 +190,29 @@ final class I18nScanner
 
             $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
             foreach ($it as $file) {
-                if ($file->isFile() && str_ends_with($file->getFilename(), '.php')) {
-                    $files[] = str_replace($this->root.'/', '', $file->getPathname());
+                if (! $file->isFile()) {
+                    continue;
+                }
+                $name = $file->getFilename();
+                $rel = str_replace($this->root.'/', '', $file->getPathname());
+
+                if (str_ends_with($name, '.php')) {
+                    $files[] = $rel;
+
+                    continue;
+                }
+
+                if (str_ends_with($name, '.ts') && ! str_ends_with($name, '.test.ts') && ! str_ends_with($name, '.d.ts')) {
+                    $files[] = $rel;
                 }
             }
+        }
+
+        $dupes = array_diff_key($files, array_unique($files));
+        if ($dupes !== []) {
+            // Kann nur passieren, wenn SCAN_ROOTS sich überlappen — die Fund-
+            // stellen würden doppelt zählen und die Dateizahl LÜGEN.
+            throw new RuntimeException('i18n-Scan: SCAN_ROOTS überlappen, doppelt gesammelt: '.reset($dupes));
         }
 
         sort($files);
@@ -224,6 +266,12 @@ final class I18nScanner
     {
         $path = $this->root.'/'.$rel;
         $src = (string) file_get_contents($path);
+
+        if (str_ends_with($path, '.ts')) {
+            $this->scanTsFile($rel, $src, $calls, $dynamic, $chained);
+
+            return;
+        }
 
         $isBlade = str_ends_with($path, '.blade.php');
         $code = $isBlade ? Blade::compileString($src) : $src;
@@ -292,6 +340,131 @@ final class I18nScanner
             $fragment = is_array($tokens[$j]) ? $tokens[$j][1] : (string) $tokens[$j];
             $dynamic[] = $rel.':'.$this->sourceLine($srcLines, '__('.$fragment, $line).'  (dynamisch) '.trim($fragment);
         }
+    }
+
+    /**
+     * Liest die `t(…)`-Aufrufe einer Datei der TypeScript-Insel.
+     *
+     * Drei Klassen, exakt wie auf der PHP-Seite:
+     *   - literales erstes Argument, gefolgt von `,` oder `)` → Schlüssel.
+     *     (`t('…', { … })` — Ersetzungen sind zulässig und brauchen kein
+     *     eigenes Klassenzeichen: der Schlüssel bleibt der deutsche Satz.)
+     *   - literales Argument mit Folgetoken `+`/`.`/… → verkettet.
+     *   - nicht-literales Argument (Variable, Template, Aufruf) → dynamisch.
+     *
+     * Dazu die Fragment-Signatur der PHP-Seite, hier über den Schlüssel selbst
+     * erkennbar: ein `t('Ungelesen. ')` mit Rand-Leerzeichen ist der rechte
+     * Teil einer Konkatenation, die außerhalb des Aufrufs steht — der Scanner
+     * kann die Verkettung nicht sehen, die Signatur genügt als Beweis. Solche
+     * Schlüssel laufen wie PHP-Verkettungen in `$chained`, nicht in `$calls`.
+     *
+     * @param  array<string, list<string>>  $calls
+     * @param  list<string>  $dynamic
+     * @param  list<string>  $chained
+     */
+    private function scanTsFile(string $rel, string $src, array &$calls, array &$dynamic, array &$chained): void
+    {
+        $code = $this->stripTsComments($src);
+
+        // Wortanfang vor `t(`: `.split(`, `->t(`-artige Methoden (`x.t(`) und
+        // `tPlural(` sind keine i18n-Aufrufe. `$` deckt TS-Bezeichner ab.
+        if (! preg_match_all('/(?<![.\w$])t\(/', $code, $hits, PREG_OFFSET_CAPTURE)) {
+            return;
+        }
+
+        foreach ($hits[0] as [, $offset]) {
+            $line = substr_count(substr($code, 0, $offset), "\n") + 1;
+
+            $pos = $offset + 2;
+            $pos += strspn($code, " \t\r\n", $pos);
+
+            $quote = ($code[$pos] ?? '');
+
+            if (($quote === "'" || $quote === '"')
+                && preg_match('/\G'.preg_quote($quote, '/').'((?:[^\\\\'.preg_quote($quote, '/').']|\\\\.)*)'.preg_quote($quote, '/').'/', $code, $m, 0, $pos) === 1) {
+                $after = $pos + strlen($m[0]);
+                $after += strspn($code, " \t\r\n", $after);
+                $next = $code[$after] ?? '';
+
+                if ($next === ',' || $next === ')') {
+                    $key = $this->decodeLiteral($m[0]);
+                    if ($key !== trim($key)) {
+                        $chained[] = $rel.':'.$line.'  (Fragment-Signatur) '.$m[0];
+                    } else {
+                        $calls[$key][] = $rel.':'.$line;
+                    }
+                } else {
+                    $chained[] = $rel.':'.$line.'  (verkettet) '.$m[0];
+                }
+
+                continue;
+            }
+
+            $fragment = trim((string) preg_replace('/\s+/s', ' ', substr($code, $pos, 24)));
+            $dynamic[] = $rel.':'.$line.'  (dynamisch) '.$fragment;
+        }
+    }
+
+    /**
+     * Ersetzt `//`-Zeilen- und Block-Kommentare durch Leerzeichen — gleiche
+     * Länge, Zeilenumbrüche bleiben stehen, damit die Offset-basierten
+     * Zeilennummern stimmen bleiben. Strings ('", `) mitsamt Escape-Sequenzen
+     * bleiben unangetastet; was in Anführungszeichen steht, ist kein Kommentar.
+     *
+     * Restrisiko dokumentiert statt behoben: Regex-Literale mit `//`-Inhalt
+     * würden als Kommentarbeginn fehlgedeutet. Im Bestand gibt es keine
+     * (gemessen); der Zahlabgleich gegen die erwartete Fundmenge ginge bei
+     * einem solchen Fehlgriff nach unten — laut, nicht still.
+     */
+    private function stripTsComments(string $src): string
+    {
+        $len = strlen($src);
+        $out = $src;
+        $state = 'code';
+        $stringQuote = '';
+
+        for ($i = 0; $i < $len; $i++) {
+            $char = $src[$i];
+            $next = $i + 1 < $len ? $src[$i + 1] : '';
+
+            if ($state === 'code') {
+                if ($char === "'" || $char === '"' || $char === '`') {
+                    $state = 'string';
+                    $stringQuote = $char;
+                } elseif ($char === '/' && $next === '/') {
+                    $state = 'line';
+                    $out[$i] = ' ';
+                } elseif ($char === '/' && $next === '*') {
+                    $state = 'block';
+                    $out[$i] = ' ';
+                }
+
+                continue;
+            }
+
+            if ($state === 'string') {
+                if ($char === '\\') {
+                    $i++; // Escape — das nächste Zeichen gehört zum String, egal was es ist.
+                } elseif ($char === $stringQuote) {
+                    $state = 'code';
+                }
+
+                continue;
+            }
+
+            // line / block: Kommentar-Inhalt weg, Umbrüche (line) und das
+            // schließende `*` + `/` (block) beenden den Zustand.
+            $out[$i] = $char === "\n" ? "\n" : ' ';
+            if ($state === 'line' && $char === "\n") {
+                $state = 'code';
+            } elseif ($state === 'block' && $char === '*' && $next === '/') {
+                $out[$i + 1] = ' ';
+                $i++;
+                $state = 'code';
+            }
+        }
+
+        return $out;
     }
 
     /**

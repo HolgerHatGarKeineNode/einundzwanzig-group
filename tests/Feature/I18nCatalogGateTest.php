@@ -45,23 +45,39 @@ function i18nScanResult(): array
 /**
  * UNTERGRENZEN, und warum genau diese Zahlen:
  *
- * Gemessen am 2026-08-15 (`php artisan i18n:scan`): 111 Dateien, 551 verschiedene
- * gerufene Schlüssel. Die Schranken liegen bei rund 72 % davon — weit genug unter
- * dem Ist-Stand, dass gewöhnliche Bewegung sie nie berührt (Views werden
+ * Gemessen am 2026-08-15 (P10, `php artisan i18n:scan`): 182 Dateien (72
+ * davon TypeScript), 698 verschiedene gerufene Schlüssel (193 davon aus der
+ * TS-Insel). Die Schranken liegen bei rund 75 % davon — weit genug unter dem
+ * Ist-Stand, dass gewöhnliche Bewegung sie nie berührt (Views werden
  * zusammengelegt, tote Schlüssel fliegen raus: in P3 waren das 44 auf einen
  * Schlag), und weit genug über dem Bruchbild, dass jeder strukturelle Ausfall
- * darunter landet: fällt allein die größte Scan-Wurzel weg
- * (`packages/einundzwanzig-group/resources`, 49 der 111 Dateien), bleiben 62 —
- * unter 80. Fällt der Tokenizer oder der Blade-Durchlauf aus, ist die Fundmenge
- * nahe null.
+ * darunter landet: fällt die Paket-Blade-Wurzel weg (49 Dateien), bleiben 133
+ * — unter 140. Fällt die TS-Insel weg, bleiben 110 Dateien und 529 Schlüssel.
+ *
+ * Die 529 lägen ÜBER der alten Schlüssel-Schwelle von 400 — das ist der Grund
+ * für die beiden TS-Zeilen darunter: seit der Scanner beide Welten misst,
+ * kann die Insel still ausfallen (globs kaputt, Wurzel umbenannt), ohne dass
+ * die globalen Schranken rot werden. Die namentliche Schranke schließt genau
+ * diese Lücke; „0 fehlend" der Insel ist sonst die leere Menge.
  *
  * Sie sind Untergrenzen, keine Sollwerte: Wachstum bewegt sie nie. Nachgezogen
  * werden müssen sie erst, wenn das Repo dauerhaft um ein Drittel schrumpft — und
  * dann ist das Nachziehen eine bewusste Entscheidung und kein Wartungsrauschen.
  */
-const I18N_MIN_FILES = 80;
+const I18N_MIN_FILES = 140;
 
-const I18N_MIN_KEYS = 400;
+const I18N_MIN_KEYS = 550;
+
+/** Untergrenzen NUR der TS-Insel (72 Dateien / 193 Schlüssel am 2026-08-15). */
+const I18N_MIN_TS_FILES = 60;
+
+const I18N_MIN_TS_KEYS = 150;
+
+/** Fundstellen-Suffix „:zeilennummer" abschneiden, die Datei-Endung bleibt stehen. */
+function i18nSiteFile(string $site): string
+{
+    return (string) preg_replace('/:\d+$/', '', $site);
+}
 
 test('der Scanner sieht das Repo — sonst ist sein „0 fehlend" wertlos', function () {
     $result = i18nScanResult();
@@ -74,8 +90,28 @@ test('der Scanner sieht das Repo — sonst ist sein „0 fehlend" wertlos', func
 
     expect(count($result['keys']))->toBeGreaterThanOrEqual(
         I18N_MIN_KEYS,
-        'Der i18n-Scanner hat nur '.count($result['keys']).' gerufene __()-Schlüssel gefunden (erwartet: mindestens '.
+        'Der i18n-Scanner hat nur '.count($result['keys']).' gerufene Schlüssel gefunden (erwartet: mindestens '.
         I18N_MIN_KEYS.'). Entweder ist der Tokenizer-Pfad kaputt oder die Blade-Kompilierung liefert nichts.'
+    );
+
+    // Die TS-Insel namentlich: sie kann still ausfallen, während die globalen
+    // Schranken (Blade trägt allein 529 Schlüssel) weiter grün bleiben.
+    $tsFiles = array_filter($result['files'], fn (string $f): bool => str_ends_with($f, '.ts'));
+    $tsKeys = array_filter(
+        $result['calls'],
+        fn (array $sites): bool => (bool) array_filter($sites, fn (string $s): bool => str_ends_with(i18nSiteFile($s), '.ts')),
+    );
+
+    expect(count($tsFiles))->toBeGreaterThanOrEqual(
+        I18N_MIN_TS_FILES,
+        'Der i18n-Scanner sieht nur '.count($tsFiles).' TypeScript-Dateien der Insel (erwartet: mindestens '.
+        I18N_MIN_TS_FILES.'). Die t()-Aufrufe der Insel lägen wieder außerhalb jeder Messung.'
+    );
+
+    expect(count($tsKeys))->toBeGreaterThanOrEqual(
+        I18N_MIN_TS_KEYS,
+        'Der i18n-Scanner findet nur '.count($tsKeys).' t()-Schlüssel der Insel (erwartet: mindestens '.
+        I18N_MIN_TS_KEYS.'). Ein TS-Pfad, der nichts findet, meldet auch für die Insel „0 fehlend".'
     );
 
     // Alle sieben Kataloge müssen tatsächlich geladen sein — ein leeres
@@ -84,7 +120,7 @@ test('der Scanner sieht das Repo — sonst ist sein „0 fehlend" wertlos', func
     expect(array_keys($result['catalogs']))->toBe(I18nScanner::LOCALES);
 });
 
-test('kein gerufener __()-Schlüssel fehlt in einem der sieben Kataloge', function () {
+test('kein gerufener __()- oder t()-Schlüssel fehlt in einem der sieben Kataloge', function () {
     $result = i18nScanResult();
 
     // Die Schranke steht hier ein zweites Mal: dieser Test wird oft einzeln
@@ -168,14 +204,22 @@ test('kein Katalogwert ist leer — der leere String ist die Narbe der Fragment-
     );
 });
 
-test('kein __()-Aufruf steht als verkettetes Fragment im Code', function () {
+test('kein __()- oder t()-Aufruf steht als verkettetes Fragment im Code', function () {
     $chained = i18nScanResult()['chained'];
 
     // Verkettung (`__('In ') . $label . __(' suchen')`) ist nicht übersetzbar:
     // sie zwingt jede Sprache in die deutsche Wortstellung und erzeugt genau die
     // leeren Werte, die der Test darüber verbietet. Platzhalter statt Verkettung.
     // Null ist hier kein Messwert, sondern die Aussage selbst — die Zahl wächst
-    // also nie mit dem Katalog. Die vier DYNAMISCHEN Aufrufe (`__($label)`) sind
-    // davon unberührt und bleiben zulässig; sie stehen im Scanner-Bericht.
-    expect($chained)->toBe([], "Verkettete __()-Fragmente gefunden:\n  ".implode("\n  ", array_unique($chained)));
+    // also nie mit dem Katalog. Die vier DYNAMISCHEN Aufrufe (`__($label)`, in
+    // der Insel `t(key)` in vereinFlow.ts) sind davon unberührt und bleiben
+    // zulässig; sie stehen im Scanner-Bericht.
+    //
+    // Auf der TS-Seite trägt die Fragment-Signatur der Schlüssel selbst den
+    // Beweis: `t('Ungelesen. ')` mit Rand-Leerzeichen ist der rechte Teil einer
+    // Konkatenation AUSSERHALB des Aufrufs — der Scanner sieht die Verkettung
+    // nicht, aber ein deutsches Literal mit führendem/nachlaufendem Leerzeichen
+    // ist kein Satz, sondern ein Satzteil. Der erste Lauf dieser Erweiterung
+    // fand genau ein solches: updatesView.ts:144, „Ungelesen. " (P10, Punkt 3).
+    expect($chained)->toBe([], "Verkettete __()/t()-Fragmente gefunden:\n  ".implode("\n  ", array_unique($chained)));
 });

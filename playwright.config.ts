@@ -85,14 +85,19 @@ export default defineConfig({
         /**
          * Der Test-Browser spricht Deutsch.
          *
-         * Seit P2 verhandelt die `SetLocale`-Middleware die Oberflächensprache über
-         * `Accept-Language`, solange kein Sprach-Cookie gesetzt ist. Host-Chromium
-         * sendet ab Werk `en-US,en` — ohne diesen Pin renderte die gesamte Suite auf
-         * Englisch und jede Assertion auf deutschen Text („Anmelden", „Räume", …)
-         * ginge rot, obwohl am Produkt nichts kaputt ist.
+         * Die `SetLocale`-Middleware verhandelt NICHT über `Accept-Language` —
+         * die Verhandlung wurde mit `fc9c3ec` (Nutzerentscheid 2026-08-13)
+         * entfernt. Auflösung heute: Cookie `locale` → Session → erster
+         * Whitelist-Eintrag (`de`). Ein Browser mit `en-US` bekäme also auch
+         * OHNE diesen Pin Deutsch — der Fallback ist das Haus.
          *
-         * `locale` setzt beides: den `Accept-Language`-Header (das ist der Hebel für
-         * die Middleware) UND `navigator.language`.
+         * Der Pin bleibt trotzdem und ist jetzt eine Deklaration, kein Hebel:
+         * Die Suite assertet deutschen Text („Anmelden", „Räume", …). `locale`
+         * setzt `Accept-Language` UND `navigator.language` — sollte die
+         * Verhandlung je zurückkehren, bleibt der Lauf deterministisch deutsch,
+         * statt still umzufärben. Wer einen Render-Smoke baut: `Accept-Language`
+         * ist seit `fc9c3ec` bewusst wirkungslos — drei Läufe mit `lang=de`
+         * sind kein Befund (genau hierauf ist ein Prüfer mal hereingefallen).
          *
          * Eine Spec, die den Sprachwechsel SELBST prüft, setzt ihren eigenen Context
          * (`test.use({ locale: 'es-ES' })`) oder ein `locale`-Cookie — beides sticht

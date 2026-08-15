@@ -43,9 +43,26 @@ class I18nScan extends Command
             $this->newLine();
         }
 
-        $this->line('Dateien gescannt:        '.count($result['files']));
+        // Die Insel separat beziffert (P10): „0 fehlend" allein über beide
+        // Welten könnte einen blinden TS-Pfad nicht von einem vollen
+        // unterscheiden — hier stehen die beiden Zahlen nebeneinander.
+        $tsSites = function (array $sites): bool {
+            foreach ($sites as $site) {
+                if (str_ends_with((string) preg_replace('/:\d+$/', '', $site), '.ts')) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+        $tsFiles = array_filter($result['files'], fn (string $f): bool => str_ends_with($f, '.ts'));
+        $tsKeys = array_filter($result['calls'], $tsSites);
+        $tsMissing = array_intersect_key($result['missing'], $tsKeys);
+
+        $this->line('Dateien gescannt:        '.count($result['files']).' (davon TypeScript: '.count($tsFiles).')');
         $this->line('Verschiedene __()-Keys:  '.count($result['keys']));
-        $this->line('FEHLENDE Keys:           '.count($result['missing']));
+        $this->line('t()-Keys (TS-Insel):     '.count($tsKeys));
+        $this->line('FEHLENDE Keys:           '.count($result['missing']).' (davon t(): '.count($tsMissing).')');
         $this->line('Verkettete Fragmente:    '.count($result['chained']));
         foreach (array_unique($result['chained']) as $entry) {
             $this->line('    '.$entry);

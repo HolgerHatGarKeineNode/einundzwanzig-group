@@ -574,12 +574,33 @@ test('keine Ersetzungskette füllt einen Platzhalter, der Präfix eines anderen 
      * zeilenweise Prüfung übersieht genau die Bauform, die dieses Repo benutzt —
      * mit einer solchen Fassung ist der Fall hier zuerst durchgerutscht.
      */
+    /*
+     * P10, Punkt 4 — beide Quote-Ebenen, nicht nur eine: Bis hierher las der
+     * Fall nur doppelte Attribut-Quotes MIT einfachen JS-Quotes. Eine Kette in
+     * einem einfach-gequoteten Attribut trägt aber ZWINGEND doppelte JS-Quotes
+     * (sonst endete das Attribut am ersten `'` des Ausdrucks) — für sie war der
+     * Fall doppelt blind. Gelesen werden jetzt beide Ebenen. Im Bestand gibt es
+     * keine einfach-gequoteten Attribute mit Kette (gemessen am 2026-08-15:
+     * 26 doppelte Attributstellen mit 34 Platzhalternamen, 0 einfache).
+     *
+     * Die EINE nicht erreichte Stelle ist `components/emoji-picker.blade.php`:
+     * Dort baut PHP den Ausdruck zusammen (`$pickTemplate` per `str_replace`
+     * aus `__('Einfügen: :emoji')`), die Kette steht nicht im Attributwert des
+     * Blade-Quelltexts. Konstruktiv kollisionsfrei: der Ausdruck trägt GENAU
+     * EINEN Platzhalter (`:emoji`), und eine Kollision braucht zwei Namen, von
+     * denen einer Präfix des anderen ist. Wer dort je einen zweiten Platzhalter
+     * ergänzt, muss diese Ausnahme mit neu prüfen.
+     */
     $treffer = [];
     foreach (bladeQuellen() as $pfad => $quelle) {
-        preg_match_all('/="([^"]*)"/', $quelle, $attribute);
+        // Attributwerte BEIDER Quote-Arten; die Quotes selbst werden abgezogen,
+        // damit die Ketten-Suche nicht am Rand des Werts klebt.
+        preg_match_all('/=("[^"]*"|\'[^\']*\')/', $quelle, $attribute);
 
-        foreach ($attribute[1] as $ausdruck) {
-            preg_match_all("/\.(?:replace|split)\('(:[a-zA-Z]+)'/", $ausdruck, $m);
+        foreach ($attribute[1] as $rohwert) {
+            $ausdruck = substr($rohwert, 1, -1);
+            // JS-String-Quotes ebenfalls beider Arten (siehe Kommentar oben).
+            preg_match_all("/\.(?:replace|split)\(['\"](:[a-zA-Z]+)['\"]/", $ausdruck, $m);
             $namen = array_unique($m[1]);
 
             foreach ($namen as $a) {
