@@ -29,7 +29,10 @@
  *   BUZZ_ADMIN_SECRET  nsec oder 64-hex des schreibenden Schluessels (Pflicht).
  *                      Der Pubkey MUSS auf dem Relay Rolle `owner` oder `admin` haben.
  *   BUZZ_RELAY         Default wss://buzz.einundzwanzig.space
- *   MEMBERS_API        Default https://verein.einundzwanzig.space/api/members/2026
+ *   MEMBERS_API        Default https://verein.einundzwanzig.space/api/members/<Jahr>
+ *                      (Kalenderjahr des Laufs — wie zooid-member-sync.mjs; seit 2026-08-16,
+ *                      davor hart auf 2026 verdrahtet, was am 2027-01-01 auseinander-
+ *                      gelaufen waere)
  *   APPLY=1            schreiben; ohne die Variable Trockenlauf (nichts wird gesendet)
  *   MAX_REMOVALS       Sicherung gegen Massenentfernung, Default 10
  *   FORCE=1            hebt MAX_REMOVALS auf
@@ -42,7 +45,9 @@ import { hexToBytes } from 'nostr-tools/utils'
 import { decode } from 'nostr-tools/nip19'
 
 const RELAY = process.env.BUZZ_RELAY || 'wss://buzz.einundzwanzig.space'
-const MEMBERS_API = process.env.MEMBERS_API || 'https://verein.einundzwanzig.space/api/members/2026'
+const MEMBERS_API =
+    process.env.MEMBERS_API ||
+    `https://verein.einundzwanzig.space/api/members/${new Date().getFullYear()}`
 const APPLY = process.env.APPLY === '1'
 const FORCE = process.env.FORCE === '1'
 const MAX_REMOVALS = Number(process.env.MAX_REMOVALS ?? '10')
