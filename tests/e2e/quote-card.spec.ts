@@ -302,6 +302,10 @@ test('Profil-Chip: öffnet das bestehende profile-card-Modal mit Hex-Pubkey (nic
     const chip = row.getByRole('button', { name: /Profil anzeigen: Relay Admin/ })
     await expect(chip).toBeVisible({ timeout: 15_000 })
 
+    // P5.3 (Nutzerentscheidung 2026-08-15): wo der Chip steht, steht der `@Name`-Span
+    // NICHT mehr — dieselbe Person stand vorher zweimal untereinander.
+    await expect(row.locator('.chat-content span.mention')).toHaveCount(0)
+
     await chip.click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
@@ -329,6 +333,8 @@ test('Einstellungen: Zitat-/Profilkarten abschaltbar — aus heißt keine Karte,
     const row = page.locator('div.group', { hasText: refMarker })
     // Vorbedingung: Default AN, der Chip ist da.
     await expect(row.getByRole('button', { name: /Profil anzeigen: Relay Admin/ })).toBeVisible({ timeout: 15_000 })
+    // … und der Span ist deshalb weg (P5.3).
+    await expect(row.locator('.chat-content span.mention')).toHaveCount(0)
 
     await page.goto('/settings/space')
     await expect(page.getByRole('heading', { name: 'Darstellung' })).toBeVisible()
@@ -342,6 +348,10 @@ test('Einstellungen: Zitat-/Profilkarten abschaltbar — aus heißt keine Karte,
     // `/Profil anzeigen: /` (mit Doppelpunkt) ist der CHIP — nicht die Autor-Avatar-
     // Schaltfläche der Zeile, deren aria-label exakt „Profil anzeigen" ohne Namen ist.
     await expect(row.getByRole('button', { name: /Profil anzeigen: / })).toHaveCount(0)
+    // **Die eigentliche Prüfung des P5.3-Umbaus.** Ohne Chip MUSS der `@Name`-Span
+    // zurück sein — sonst wäre die Erwähnung vollständig unsichtbar und der Satz
+    // hätte seinen Bezug verloren, ohne dass irgendwo etwas an seine Stelle tritt.
+    await expect(row.locator('.chat-content span.mention')).toHaveText(['@Relay Admin'])
 
     // Reload: die Abwahl überlebt (localStorage), keine Karte kommt zurück.
     await page.reload()
@@ -349,6 +359,8 @@ test('Einstellungen: Zitat-/Profilkarten abschaltbar — aus heißt keine Karte,
     // `/Profil anzeigen: /` (mit Doppelpunkt) ist der CHIP — nicht die Autor-Avatar-
     // Schaltfläche der Zeile, deren aria-label exakt „Profil anzeigen" ohne Namen ist.
     await expect(row.getByRole('button', { name: /Profil anzeigen: / })).toHaveCount(0)
+    // Auch nach dem Reload trägt der Fließtext die Erwähnung wieder selbst.
+    await expect(row.locator('.chat-content span.mention')).toHaveText(['@Relay Admin'])
     expect(await page.evaluate(() => localStorage.getItem('e21:quote-cards'))).toBe('0')
 })
 
@@ -377,4 +389,212 @@ test('Thread-Panel: ein Kommentar mit Profil-Referenz zeigt denselben Chip wie i
 
     const commentRow = dialog.locator('div.group', { hasText: commentMarker })
     await expect(commentRow.getByRole('button', { name: /Profil anzeigen: Relay Admin/ })).toBeVisible({ timeout: 15_000 })
+    // P5.3 gilt im Thread genauso — Raum und Panel teilen sich `chat-row`.
+    await expect(commentRow.locator('.chat-content span.mention')).toHaveCount(0)
+})
+
+// ── 9) Thread-Panel: ein RAUMFREMDES Zitat wird nachgeladen ─────────────────────────
+
+test('Thread-Panel: ein Kommentar mit raumfremdem Zitat zeigt erst die Kennung und löst nach dem Nachladen auf', async ({ page }) => {
+    test.setTimeout(60_000)
+    // Das zitierte Ereignis lebt in einem Raum, den dieser Browser NIE besucht — genau
+    // wie in Test 2, aber diesmal im THREAD. Der Unterschied ist nicht kosmetisch: der
+    // Raum-Feed reicht `collectRefEvents` nur seine kind-9-Nachrichten (feeds.ts:1094),
+    // NICHT die kind-1111-Kommentare. Ein Zitat, das nur in einem Kommentar steht, wird
+    // also vom Raum-Feed nie angefragt — `deriveThread` ist der einzige Pfad, der es
+    // nachlädt, und `throttled(200, refEventStore)` in seiner Ableitungsliste
+    // (feeds.ts:1667) die einzige Quelle, die das Ergebnis je meldet. Ohne sie bliebe
+    // die Karte für immer bei der gekürzten Kennung stehen (P5, Restposten 2).
+    const hQuoted = trackRoom(`qc9q${rnd()}`)
+    const hThread = trackRoom(`qc9t${rnd()}`)
+    createRoomNak(hQuoted, 'QC9Quoted')
+    createRoomNak(hThread, 'QC9Thread')
+
+    // BEIDE Räume liegen auf DEMSELBEN Relay: `warmRefEvents` verwirft die Relay-Hints
+    // des `nevent` bewusst (feeds.ts:672-679) und fragt Space-Relay + DEFAULT_RELAYS.
+    // Ein Zitat von einem fremden Relay wäre unauffindbar — der Test prüfte dann eine
+    // Eigenschaft, die es nicht gibt.
+    const quotedMarker = `QCXRoom-${rnd()}`
+    const quotedId = publishRaw(hQuoted, ADMIN, quotedMarker)
+    // `nostr:`-Präfix ist Pflicht: welshmans `parse()` erkennt nackte bech32-Kennungen
+    // nicht, sie blieben reiner Text (gemessen in p5-recon.md des Vorgängerplans).
+    const nevent = neventEncode({ id: quotedId, relays: [], author: ADMIN_PUB, kind: 9 })
+
+    const rootMarker = `QCXRoot-${rnd()}`
+    const rootId = publishRaw(hThread, ADMIN, rootMarker)
+    const commentMarker = `QCXComment-${rnd()}`
+    publishComment(hThread, rootId, 9, ADMIN, `${commentMarker} nostr:${nevent}`)
+
+    await openRoom(page, hThread)
+    await expect(page.getByText(rootMarker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    // Zustandsrekorder VOR dem Öffnen des Threads. Er beantwortet die Frage, die das
+    // Endergebnis allein NICHT beantwortet: erschien die Karte aufgelöst, weil sie
+    // nachgeladen wurde — oder weil das Ereignis von Anfang an da war? Ein
+    // MutationObserver statt eines Polls, damit kein Zwischenzustand durch ein
+    // Abtastloch fällt; er feuert nach JEDEM DOM-Stapel, nicht alle n Millisekunden.
+    // Die Karte kann im Raum gar nicht existieren (der Kommentar rendert nur im
+    // Thread-Panel), der erste aufgezeichnete Zustand ist also der erste GEMALTE.
+    await page.evaluate((selector) => {
+        const w = window as unknown as { __qcRefStates: string[] }
+        w.__qcRefStates = []
+        const snapshot = (): void => {
+            const line = document.querySelector(selector)?.firstElementChild?.textContent?.trim() ?? ''
+            if (line !== '' && w.__qcRefStates[w.__qcRefStates.length - 1] !== line) {
+                w.__qcRefStates.push(line)
+            }
+        }
+        new MutationObserver(snapshot).observe(document.body, { subtree: true, childList: true, characterData: true })
+        snapshot()
+    }, `a[href*="/thread/${nevent}"]`)
+
+    const rootRow = page.locator('div.group', { hasText: rootMarker })
+    await rootRow.hover()
+    await rootRow.getByRole('button', { name: 'Im Thread antworten' }).click()
+
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText(commentMarker, { exact: false })).toBeVisible({ timeout: 15_000 })
+
+    const commentRow = dialog.locator('div.group', { hasText: commentMarker })
+    const card = commentRow.locator(`a[href*="/thread/${nevent}"]`)
+    await expect(card).toBeVisible({ timeout: 15_000 })
+
+    // Endzustand: Autorname + Textausschnitt statt „Zitiertes Ereignis" + Kennung.
+    await expect(card.locator('div').nth(0)).toHaveText('Relay Admin', { timeout: 25_000 })
+    await expect(card.locator('div').nth(1)).toHaveText(quotedMarker)
+    // Der Deep-Link zeigt jetzt in den FREMDEN Raum — dessen `h` kennt die Karte erst
+    // aus dem nachgeladenen Ereignis (buildRefCard `quotedRoom`), vorher fällt sie auf
+    // den aktuellen Raum zurück. Zweiter, unabhängiger Beleg für dieselbe Auflösung.
+    await expect(card).toHaveAttribute('href', new RegExp(`^/rooms/${hQuoted}/thread/`))
+
+    // Und der Weg dorthin: erst die Kennung, dann der Name. Wäre das Ereignis von
+    // Anfang an im Repository gewesen, stünde hier NUR der Name — dieser Fall fällt.
+    const states = await page.evaluate(() => (window as unknown as { __qcRefStates: string[] }).__qcRefStates)
+    expect(states[0], `erster gemalter Kartenzustand (aufgezeichnet: ${JSON.stringify(states)})`).toBe('Zitiertes Ereignis')
+    expect(states, `Kartenzustände über die Zeit: ${JSON.stringify(states)}`).toContain('Relay Admin')
+})
+
+// ── 10) P5.3: der Chip ERSETZT den Mention-Span — aber nur, wo er wirklich steht ─────
+
+/**
+ * Nutzerentscheidung 2026-08-15: „der Profil-Chip ersetzt den `@Name`-Mention-Span im
+ * Fließtext". Vorher stand dieselbe Person zweimal untereinander — bei ungeladenem
+ * `kind 0` sogar zeichengleich als gekürzte npub-Kette (Chip `n npub18s7…5kgc0`,
+ * Span `@npub18s7…5kgc0`).
+ *
+ * **Der Kern dieses Tests ist die Kopplung, nicht das Entfernen.** Ein Span darf nur
+ * verschwinden, wo der Chip WIRKLICH gerendert wird — nicht, wo er es prinzipiell
+ * könnte. `buildRefCard` liefert aus VIER unabhängigen Gründen keinen Profil-Chip, und
+ * in jedem davon muss die Erwähnung im Text stehen bleiben, sonst ist sie vollständig
+ * unsichtbar:
+ *   a) ein `nevent`/`note` gewinnt das Rennen (`firstNostrRef` wertet Event-Token VOR
+ *      Profil-Token) → Zitatkarte statt Profil-Chip,
+ *   b) die Nachricht trägt bereits eine Antwort-Vorschau (`q`-Tag) → gar keine Karte,
+ *   c) es ist das ZWEITE npub derselben Nachricht (die Karte ist genau eine),
+ *   d) der Nutzer hat die Karten abgeschaltet (eigener Test, Fall 7).
+ * Der Thread-ROOT ist ein fünfter Fall: er wird ohne `refCard` gebaut (`ThreadView`),
+ * bekommt also nie einen Chip — auch dort bleibt der Span.
+ *
+ * Alle Zustände am 2026-08-15 am laufenden Client gemessen (Rohausgabe:
+ * `docs/plans/2026-08-11T1321-restposten-aus-ux-plan/p5-punkt3-nachher.log`).
+ */
+test('Profil-Chip ersetzt den Mention-Span — und NUR dort, wo der Chip wirklich steht', async ({ page }) => {
+    const h = trackRoom(`qc10${rnd()}`)
+    createRoomNak(h, 'QC10')
+
+    const npub = npubEncode(ADMIN_PUB)
+    // Ein pubkey ohne kind 0 → Chip UND Span zeigten vorher dieselbe gekürzte Kette.
+    const ghost = npubEncode('3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c')
+
+    const mBekannt = `QCRep1-${rnd()}`
+    const mUnbekannt = `QCRep2-${rnd()}`
+    const mSatz = `QCRep3-${rnd()}`
+    const mEvent = `QCRep4-${rnd()}`
+    const mZwei = `QCRep5-${rnd()}`
+    const mReply = `QCRep6-${rnd()}`
+
+    publishRaw(h, ADMIN, `${mBekannt} nostr:${npub}`)
+    publishRaw(h, ADMIN, `${mUnbekannt} nostr:${ghost}`)
+    publishRaw(h, ADMIN, `${mSatz} schaut mal nostr:${npub} an bitte`)
+    const zielId = publishRaw(h, ADMIN, `QCRepZiel-${rnd()}`)
+    publishRaw(h, ADMIN, `${mEvent} nostr:${neventEncode({ id: zielId, relays: [], kind: 9 })} und nostr:${npub}`)
+    publishRaw(h, ADMIN, `${mZwei} nostr:${npub} und nostr:${ghost}`)
+    publishRaw(h, ADMIN, `${mReply} nostr:${npub}`, ['-t', `q=${zielId}`])
+
+    await openRoom(page, h)
+    await expect(page.getByText(mBekannt, { exact: false })).toBeVisible({ timeout: 15_000 })
+
+    const zeile = (marker: string) => page.locator('div.group', { hasText: marker }).last()
+
+    // 1) Chip da → Span weg. Der Name steht genau EINMAL, nämlich im Chip.
+    await expect(zeile(mBekannt).getByRole('button', { name: /Profil anzeigen: Relay Admin/ })).toBeVisible({
+        timeout: 15_000,
+    })
+    await expect(zeile(mBekannt).locator('.chat-content span.mention')).toHaveCount(0)
+
+    // 2) Ohne geladenes kind 0: die gekürzte Kette EINMAL, nicht zweimal untereinander.
+    await expect(zeile(mUnbekannt).getByRole('button', { name: /Profil anzeigen: npub18s7…5kgc0/ })).toBeVisible({
+        timeout: 15_000,
+    })
+    await expect(zeile(mUnbekannt).locator('.chat-content span.mention')).toHaveCount(0)
+    await expect(zeile(mUnbekannt).locator('.chat-content')).not.toContainText('npub18s7')
+
+    // 3) Mention MITTEN im Satz: kein doppelter Abstand, wo der Span herausfällt.
+    //    (`whitespace-pre-wrap` würde zwei Leerzeichen sichtbar stehen lassen.)
+    await expect(zeile(mSatz).locator('.chat-content')).toHaveText(`${mSatz} schaut mal an bitte`)
+
+    // 4) a) Ein `nevent` gewinnt gegen das `npub` → Zitatkarte, KEIN Profil-Chip →
+    //    der Span bleibt, sonst wäre die Erwähnung spurlos weg.
+    await expect(zeile(mEvent).getByRole('button', { name: /Profil anzeigen: / })).toHaveCount(0)
+    await expect(zeile(mEvent).locator('.chat-content span.mention')).toHaveText(['@Relay Admin'])
+
+    // 5) c) Zwei npubs, eine Karte: der Chip steht fürs ERSTE, der Span des ZWEITEN bleibt.
+    await expect(zeile(mZwei).getByRole('button', { name: /Profil anzeigen: Relay Admin/ })).toBeVisible({
+        timeout: 15_000,
+    })
+    await expect(zeile(mZwei).locator('.chat-content span.mention')).toHaveText(['@npub18s7…5kgc0'])
+
+    // 6) b) Antwort-Vorschau (q-Tag) schlägt die Karte → kein Chip → Span bleibt.
+    await expect(zeile(mReply).getByRole('button', { name: /Profil anzeigen: / })).toHaveCount(0)
+    await expect(zeile(mReply).locator('.chat-content span.mention')).toHaveText(['@Relay Admin'])
+})
+
+// ── 11) P5.3 im Thread: Kommentar ohne Span, ROOT MIT Span ──────────────────────────
+
+test('Thread: der Kommentar verliert seinen Span an den Chip, der Root behält ihn (er hat keinen Chip)', async ({
+    page,
+}) => {
+    const h = trackRoom(`qc11${rnd()}`)
+    createRoomNak(h, 'QC11')
+
+    const npub = npubEncode(ADMIN_PUB)
+    const rootMarker = `QCTRoot-${rnd()}`
+    const commentMarker = `QCTKomm-${rnd()}`
+    const rootId = publishRaw(h, ADMIN, `${rootMarker} nostr:${npub}`)
+    publishComment(h, rootId, 9, ADMIN, `${commentMarker} nostr:${npub}`)
+
+    await openRoom(page, h)
+    await expect(page.getByText(rootMarker, { exact: false })).toBeVisible({ timeout: 15_000 })
+
+    const rootRow = page.locator('div.group', { hasText: rootMarker }).last()
+    await rootRow.hover()
+    await rootRow.getByRole('button', { name: 'Im Thread antworten' }).click()
+
+    const dialog = page.getByRole('dialog', { name: 'Thread' })
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText(commentMarker, { exact: false })).toBeVisible({ timeout: 15_000 })
+
+    // Der KOMMENTAR ist eine vollwertige ChatMessage mit `refCard` → Chip da, Span weg.
+    const commentRow = dialog.locator('div.group', { hasText: commentMarker }).last()
+    await expect(commentRow.getByRole('button', { name: /Profil anzeigen: Relay Admin/ })).toBeVisible({
+        timeout: 15_000,
+    })
+    await expect(commentRow.locator('.chat-content span.mention')).toHaveCount(0)
+
+    // Der ROOT wird über `personFields` OHNE refCard gebaut (`ThreadView`) → kein Chip.
+    // Sein Span MUSS deshalb stehen bleiben; ohne ihn stünde im Thread-Kopf eine
+    // Erwähnung, die nirgends mehr auftaucht.
+    const rootBody = dialog.locator('[x-ref="rootBody"]').first()
+    await expect(rootBody.locator('span.mention')).toHaveText(['@Relay Admin'])
 })
