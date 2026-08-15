@@ -1557,7 +1557,12 @@ test('C4: Senden bei offenem @-Popover schließt das Popover', async ({ page }) 
     const composer = page.getByPlaceholder('Nachricht schreiben…')
     await expect(composer).toBeVisible({ timeout: 15_000 })
 
-    const suggestion = page.getByRole('button', { name: /Relay Admin/ })
+    // Vorschlag-Button vom Profil-Chip trennen — Stage-A-Befund (2026-08-15,
+    // p8-c4-umbau.md): Der mention-Raum wird über Läufe wiederverwendet, und
+    // seit P5.3 tragen ALTE Zeilen Chip-Buttons, deren accessible name mit
+    // „Profil anzeigen: …" BEGINNT — der Vorschlag enthält nur den Namen. Ohne
+    // den Lookahead matcht der Locator beide → strict mode bei 2 Treffern.
+    const suggestion = page.getByRole('button', { name: /^(?!Profil anzeigen).*Relay Admin/ })
     await expect(async () => {
         await composer.fill('')
         await composer.pressSequentially('@Relay')
