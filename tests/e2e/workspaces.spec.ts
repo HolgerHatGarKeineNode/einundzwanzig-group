@@ -359,4 +359,75 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
         // stünde hier der zooid-Name, wäre die Zuordnung falsch herum.
         await expect(hint).toHaveText('Buzz Relay')
     })
+
+    /**
+     * **P13 — derselbe Hinweis, auf dem KALTEN Weg** (F5/Bookmark/geteilter Link mit
+     * `?space=workspace`): das Geschwisterstück zum Test oben, das den WARMEN Weg
+     * (Tab → Kachel, NIP-11 von `nostrSpaces` vorgeladen) sichert.
+     *
+     * Beim kalten Lauf liest `setup()` der Rauminsel das NIP-11 EINMAL synchron in den
+     * leeren Cache (`bridge.ts`, `spaceHint = … spaceBranding(…, getRelay(url))`) — der
+     * Hinweis stand auf der URL-Form (`localhost:3001`) und BLIEB dort, auch nachdem das
+     * Doc eintraf: eingefroren, nicht langsam (im Browser reproduziert, 10 s nach
+     * Ankunft unverändert; Rohlog p13-08 im Artefaktordner). Der Fix korrigiert über die
+     * `deriveRelay`-Subscription, die die Insel ohnehin hält — dieser Test ist der
+     * ausgelieferte Wächter dagegen, dass die Eigenschaft still zurückfällt.
+     *
+     * **Gate statt fester Verzögerung** (P6-Muster ist 6 s): die Verzögerung muss
+     * zuverlässig ÜBER den Moment halten, in dem der Kopf gerendert ist — und danach
+     * auf Kommando freigeben, denn die Aussage ist die TRANSITION, nicht die Ankunft.
+     * `fetchJson` (welshman) hat keinen eigenen Timeout, `makeLoadItem` koalesziert
+     * alle `loadRelay`-Aufrufe auf das eine pendende Promise → die Freigabe liefert
+     * das Doc garantiert nach, egal wie viele Fetches das Gate festhielt.
+     */
+    test('Kalter Workspace-Raum-Link: der Space-Hinweis korrigiert sich, wenn NIP-11 nach dem Mount eintrifft', async ({ page }) => {
+        test.setTimeout(150_000)
+        joinBuzzRelay()
+
+        // NIP-11 des Buzz-Ports festhalten (nur `Accept: application/nostr+json`, der
+        // WebSocket bleibt unberührt — der Raum-Feed ist sofort da, nur die Relay-ART
+        // trifft später ein). VOR dem Login installiert: Auch der Client-Boot während
+        // des Logins kann den Fetch anstoßen.
+        let nip11Hits = 0
+        let releaseGate!: () => void
+        const gate = new Promise<void>((resolve) => {
+            releaseGate = resolve
+        })
+        await page.route(`http://localhost:${BUZZ_PORT}/`, async (route) => {
+            if ((route.request().headers().accept ?? '').includes('nostr+json')) {
+                nip11Hits++
+                await gate
+            }
+            await route.continue()
+        })
+
+        await useZooid(page)
+        await page.addInitScript((url) => {
+            ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
+        }, BUZZ_URL)
+        await loginNsec(page, NSEC)
+
+        // KALTER Workspace-Raum: voller Ladezyklus. `init()` stellt den aktiven Space
+        // synchron um, `setup()` liest den (leeren) NIP-11-Cache — genau der F5-Pfad.
+        await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}?space=workspace`)
+        await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
+        const hint = page.locator('[data-space-hint]')
+        await expect(hint).toBeVisible({ timeout: 20_000 })
+
+        // Vakuitätsriegel 1 — das Gate hält tatsächlich etwas fest (hätte die Route nie
+        // gegriffen, wäre der Test stimmhaft grün gegen einen Zufallssieg der Korrektur).
+        await expect
+            .poll(() => nip11Hits, { timeout: 10_000, message: 'page.route muss das NIP-11-Dokument tatsächlich festhalten' })
+            .toBeGreaterThan(0)
+        // Vakuitätsriegel 2 — der Zustand VOR der Korrektur ist die URL-Form
+        // (`displayRelayUrl('ws://localhost:3001/')` → `localhost:3001`). Ohne diesen
+        // Anker wäre der Test grün, bevor der Fehler überhaupt eintreten KANN.
+        await expect(hint).toHaveText('localhost:3001')
+
+        // Übergangspunkt abwarten, dann erst asserten: Freigabe liefert das Doc, das
+        // korrigierende Abo muss den Hinweis auf den Space-Namen ziehen. Der rekonstruierte
+        // Einmal-Snapshot (Mutationskalibrierung) liefert ihn NIE → dieser Assert fällt rot.
+        releaseGate()
+        await expect(hint).toHaveText('Buzz Relay', { timeout: 20_000 })
+    })
 })
