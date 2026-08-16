@@ -181,9 +181,15 @@ async function bootstrapWasserzeichen(page: Page): Promise<number> {
  * käme es NACH der Nachricht und machte sie ebenso gelesen), dann `created_at` explizit
  * eine Sekunde darüber setzen und das am zurückgelesenen Event prüfen.
  */
-async function ungelesenSicherPublizieren(page: Page, h: string, content: string): Promise<string> {
+async function ungelesenSicherPublizieren(page: Page, h: string, content: string, versatz = 0): Promise<string> {
     const wm = await bootstrapWasserzeichen(page)
-    const ts = wm + 1
+    // `Math.max(…, jetzt)` statt schlicht `wm + 1`: liegt der Login länger zurück, wäre
+    // `wm + 1` ein Zeitstempel in der VERGANGENHEIT und die Nachricht rutschte in der
+    // Sortierung an eine Stelle, an die sie nicht gehört. Beides zusammen ist immer
+    // größer als das Wasserzeichen UND nie älter als der Augenblick.
+    // `versatz` staffelt mehrere Nachrichten desselben Tests, damit ihre Reihenfolge
+    // eindeutig bleibt (sonst trügen sie bei schnellem Publizieren dieselbe Sekunde).
+    const ts = Math.max(wm + 1, Math.floor(Date.now() / 1000)) + versatz
     const id = publishMessage(h, content, ts)
     const event = findEvent(h, 9, (e) => e.id === id)
     expect(
@@ -829,8 +835,11 @@ test('Anker 8: Ungelesen-Zahlen erscheinen an den vorgesehenen Orten — Nav ble
     const room = makeRoom()
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
-    publishMessage(room.h, `Zahl-${rnd()}`)
-    publishMessage(room.h, `Zahl-${rnd()}`) // zwei ⇒ die Raum-Pille muss "2" zeigen, nicht nur "> 0"
+    // Ungelesen-sicher (2026-08-16): dieser Test misst Ungelesen-ZAHLEN — fiele eine
+    // Nachricht in die Sekunde des Lesestand-Wasserzeichens, zählte sie als gelesen und
+    // die Pille zeigte „1" statt „2". Herleitung bei `ungelesenSicherPublizieren`.
+    await ungelesenSicherPublizieren(page, room.h, `Zahl-${rnd()}`)
+    await ungelesenSicherPublizieren(page, room.h, `Zahl-${rnd()}`, 1) // zwei ⇒ die Raum-Pille muss "2" zeigen, nicht nur "> 0"
 
     const roomButton = page.getByRole('button', { name: new RegExp(room.name) })
     const roomPill = roomButton.locator('span.bg-brand-500.rounded-pill')
@@ -1032,7 +1041,11 @@ test('Anker 11: zweiter Tap auf „Alles" zerstört das Rückgängig nicht — K
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(roomX.name) })).toBeVisible({ timeout: 25_000 })
     await expect(page.getByRole('button', { name: new RegExp(roomY.name) })).toBeVisible({ timeout: 25_000 })
-    publishMessage(roomX.h, `Undo-A-${rnd()}`)
+    // Nur roomX bekommt die Bootstrap-Zusicherung. roomY unten hängt am Wasserzeichen,
+    // das `markAllRead()` gerade gesetzt hat — dort ist `awaitNextSecond` das richtige
+    // Mittel, und eine Bootstrap-Zusicherung wäre sogar falsch: ihr Zeitstempel läge VOR
+    // dem frisch gesetzten Stand und die Nachricht gälte zu Recht als gelesen.
+    await ungelesenSicherPublizieren(page, roomX.h, `Undo-A-${rnd()}`)
 
     await openUpdates(page)
     const rowA = roomRow(page, roomX.name)
@@ -1283,7 +1296,7 @@ test('Anker 14: kalter Direkteinstieg auf /updates zeigt dieselbe Zeile wie die 
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
     const marker = `Kalt-${rnd()}`
-    publishMessage(room.h, marker)
+    await ungelesenSicherPublizieren(page, room.h, marker)
 
     // ── warm: über die Glocke ────────────────────────────────────────────────
     await openUpdates(page)
@@ -1734,7 +1747,7 @@ test('Anker 18: „Rückgängig" nach Ablauf der Frist stellt nichts wieder her'
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 45_000 })
     const marker = `Frist-${rnd()}`
-    publishMessage(room.h, marker)
+    await ungelesenSicherPublizieren(page, room.h, marker)
 
     await openUpdates(page)
     const row = roomRow(page, room.name)
@@ -1825,8 +1838,8 @@ test('Anker 19: Raum-Badge zeigt exakt N — Badge und Rauminhalt stimmen übere
     const runId = rnd()
     const COUNT = 5
     const markers = Array.from({ length: COUNT }, (_, i) => `Gate3-${runId}-${i}`)
-    for (const m of markers) {
-        publishMessage(room.h, m)
+    for (const [i, m] of markers.entries()) {
+        await ungelesenSicherPublizieren(page, room.h, m, i)
     }
 
     const roomButton = page.getByRole('button', { name: new RegExp(room.name) })
@@ -1897,7 +1910,7 @@ test('Anker 20: Glockenzahl entspricht exakt den ungelesenen /updates-Zeilen (Ga
     const room = makeRoom()
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
-    publishMessage(room.h, `Glocke-${rnd()}`)
+    await ungelesenSicherPublizieren(page, room.h, `Glocke-${rnd()}`)
 
     await expect(bell(page)).toBeVisible({ timeout: 25_000 })
     const readBellCount = async (): Promise<number> => {
