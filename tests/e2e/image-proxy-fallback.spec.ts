@@ -211,13 +211,147 @@ test('Tür 5 — Lightbox: http-Inline-Bild → keine Anfrage, Proxy-src bleibt 
     const lightbox = page.locator('div[role="dialog"] img.rounded-card')
     await expect(page.getByRole('dialog', { name: 'Bild in voller Größe' })).toBeVisible({ timeout: 10_000 })
     await expect(lightbox).toBeAttached()
-    await expect
-        .poll(() => lightbox.evaluate((el) => (el as HTMLElement).dataset.orig ?? ''), { timeout: 15_000 })
-        .toBe('1')
+
+    // **Auf `data-img-error` gewartet, nicht auf `data-img-orig` — und das ist der
+    // Unterschied, den der Test bis zum 2026-08-16 nicht machen konnte.**
+    //
+    // Vorher stand hier ein Poll auf `dataset.orig === '1'`. Dieses eine Attribut trug
+    // zwei Aussagen zugleich: „ein Ladefehler ist eingetreten" UND „es wurde auf das
+    // Original umgeschaltet". Solange der Rückfall imperativ war, fielen sie zusammen.
+    // Seit dem reaktiven Umbau sind es zwei gebundene Attribute, und in DIESEM Test
+    // laufen sie auseinander: `$imgFallback` lehnt die http-URL per Policy ab, also
+    // bleibt `data-img-orig` auf `0` — auf `1` zu warten liefe hier zwangsläufig in
+    // einen Timeout, und zwar zu Recht, denn ein Umschalten darf gar nicht passieren.
+    //
+    // Gemeint war immer die ERSTE Aussage: der Fehlerpfad ist durchlaufen, das Warten
+    // hat also einen definierten Endpunkt statt einer geratenen Frist. Beide Attribute
+    // werden geprüft, weil beide Teil der Zusage sind — Fehler ja, Umschalten nein.
+    await expect(lightbox).toHaveAttribute('data-img-error', '1', { timeout: 15_000 })
+    await expect(
+        lightbox,
+        'die Policy hat abgelehnt — auf das Original darf NICHT umgeschaltet worden sein',
+    ).toHaveAttribute('data-img-orig', '0')
     await page.waitForTimeout(500)
 
     expect(routes.evilHits(), 'keine Anfrage an den Angreifer-Host').toHaveLength(0)
     await expect(lightbox).toHaveAttribute('src', /\/img\/full\?src=/)
+})
+
+/**
+ * Der legitime Zweig der LIGHTBOX — der Gegenpol zu Tür 5 und bis zum 2026-08-16 nicht
+ * abgedeckt.
+ *
+ * Tür 5 misst nur den Policy-Fall (Ablehnung, kein Umschalten). Ob der Rückfall auf das
+ * Original in der Lightbox überhaupt FUNKTIONIERT, prüfte niemand — dabei ist es derselbe
+ * Zweig, den der reaktive Umbau neu geschrieben hat. Ohne diesen Test hätte man an der
+ * Lightbox jede Umschaltung kaputtmachen können, ohne dass etwas rot wird.
+ *
+ * `originHits > 0` ist Pflicht und nicht Zierrat (gleiche Regel wie bei den Kacheln): ohne
+ * diese Zeile wäre der Test nicht davon zu unterscheiden, dass die Policy abgelehnt und
+ * das Bild aus einem ganz anderen Grund funktioniert hat.
+ */
+test('Lightbox legitim — Proxy scheitert (500), das Original wird nachgeladen und angezeigt', async ({ page }) => {
+    const uid = rnd()
+    const h = trackRoom(`lbxok${uid}`)
+    makeVerifiedRoom(h, [`name=LightboxOk ${uid}`])
+    nak(['event', '--auth', '--sec', NSEC, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
+    nak([
+        'event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`,
+        '-c', 'Bild: https://legit.example/inline.png', ZOOID_WS,
+    ])
+
+    await useZooid(page)
+    await armImageRoutes(page)
+    // NACH `armImageRoutes` registriert, gewinnt also: der Proxy antwortet 500 (das tut
+    // er für legit.example dort schon), das ORIGIN liefert ein echtes PNG und wird gezählt.
+    const originHits: string[] = []
+    await page.route('**legit.example/**', (route) => {
+        originHits.push(route.request().url())
+        return route.fulfill({ status: 200, contentType: 'image/png', body: PNG_1X1 })
+    })
+    await loginNsec(page, NSEC)
+
+    await page.goto(`/rooms/${h}`)
+    const chatImg = page.locator('img.chat-image').first()
+    await expect(chatImg).toBeVisible({ timeout: 20_000 })
+    await chatImg.click()
+
+    const lightbox = page.locator('div[role="dialog"] img.rounded-card')
+    await expect(page.getByRole('dialog', { name: 'Bild in voller Größe' })).toBeVisible({ timeout: 10_000 })
+    await expect(lightbox).toBeAttached()
+
+    // Erst der Fehler, dann das Umschalten — hier laufen beide Marken auf `1`.
+    await expect(lightbox).toHaveAttribute('data-img-error', '1', { timeout: 15_000 })
+    await expect(lightbox).toHaveAttribute('data-img-orig', '1', { timeout: 15_000 })
+    // Und die Quelle steht danach auf dem ORIGINAL, nicht mehr auf der Proxy-URL.
+    await expect(lightbox).toHaveAttribute('src', 'https://legit.example/inline.png')
+    // Das Bild ist wirklich da — ein `src`-Attribut allein sagt nichts über den Ladeerfolg.
+    await expect
+        .poll(() => lightbox.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 10_000 })
+        .toBeGreaterThan(0)
+
+    expect(
+        originHits.length,
+        'das Original MUSS angefragt worden sein — sonst prüft der Test den Policy-Zweig',
+    ).toBeGreaterThan(0)
+})
+
+/**
+ * **Der Zustand darf das Bild nicht überleben** — und das ist hier kein Kosmetik-, sondern
+ * ein Sicherheitsfall.
+ *
+ * Der alte Rückfall hielt seinen Zustand im `dataset` des `<img>`. Dasselbe Element trägt
+ * aber NACHEINANDER verschiedene Bilder: die Lightbox wechselt nur `lightboxSrc`. Ich hatte
+ * das am 2026-08-16 als Restrisiko gemeldet, ohne es zu messen; der reaktive Umbau schließt
+ * es mit `x-effect="lightboxSrc; imgOrig = false; imgError = false"`.
+ *
+ * Dieser Test misst genau diesen Reset — und zwar an der Stelle, an der ein Versagen weh
+ * tut: Bild A ist legitim und schaltet auf das Original um (`imgOrig` wird wahr). Bild B
+ * ist die http-Angriffs-URL. Bliebe `imgOrig` stehen, bekäme B beim Öffnen sofort seine
+ * ROHE Quelle gebunden (`:src="imgOrig && roh ? roh : lightboxSrc"`) — der Browser jedes
+ * Lesers ginge ohne einen einzigen Ladefehler direkt zum Angreifer-Host, ohne dass
+ * `$imgFallback` je gefragt würde. Die Reihenfolge legitim-vor-Angriff ist deshalb Teil
+ * des Tests, nicht Zufall.
+ */
+test('Lightbox: der Rückfall-Zustand überlebt den Bildwechsel NICHT — sonst umginge das zweite Bild die Policy', async ({
+    page,
+}) => {
+    const uid = rnd()
+    const h = trackRoom(`lbxmix${uid}`)
+    makeVerifiedRoom(h, [`name=LightboxMix ${uid}`])
+    nak(['event', '--auth', '--sec', NSEC, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
+    nak(['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, '-c', 'A: https://legit.example/a.png', ZOOID_WS])
+    nak(['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, '-c', 'B: http://evil.example/b.png', ZOOID_WS])
+
+    const routes = await openSpaces(page)
+    await page.goto(`/rooms/${h}`)
+    const bilder = page.locator('img.chat-image')
+    await expect(bilder).toHaveCount(2, { timeout: 20_000 })
+
+    const lightbox = page.locator('div[role="dialog"] img.rounded-card')
+    const dialog = page.getByRole('dialog', { name: 'Bild in voller Größe' })
+    const schliessen = page.getByRole('button', { name: 'Schließen' })
+
+    // ── A: legitim → Umschaltung auf das Original, `imgOrig` steht auf wahr ──────────
+    await bilder.nth(0).click()
+    await expect(dialog).toBeVisible({ timeout: 10_000 })
+    await expect(lightbox).toHaveAttribute('data-img-orig', '1', { timeout: 15_000 })
+
+    await schliessen.click()
+    await expect(dialog).toBeHidden({ timeout: 10_000 })
+
+    // ── B: Angriffs-URL → der Zustand MUSS zurückgesetzt sein ───────────────────────
+    await bilder.nth(1).click()
+    await expect(dialog).toBeVisible({ timeout: 10_000 })
+    await expect(lightbox).toHaveAttribute('data-img-error', '1', { timeout: 15_000 })
+    await expect(
+        lightbox,
+        'der Rückfall-Zustand von Bild A darf für Bild B nicht mehr gelten',
+    ).toHaveAttribute('data-img-orig', '0')
+    await expect(lightbox).toHaveAttribute('src', /\/img\/full\?src=/)
+    await page.waitForTimeout(500)
+
+    expect(routes.evilHits(), 'keine Anfrage an den Angreifer-Host — auch nicht nach einem Bildwechsel').toHaveLength(0)
 })
 
 test('Legitim — Proxy scheitert am Upstream (500): roher Rückfall zeigt das Bild', async ({ page }) => {
