@@ -2372,6 +2372,17 @@ test('Thread-Umbau (c): kalter Deep-Link-Aufruf öffnet den Thread, Kopf-Zurück
  * die mit dem neuen „immer-da-aber-disabled"-Button bedeutungslos wäre).
  */
 test('Thread-Umbau (d): langer Root ist geklammert + Kopf-Leiste expandiert (inkl. aria-expanded); kurzer Root mit deaktiviertem Toggle', async ({ page }) => {
+    // 30 s (Voreinstellung) → 120 s wie bei den Nachbarn dieser Datei. Der Test macht
+    // zwei volle Durchgänge (langer Root senden, Thread öffnen, zweimal togglen, zurück;
+    // dann kurzer Root, Thread öffnen, Gegenprobe) und braucht warm ~2 s. In einem Lauf
+    // mit FRISCH aufgesetzten Relays (Seed läuft parallel) sind es 19–30 s — gemessen am
+    // 2026-08-16, `--repeat-each=20 --workers=6`: 2 von 20 Läufen wurden dabei mitten im
+    // Klick auf „Im Thread antworten" von der 30-s-Frist abgeschnitten, während dieselbe
+    // Aktion in jedem warmen Lauf in rund 2 s durchgeht. Der Wert KOMMT hier also, die
+    // Frist war zu knapp — anders als bei den drei übrigen Fehlschlägen desselben Laufs,
+    // die an `toBeEnabled` scheiterten und von einer längeren Frist nichts hätten (offener
+    // Befund, siehe Meldung 2026-08-16).
+    test.setTimeout(120_000)
     await openRoom(page, 'thread')
     const composer = page.getByPlaceholder('Nachricht schreiben…')
     await expect(composer).toBeVisible({ timeout: 15_000 })
