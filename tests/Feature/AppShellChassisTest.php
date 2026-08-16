@@ -207,6 +207,41 @@ test('app-shell rendert Chrome (status-strip + main-Outlet + nav); chrome=false 
         ->not->toContain('aria-label="Hauptnavigation"');
 });
 
+/**
+ * Der Rahmen ab `xl` ist EINZEILIG — und das ist keine Kosmetik, sondern die
+ * Bedingung dafür, dass Rail und Bühne bis zum unteren Fensterrand reichen.
+ *
+ * Im Fluss des Grids stehen DREI Kinder: Rail, Bühne und die `profile-card`
+ * (ein Overlay mit geschlossenem `<dialog>`, 0 px hoch — aber eben ein Grid-Item).
+ * Ohne feste Zeilenachse legt Auto-Placement die Karte in eine zweite, implizite
+ * Zeile; beide Zeilen sind dann `auto`, und `align-content: stretch` verteilt den
+ * freien Platz GLEICHMÄSSIG auf beide. Gemessen im isolierten Repro: Rail 672 px
+ * statt 1291 px bei 1291 px Viewport — die Spalte endet mitten im Fenster, darunter
+ * steht der nackte Seitengrund. Genau der Defekt aus dem Ticket vom 2026-08-16.
+ *
+ * Geprüft wird die Klasse und NICHT die gerenderte Höhe: Letzteres bräuchte einen
+ * Browser mit gebautem CSS. Der Zusammenhang „Klasse fehlt → Spalte zu kurz" ist
+ * im Repro belegt; dieser Test hält fest, dass die Klasse dort steht.
+ */
+test('app-frame: das Desktop-Grid hat genau EINE Zeile, sonst teilt die Profilkarte die Höhe', function () {
+    $html = Blade::render('<x-group::app-frame><div id="sonde">x</div></x-group::app-frame>');
+
+    expect($html)
+        ->toContain('xl:grid-rows-1')
+        // Die Zeilenachse ist nur zusammen mit `h-dvh` sinnvoll — fiele die Höhe weg,
+        // gäbe es keinen freien Platz zu verteilen und der Test schützte nichts mehr.
+        ->toContain('xl:h-dvh');
+
+    // Gegenprobe zur Ursache: die Profilkarte steht wirklich IM Grid (drittes Kind).
+    // Wandert sie eines Tages hinaus, darf dieser Test seine Begründung verlieren —
+    // aber dann soll er auffallen, statt still weiter das Falsche zu behaupten.
+    expect($html)->toContain('nostrProfileCard');
+
+    // Und `rail=false` bleibt zeichengleich zu vorher: kein Chassis, keine Zeilenachse.
+    $bare = Blade::render('<x-group::app-frame :rail="false"><div>x</div></x-group::app-frame>');
+    expect($bare)->not->toContain('xl:grid-rows-1');
+});
+
 test('app-frame rendert GENAU EIN Wurzelelement (Livewire-Vertrag)', function () {
     // Livewire erlaubt pro Full-Page-Komponente genau eine Wurzel und prüft das mit
     // `DOMDocument` (SupportMultipleRootElementDetection). Ein einziges überzähliges
