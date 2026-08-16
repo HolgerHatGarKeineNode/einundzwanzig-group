@@ -1475,15 +1475,14 @@ test('B4: verifizierter NIP-05-Handle zeigt Häkchen in der Profil-Karte', async
  * Mitglieder-Vorschlag „Relay Admin"; die Auswahl fügt `nostr:npub… ` ein. Die
  * gesendete kind-9 trägt ein `["p", SELF]`-Tag (NIP-08/27).
  *
- * Rendering nach P5.3 (Nutzerentscheidung 2026-08-15, Package-Commit 2bd6a45):
- * Der Profil-Chip ersetzt den `@Name`-Span — aber nur, wo er wirklich steht.
- * Der Draft erwähnt „Relay Admin" deshalb ZWEIMAL (zweiter Autocomplete): Das
- * erste npub bekommt den Chip (`/Profil anzeigen: Relay Admin/`, Kolon-Idiom
- * wie in quote-card.spec.ts), für das zweite bleibt der `@Name`-Span — der
- * P5.3-Ausnahmefall „bei zwei npubs bekommt nur das erste einen Chip". So prüft
- * dieser Test beide Seiten des Vertrags über den Composer-Pfad; die übrigen
- * Ausnahmefälle (Schalter aus, q-Tag, nevent, Thread-Root) deckt
- * quote-card.spec.ts ab.
+ * Rendering seit 2026-08-16 (ersetzt die Chip-Entscheidung vom 2026-08-15):
+ * Ein im Text referenziertes Profil bekommt NIE eine Karte, es steht immer
+ * inline als `@Name`. Der Draft erwähnt „Relay Admin" deshalb ZWEIMAL (zweiter
+ * Autocomplete) und muss danach ZWEI gleichlautende Erwähnungen im Fließtext
+ * zeigen — vorher fiel die erste weg, weil ein Chip an ihre Stelle trat. Über
+ * den Composer-Pfad ist das die einzige Stelle, die das misst; die übrigen
+ * Fälle (mehrzeilige Ankündigung, Schalter aus, q-Tag, nevent, Thread-Root)
+ * deckt quote-card.spec.ts ab.
  *
  * Befund (2026-08-15, Probe /tmp/opencode/probe-c4.spec.ts): Nach einem KLICK
  * auf den Vorschlag landet der Caret bei 0 — weiteres Tippen PREPENDED, der
@@ -1492,17 +1491,21 @@ test('B4: verifizierter NIP-05-Handle zeigt Häkchen in der Profil-Karte', async
  * Klick den Caret explizit ans Ende; sobald das Produkt den Caret selbst
  * korrekt stellt, ist das ein No-op.
  */
-test('C4: @-Mention fügt nostr:npub ein, trägt p-Tag, rendert Profil-Chip (P5.3)', async ({ page }) => {
+test('C4: @-Mention fügt nostr:npub ein, trägt p-Tag, rendert beide Erwähnungen inline', async ({ page }) => {
     await openRoom(page, 'mention')
     const composer = page.getByPlaceholder('Nachricht schreiben…')
     await expect(composer).toBeVisible({ timeout: 15_000 })
 
-    // Vorschlag-Button vom Profil-Chip trennen: Der mention-Raum wird über Läufe
-    // wiederverwendet, und seit P5.3 tragen ALTE Zeilen Chip-Buttons, deren
-    // accessible name mit „Profil anzeigen: …" BEGINNT (Kolon-Idiom) — der Vorschlag
-    // enthält nur den Namen. Ohne den Lookahead matcht der Locator beide → strict
-    // mode bei 2 Treffern.
-    const suggestion = page.getByRole('button', { name: /^(?!Profil anzeigen).*Relay Admin/ })
+    // Den Vorschlag auf SEIN Popover scopen statt ihn auf der ganzen Seite zu suchen.
+    // Grund (2026-08-16): Der mention-Raum wird über Läufe wiederverwendet, und jede
+    // alte Zeile trägt die gerenderten Erwähnungen „Relay Admin" im Fließtext — ein
+    // seitenweiter Locator auf den blossen Namen läuft damit in den strict mode.
+    // Vorher trennte ein Lookahead auf „Profil anzeigen: …" den Vorschlag von den
+    // Chip-Buttons; die gibt es seit dem 2026-08-16 nicht mehr, und gegen den
+    // Fließtext hätte er ohnehin nicht geholfen. Der Container ist die belastbare
+    // Grenze: er gehört dem Composer und kann nie Nachrichteninhalt enthalten.
+    const mentionPopover = page.locator('.surface-card.absolute.bottom-full.left-0')
+    const suggestion = mentionPopover.getByRole('button', { name: /Relay Admin/ })
     // Text zuerst, dann `@Rel` → der Vorschlag ersetzt das @-Token an Ort und
     // Stelle (Directory lädt async → tippen wiederholen, bis der Vorschlag steht).
     // Der KOMPLETTE Draft — beide Autocompletes samt Zwischenprüfungen — steht in
@@ -1530,14 +1533,19 @@ test('C4: @-Mention fügt nostr:npub ein, trägt p-Tag, rendert Profil-Chip (P5.
 
     await page.getByRole('button', { name: 'Senden' }).click()
 
-    // Gerendert (P5.3), auf die Marker-Zeile gescoped. `/Profil anzeigen: /`
-    // (MIT Doppelpunkt) ist der CHIP — nicht die Autor-Avatar-Schaltfläche der
-    // Zeile, deren aria-label exakt „Profil anzeigen" ohne Namen ist.
+    // Gerendert, auf die Marker-Zeile gescoped: ZWEI eingefügte npub-Referenzen
+    // derselben Person ergeben ZWEI gleichlautende Erwähnungen im Fließtext. Genau
+    // hier fiel bis zum 2026-08-16 die erste weg, weil ein Chip an ihre Stelle trat.
+    // Adressiert über die Klasse `.mention`, nicht über das Tag — geprüft ist, dass
+    // der Name im Text steht, nicht welches Element ihn trägt.
     const rendered = page.locator('div.group', { hasText: marker })
-    await expect(rendered.getByRole('button', { name: /Profil anzeigen: Relay Admin/ })).toBeVisible({ timeout: 15_000 })
-    // Zweites npub derselben Person: genau EIN `@Name`-Span bleibt (kein zweiter
-    // Chip) — die Erwähnung verliert nie ihren Bezug.
-    await expect(rendered.locator('.chat-content span.mention')).toHaveText(['@Relay Admin'], { timeout: 15_000 })
+    await expect(rendered.locator('.chat-content .mention')).toHaveText(['@Relay Admin', '@Relay Admin'], { timeout: 15_000 })
+    // Und keine Fläche über dem Text: die Randmarke `$quoteRail` (chat-row.blade.php)
+    // trägt jede Referenz-Karte — Antwort-Vorschau, Zitat und der frühere Chip. Zwei
+    // Signale ODER-verknüpft, Begründung bei `kartenFlaechen` in quote-card.spec.ts:
+    // das Attribut überlebt eine Klassen-Umbenennung, die Klasse fängt eine neue Fläche,
+    // deren Autor das Attribut vergisst.
+    await expect(rendered.locator('[data-quote-rail], [class*="border-l-2"]')).toHaveCount(0)
 
     // Relay: kind-9 mit nostr:npub… im Content UND p-Tag = SELF (Mention-Ziel).
     let msg: RelayEvent | undefined
@@ -1557,12 +1565,14 @@ test('C4: Senden bei offenem @-Popover schließt das Popover', async ({ page }) 
     const composer = page.getByPlaceholder('Nachricht schreiben…')
     await expect(composer).toBeVisible({ timeout: 15_000 })
 
-    // Vorschlag-Button vom Profil-Chip trennen — Stage-A-Befund (2026-08-15,
-    // p8-c4-umbau.md): Der mention-Raum wird über Läufe wiederverwendet, und
-    // seit P5.3 tragen ALTE Zeilen Chip-Buttons, deren accessible name mit
-    // „Profil anzeigen: …" BEGINNT — der Vorschlag enthält nur den Namen. Ohne
-    // den Lookahead matcht der Locator beide → strict mode bei 2 Treffern.
-    const suggestion = page.getByRole('button', { name: /^(?!Profil anzeigen).*Relay Admin/ })
+    // Denselben Popover-Scope wie im Test darüber, aus demselben Grund
+    // (2026-08-16): Der mention-Raum wird über Läufe wiederverwendet, seine alten
+    // Zeilen tragen den Namen „Relay Admin" als Erwähnung im Fließtext, und ein
+    // seitenweiter Locator darauf läuft in den strict mode. Der frühere Lookahead
+    // auf „Profil anzeigen: …" trennte den Vorschlag von den Chip-Buttons — die
+    // gibt es seit dem 2026-08-16 nicht mehr (Stage-A-Befund p8-c4-umbau.md).
+    const mentionPopover = page.locator('.surface-card.absolute.bottom-full.left-0')
+    const suggestion = mentionPopover.getByRole('button', { name: /Relay Admin/ })
     await expect(async () => {
         await composer.fill('')
         await composer.pressSequentially('@Relay')
