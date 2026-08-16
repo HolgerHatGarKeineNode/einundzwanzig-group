@@ -99,6 +99,23 @@ class AppServiceProvider extends ServiceProvider
                 Limit::perMinute(30)->by('verein-proxy:instance'),
             ];
         });
+
+        /*
+         * P8 — Kontingent des APP-Proxys (`throttle:verein-app-proxy`). Kein
+         * Session-Pubkey hier — der Aufrufer ist die native App. Der
+         * Body-Pubkey ist eine BEHAUPTUNG (rotierbar), deshalb bleibt der
+         * IP-Eimer als zweite Kette; beide sind bewusst großzügiger als beim
+         * Web-Proxy, denn die harte Obergrenze für Rechnungen trägt der
+         * VEREIN selbst (3/Tag pro Pubkey, dort mit demselben Fallback).
+         */
+        RateLimiter::for('verein-app-proxy', function (Request $request): array {
+            $claimed = (string) $request->json('pubkey', '');
+
+            return [
+                Limit::perMinute(20)->by('verein-app-proxy:pubkey:'.(preg_match('/^[0-9a-f]{64}$/', $claimed) === 1 ? $claimed : 'none')),
+                Limit::perMinute(60)->by('verein-app-proxy:ip:'.$request->ip()),
+            ];
+        });
     }
 
     /**

@@ -42,6 +42,21 @@ return Application::configure(basePath: dirname(__DIR__))
                 Route::middleware('web')
                     ->prefix('api/verein')
                     ->group(__DIR__.'/../routes/verein.php');
+
+                /*
+                 * P8 — der App-Zweig desselben Proxys: kein `web` (keine
+                 * Session, kein CSRF — der Aufrufer ist die native App auf
+                 * einem fremden Gerät), sondern die `api`-Gruppe. Deren
+                 * throttle:api sitzt VOR dem dedizierten Verein-Limiter und
+                 * deckt groben Unfug; die feineren Eimer pro IP und pro
+                 * Body-Pubkey vergibt AppServiceProvider
+                 * (`verein-app-proxy`). CORS regelt Laravels HandleCors —
+                 * der App-Origin (http://127.0.0.1) trifft auf die
+                 * api/*-Pfade des Default-Katalogs.
+                 */
+                Route::middleware('api')
+                    ->prefix('api/app/verein')
+                    ->group(__DIR__.'/../routes/verein-app.php');
             }
         },
     )
