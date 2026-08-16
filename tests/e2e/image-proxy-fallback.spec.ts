@@ -253,6 +253,114 @@ test('data:-picture bleibt inline — kein Proxy, kein Fehlerpfad (blob: äquiva
         .toBeGreaterThan(0)
 })
 
+/**
+ * ── Der ZWEITE Weg nach `imgBroken` (ergänzt 2026-08-16) ────────────────────────────
+ *
+ * Die Türen 2/3 erreichen den Rückfall über die POLICY: `$imgFallback` lehnt eine
+ * protokoll-relative bzw. http-URL ab, das Original wird nie versucht. Der andere Weg —
+ * `$imgFallback` sagt ja, das Original wird geladen und scheitert AUCH — war bis hierher
+ * ungeprüft, in beiden Kacheln. Er ist genau der Zweig, den der Umbau vom 2026-08-16
+ * (`dataset` → Alpine-Scope, `src` gebunden statt imperativ) neu geschrieben hat.
+ *
+ * Die beiden Tests unten schließen ihn. Zusammen mit Tür 2/3 ergibt das je Komponente
+ * beide Wege und in `meetup-tile` beide sich ausschließenden Rückfall-Zweige:
+ *   room-tile    Policy → `#` (Tür 2)              · Original scheitert → `#`      (hier)
+ *   meetup-tile  Policy → Initiale (Tür 3)         · Original scheitert → Flagge   (hier)
+ *
+ * Beide registrieren ihre Routen VOR `loginNsec`: der Meetup-Portal-Join und die ersten
+ * Bild-Anfragen laufen beim Space-Mount, also unmittelbar nach dem Login — ein danach
+ * registrierter Stub käme zu spät. Playwright befragt Routen in umgekehrter
+ * Registrierungsordnung, die späteste gewinnt: `armImageRoutes` liefert für
+ * `legit.example` ein 200, die Zeile darunter überschreibt das auf 500.
+ */
+
+/** Wie `openSpaces`, aber mit einem Fenster für eigene Routen VOR dem Login. */
+async function openSpacesMitRouten(page: Page, extra: (p: Page) => Promise<void>): Promise<ImageRoutes> {
+    await useZooid(page)
+    const routes = await armImageRoutes(page)
+    await extra(page)
+    await loginNsec(page, NSEC)
+    return routes
+}
+
+const MEETUP_API = 'https://portal.einundzwanzig.space/api/mobile/meetups'
+
+test('Raum-Kachel: auch das Original scheitert (500/500) → ehrlicher #-Chip, kein Bild', async ({ page }) => {
+    const uid = rnd()
+    const h = trackRoom(`legitbad${uid}`)
+    const name = `Kaputt ${uid}`
+    makeVerifiedRoom(h, [`name=${name}`, 'picture=https://legit.example/pic.png'])
+    nak(['event', '--auth', '--sec', NSEC, '-k', '9021', '-t', `h=${h}`, ZOOID_WS])
+
+    const originHits: string[] = []
+    await openSpacesMitRouten(page, async (p) => {
+        await p.route('**legit.example/**', (route) => {
+            originHits.push(route.request().url())
+            return route.fulfill({ status: 500 })
+        })
+    })
+
+    await expect(tile(page, name)).toBeVisible({ timeout: 20_000 })
+    await expect(tile(page, name).locator('img')).toHaveCount(0, { timeout: 15_000 })
+    await expect(tile(page, name).getByText('#', { exact: true })).toBeVisible()
+
+    // **Ohne diese Zeile misst der Test den Policy-Zweig und wäre eine Dublette von
+    // Tür 2.** Sie belegt, dass der Rückfall wirklich über `imgOrig = true` lief: das
+    // Original wurde angefragt (und hat 500 geliefert).
+    expect(originHits.length, 'das Original MUSS versucht worden sein — sonst prüft der Test den falschen Zweig').toBeGreaterThan(0)
+})
+
+test('Meetup-Kachel: auch das Original scheitert (500/500) → die Länderflagge tritt an die Stelle des Logos, GENAU einmal', async ({
+    page,
+}) => {
+    const uid = rnd()
+    const h = trackRoom(`meetflag${uid}`)
+    const name = `Meetup Flagge ${uid}`
+    const slug = `meetup-flag-e2e-${uid}`
+    makeVerifiedRoom(h, [
+        `name=${name}`,
+        'about=E2E-P7',
+        'picture=https://legit.example/logo.png',
+        't=meetup',
+        `i=meetup:e2e-${uid}`,
+        `meetup_slug=${slug}`,
+    ])
+
+    const originHits: string[] = []
+    await openSpacesMitRouten(page, async (p) => {
+        // Eigener Portal-Join für DIESEN Slug — sonst bliebe `meetup(slug)` null und die
+        // Kachel fiele auf die Initiale, also auf den Zweig, den Tür 3 schon abdeckt.
+        await p.route(MEETUP_API, (route) =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify([{ name, slug, city: 'Berlin', country: 'DE', logo: null, next_event_start: null }]),
+            }),
+        )
+        await p.route('**legit.example/**', (route) => {
+            originHits.push(route.request().url())
+            return route.fulfill({ status: 500 })
+        })
+    })
+
+    await page.getByRole('button').filter({ hasText: 'Meetup-Räume entdecken' }).click()
+    const kachel = tile(page, name)
+    await expect(kachel).toBeVisible({ timeout: 15_000 })
+
+    await expect(kachel.locator('img')).toHaveCount(0, { timeout: 15_000 })
+    expect(originHits.length, 'das Original MUSS versucht worden sein — sonst prüft der Test den falschen Zweig').toBeGreaterThan(0)
+
+    // Die Flagge ersetzt das Logo — und steht GENAU EINMAL da. Der Eck-Pin
+    // (`x-if="room.picture && meetup(...)?.flag"`) ist ein DRITTER Zweig derselben
+    // Fläche; er kennt `imgBroken` nicht. Solange `room.picture` gesetzt bleibt — und
+    // das tut es seit dem Umbau, weil der Fehlerpfad die Daten nicht mehr überschreibt —
+    // rendert er zusätzlich zur großen Flagge. Die Zahl ist deshalb die Aussage, nicht
+    // die Sichtbarkeit.
+    await expect(kachel.getByText('🇩🇪', { exact: true })).toHaveCount(1)
+    // Und die Initiale bleibt aus: die beiden Rückfall-Zweige schließen sich aus.
+    await expect(kachel.getByText('M', { exact: true })).toHaveCount(0)
+})
+
 test.afterAll(() => {
     cleanupRooms(ZOOID_WS, ADMIN)
 })
