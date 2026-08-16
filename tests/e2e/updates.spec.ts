@@ -103,10 +103,94 @@ function makeRoom(): { h: string; name: string } {
     return { h, name }
 }
 
-/** Fremde kind-9-Nachricht in `h`. Gibt die Event-id zurück (Thread-Wurzel). */
-function publishMessage(h: string, content: string): string {
-    const out = nak(['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, '-c', content, ZOOID_WS])
+/**
+ * Fremde kind-9-Nachricht in `h`. Gibt die Event-id zurück (Thread-Wurzel).
+ *
+ * `ts` setzt `created_at` ausdrücklich — gebraucht überall dort, wo die Nachricht
+ * NACHWEISLICH jünger als das Lesestand-Wasserzeichen sein muss (siehe
+ * {@link ungelesenSicherPublizieren}).
+ */
+function publishMessage(h: string, content: string, ts?: number): string {
+    const args = ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, '-c', content]
+    if (ts !== undefined) {
+        args.push('--ts', String(ts))
+    }
+    args.push(ZOOID_WS)
+    const out = nak(args)
     return findEvent(h, 9, (e) => e.content === content)?.id ?? out.trim()
+}
+
+/**
+ * Das Lesestand-Wasserzeichen des Bootstraps — und die Zusicherung, dass es SCHON
+ * geschrieben ist.
+ *
+ * `readState.ts` legt beim ersten Login `e21:readstate:bootstrap:<pubkey>` in den
+ * localStorage: die Wall-Clock-Sekunde, ab der alles Ältere als gelesen gilt. Der
+ * Schlüssel wird über sein Präfix gesucht, nicht über die pubkey — der Test muss die
+ * Identität dafür nicht kennen.
+ */
+async function bootstrapWasserzeichen(page: Page): Promise<number> {
+    let wm = 0
+    await expect
+        .poll(
+            async () =>
+                (wm = await page.evaluate(() => {
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i) as string
+                        if (k.startsWith('e21:readstate:bootstrap:')) {
+                            return Number(localStorage.getItem(k)) || 0
+                        }
+                    }
+                    return 0
+                })),
+            { timeout: 20_000 },
+        )
+        .toBeGreaterThan(0)
+    return wm
+}
+
+/**
+ * Eine Nachricht, die GARANTIERT ungelesen ist — die Zusicherung, die dem Test
+ * „Anker 7" bis zum 2026-08-16 fehlte.
+ *
+ * ── Der gemessene Fehler ───────────────────────────────────────────────────────────
+ * `js/unread.ts:226` zählt eine Nachricht als ungelesen, wenn `created_at > wm` —
+ * STRIKT größer, mit Begründung an Ort und Stelle (NIP-01-`since` ist inklusiv, das
+ * zuletzt gelesene Event darf nicht erneut zählen). Nostr-Zeitstempel haben
+ * Sekundenauflösung. Fällt `created_at` in DIESELBE Sekunde wie das Wasserzeichen, gilt
+ * die Nachricht als gelesen — und zwar endgültig.
+ *
+ * Genau das passierte unter Last: das Wasserzeichen wird nicht beim Klick auf „Anmelden"
+ * geschrieben, sondern erst wenn der Lesestand geladen ist (rund 2 s später), und der
+ * Test publizierte ~0,4 s nach der ersten sichtbaren Raumzeile. Ob beide in dieselbe
+ * Sekunde fallen, entschied die Maschinenlast.
+ *
+ * Messung 2026-08-16 (instrumentierte Kopie, 12 Läufe, 6 Worker) — die Trennung ist
+ * vollständig, es gibt keinen Grenzfall:
+ *   | `created_at` vs. Wasserzeichen | Ergebnis                                  |
+ *   | 1–3 s größer  (7 Läufe)        | Präfix nach 7–30 ms da                     |
+ *   | GLEICHE Sekunde (5 Läufe)      | Präfix nie, `$store.unread.rooms[h] === 0` |
+ * Über 60 s abgetastet: im Kollisionsfall kommt der Zustand NICHT verspätet — er kommt
+ * gar nicht. Eine längere Frist am Ende des Tests hätte daran nichts geändert; sie hätte
+ * nur später rot gemeldet.
+ *
+ * ── Warum die Zusicherung hier steht und nicht als längerer Timeout ────────────────
+ * Der Fehler liegt im Aufbau, nicht in der Geduld: die Nachricht MUSS jünger sein als
+ * das Wasserzeichen, sonst prüft der Test eine Voraussetzung, die er nie hergestellt hat.
+ * Beides wird deshalb erzwungen — erst auf das geschriebene Wasserzeichen warten (sonst
+ * käme es NACH der Nachricht und machte sie ebenso gelesen), dann `created_at` explizit
+ * eine Sekunde darüber setzen und das am zurückgelesenen Event prüfen.
+ */
+async function ungelesenSicherPublizieren(page: Page, h: string, content: string): Promise<string> {
+    const wm = await bootstrapWasserzeichen(page)
+    const ts = wm + 1
+    const id = publishMessage(h, content, ts)
+    const event = findEvent(h, 9, (e) => e.id === id)
+    expect(
+        event?.created_at,
+        `die Nachricht muss STRIKT jünger als das Wasserzeichen sein (wm=${wm}) — sonst gilt sie nach js/unread.ts:226 als gelesen`,
+    ).toBeGreaterThan(wm)
+    return id
 }
 
 /**
@@ -660,7 +744,10 @@ test('Anker 7: aria-label beginnt mit dem Ungelesen-Zustand, kappt den Snippet u
     // Snippet deutlich über der Label-Kappung, damit die zweite Zusage etwas zu prüfen hat.
     const marker = `Label-${rnd()}`
     const longBody = `${LONG_SNIPPET}${marker}`
-    publishMessage(room.h, longBody)
+    // Nicht `publishMessage`: die Nachricht muss NACHWEISLICH jünger sein als das
+    // Lesestand-Wasserzeichen, sonst gilt sie als gelesen und das geprüfte Präfix kann
+    // gar nicht entstehen. Herleitung und Messung bei `ungelesenSicherPublizieren`.
+    await ungelesenSicherPublizieren(page, room.h, longBody)
 
     await openUpdates(page)
     const row = roomRow(page, room.name)
