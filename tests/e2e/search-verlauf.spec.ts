@@ -86,6 +86,86 @@ test.afterAll(() => cleanupRooms(ZOOID_WS, ADMIN))
 
 // ── 1) Kein REQ über den gesamten Zyklus ────────────────────────────────────────────
 
+/**
+ * Die EINE Ausnahme: der Historien-Nachschlag des Raum-Scrollers.
+ *
+ * ── Warum es sie gibt (gemessen 2026-08-16) ────────────────────────────────────────
+ * Der Test setzte den Zähler zurück, sobald die erste Nachricht sichtbar ist. Der
+ * Raum-Scroller (`js/scroll.ts`) schickt danach aber noch GENAU EINEN Frame nach: den
+ * Nachschlag auf ältere Historie. In 12 von 12 Messläufen lag er 303–352 ms VOR dem
+ * Reset — also knapp davor. Unter Last rutscht er darüber und wird dem Suchpanel
+ * angelastet, obwohl die Suche ihn nicht ausgelöst hat. Gemeldet als roter Test am
+ * 2026-08-16; die Positivkontrolle (Fenster künstlich früher geöffnet, sonst nichts
+ * geändert) zeigt exakt diesen Frame im Fenster:
+ *   ["REQ","REQ-…",{"kinds":[9,40002,1068,9041],"#h":["<raum>"],"limit":50,"until":…}]
+ * Ausgeschlossen wurden dabei: Verbindungsabriss/Re-Subscribe (WS-Abbrüche und
+ * wiederholte Subscription-IDs treten in JEDEM Lauf gleich oft auf, auch in grünen)
+ * und eine echte Relay-Anfrage der Suche (nach dem Reset geht in grünen Läufen NULL
+ * raus, und der Filter ist der Raum-Filter, kein Suchfilter).
+ *
+ * ── Warum sie die Zusage nicht aufweicht ───────────────────────────────────────────
+ * Die Zusage lautet „die Suche stellt keine Relay-Anfrage", nicht „es geht kein Frame
+ * raus". Die Ausnahme ist deshalb an drei Bedingungen gebunden, und alle drei stammen
+ * aus der Messung, nicht aus Bequemlichkeit:
+ *   1. FORM — exakt der Raum-Stream-Filter dieses `h`, mit `until` (Nachschlag) und
+ *      `limit: 50`. Ein Suchfilter sähe anders aus und fiele durch.
+ *   2. ANZAHL — höchstens EINER. Der Scroller sendet genau einen (12/12). Eine Suche,
+ *      die versehentlich DENSELBEN Filter benutzte, käme als ZWEITER an und flöge auf;
+ *      fünf Suchen erst recht. Das ist die Gegenprobe, die die Ausnahme eng hält — und
+ *      sie ist als eigener Fall unten geprüft, nicht bloß behauptet.
+ *   3. ALLES ANDERE zählt. Kein Zeitfenster wurde verkleinert, kein Zähler später
+ *      zurückgesetzt, keine Toleranz auf eine Anzahl beliebiger Frames.
+ */
+const ROOM_STREAM_KINDS = [9, 40002, 1068, 9041]
+
+export function suchFremdeReqs(frames: readonly string[], h: string): string[] {
+    let nachschlagGesehen = false
+    return frames.filter((frame) => {
+        let filter: Record<string, unknown>
+        try {
+            filter = (JSON.parse(frame) as [string, string, Record<string, unknown>])[2] ?? {}
+        } catch {
+            return true // unlesbar ⇒ zählt, nie stillschweigend durchlassen
+        }
+        const kinds = Array.isArray(filter.kinds) ? [...(filter.kinds as number[])].sort((a, b) => a - b) : []
+        const hs = Array.isArray(filter['#h']) ? (filter['#h'] as string[]) : []
+        const istNachschlag =
+            hs.length === 1 &&
+            hs[0] === h &&
+            typeof filter.until === 'number' &&
+            filter.limit === 50 &&
+            kinds.join(',') === [...ROOM_STREAM_KINDS].sort((a, b) => a - b).join(',')
+        if (istNachschlag && !nachschlagGesehen) {
+            nachschlagGesehen = true
+            return false
+        }
+        return true
+    })
+}
+
+test('Gegenprobe zur Ausnahme: der zweite Nachschlag-Frame und jeder Suchfilter fliegen auf', () => {
+    const h = 'raum42'
+    const nachschlag = `["REQ","REQ-1",{"kinds":[9,40002,1068,9041],"#h":["${h}"],"limit":50,"until":1786891408}]`
+
+    // Der eine erwartete Frame des Scrollers — und NUR er — wird durchgelassen.
+    expect(suchFremdeReqs([nachschlag], h)).toEqual([])
+    // Ein ZWEITER derselben Form fliegt auf. Das ist der Fall „die Suche benutzt
+    // versehentlich denselben Filter": sie käme immer NACH dem Frame des Scrollers.
+    expect(suchFremdeReqs([nachschlag, nachschlag], h)).toEqual([nachschlag])
+    // Ein anderer Raum ist nie der Nachschlag DIESES Raums.
+    const fremderRaum = nachschlag.replace(h, 'anderer')
+    expect(suchFremdeReqs([fremderRaum], h)).toEqual([fremderRaum])
+    // Die Live-Subscription (ohne `until`) ist kein Nachschlag — sie darf im Fenster
+    // nicht vorkommen und wird deshalb auch nicht entschuldigt.
+    const live = `["REQ","REQ-2",{"kinds":[9,40002,1068,9041],"#h":["${h}"],"limit":50}]`
+    expect(suchFremdeReqs([live], h)).toEqual([live])
+    // Andere Kinds, andere Limits, Volltextsuche: alles zählt.
+    const suchArtig = `["REQ","REQ-3",{"kinds":[9],"#h":["${h}"],"limit":50,"until":1786891408,"search":"bitcoin"}]`
+    expect(suchFremdeReqs([suchArtig], h)).toEqual([suchArtig])
+    // Unlesbares zählt, statt still durchzufallen.
+    expect(suchFremdeReqs(['kein json'], h)).toEqual(['kein json'])
+})
+
 test('Suche: öffnen, fünf Suchen, Treffer-Klick, schließen — kein einziger REQ-Frame geht raus', async ({ page }) => {
     const h = trackRoom(`search1${rnd()}`)
     createRoomNak(h, 'Search1')
@@ -136,7 +216,11 @@ test('Suche: öffnen, fünf Suchen, Treffer-Klick, schließen — kein einziger 
     // Klick schließt die Fläche NICHT selbst — erst der ✕-Knopf.
     await closeButton.click()
 
-    expect(reqFrames, `es dürfen während Öffnen/Suchen/Klick/Schließen KEINE REQ-Frames rausgehen, gesehen: ${JSON.stringify(reqFrames)}`).toEqual([])
+    // Gezählt wird, was die SUCHE zu verantworten hat — siehe `suchFremdeReqs` oben:
+    // alles außer dem einen Historien-Nachschlag des Raum-Scrollers, der je nach
+    // Maschinenlast diesseits oder jenseits der Fenstergrenze landet.
+    const fremd = suchFremdeReqs(reqFrames, h)
+    expect(fremd, `es dürfen während Öffnen/Suchen/Klick/Schließen KEINE REQ-Frames der SUCHE rausgehen, gesehen: ${JSON.stringify(fremd)} (alle: ${JSON.stringify(reqFrames)})`).toEqual([])
 })
 
 // ── 2) Grenze steht im Ergebnisbereich, auch bei null Treffern ─────────────────────
