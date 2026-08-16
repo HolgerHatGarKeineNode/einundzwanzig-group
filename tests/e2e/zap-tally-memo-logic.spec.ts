@@ -50,6 +50,9 @@ const makeCtx = (zappers: Map<string, Zapper>): ChatBuildCtx => ({
     $profiles: new Map([[AUTHOR, { lud16: 'author@example.com' }]]),
     $handles: new Map() as ChatBuildCtx['$handles'],
     $zappers: zappers,
+    // NIP-38-Statuse (P2): hier leer — dieser Test fragt nach dem Zapper. Der Status hat
+    // seine eigene Cache-Key-Prüfung in `buzz-user-status.spec.ts`.
+    $statuses: new Map(),
     byId: new Map([[EVENT.id, EVENT]]),
     // P5-Karten-Felder: hier neutral. `cards: false` hält diesen Test bei seiner Frage
     // (Zapper-Auflösung bustet den Memo-Cache) — mit eingeschalteten Karten hinge das
