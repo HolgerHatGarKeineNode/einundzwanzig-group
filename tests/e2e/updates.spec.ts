@@ -104,20 +104,40 @@ function makeRoom(): { h: string; name: string } {
 }
 
 /**
- * Fremde kind-9-Nachricht in `h`. Gibt die Event-id zurück (Thread-Wurzel).
- *
- * `ts` setzt `created_at` ausdrücklich — gebraucht überall dort, wo die Nachricht
- * NACHWEISLICH jünger als das Lesestand-Wasserzeichen sein muss (siehe
- * {@link ungelesenSicherPublizieren}).
+ * Publiziert und liest das Event EINMAL zurück — id und `created_at` aus derselben
+ * Abfrage. Vorher holte die Zusicherung `created_at` in einer zweiten Runde; sie kostete
+ * einen `nak req` je Aufruf und lieferte nichts, was hier nicht schon vorliegt.
  */
-function publishMessage(h: string, content: string, ts?: number): string {
+function publishRoh(h: string, content: string, ts?: number): { id: string; created_at: number } {
     const args = ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, '-c', content]
     if (ts !== undefined) {
         args.push('--ts', String(ts))
     }
     args.push(ZOOID_WS)
     const out = nak(args)
-    return findEvent(h, 9, (e) => e.content === content)?.id ?? out.trim()
+    const event = findEvent(h, 9, (e) => e.content === content)
+    return { id: event?.id ?? out.trim(), created_at: event?.created_at ?? 0 }
+}
+
+/**
+ * Fremde kind-9-Nachricht OHNE Ungelesen-Zusicherung. Gibt die Event-id zurück.
+ *
+ * **Der Name trägt das `Roh` seit dem 2026-08-16, und zwar absichtlich.** Vorher hieß
+ * diese Funktion `publishMessage` und war der bequeme Default — mit der Folge, dass eine
+ * Nachricht in der Sekunde des Lesestand-Wasserzeichens landen und damit als GELESEN
+ * gelten konnte (Herleitung bei {@link publishMessage}). Zweimal hat das eine halbe
+ * Stunde Diagnose gekostet (Anker 7 und Anker 20), beide Male sah es wie ein Timeout aus.
+ * Der neutrale Name gehört deshalb der zugesicherten Fassung; wer `Roh` schreibt, hat sich
+ * entschieden. Das erzwingt der Compiler, nicht die Disziplin.
+ *
+ * Richtig ist `Roh` an genau zwei Sorten Stellen:
+ *   1. **Vor dem Login** — es gibt weder Seite noch Wasserzeichen, und bei den
+ *      Kaltstart-Szenarien ist „die Nachricht existiert vor der Sitzung" die Prämisse.
+ *   2. **Nach einem `markAllRead()`** — dort gilt ein NEUERES Wasserzeichen als das des
+ *      Bootstraps; die Zusicherung unten wäre dann sogar falsch (s. Anker 11).
+ */
+function publishMessageRoh(h: string, content: string, ts?: number): string {
+    return publishRoh(h, content, ts).id
 }
 
 /**
@@ -130,22 +150,45 @@ function publishMessage(h: string, content: string, ts?: number): string {
  * Identität dafür nicht kennen.
  */
 async function bootstrapWasserzeichen(page: Page): Promise<number> {
-    let wm = 0
-    await expect
-        .poll(
-            async () =>
-                (wm = await page.evaluate(() => {
-                    for (let i = 0; i < localStorage.length; i++) {
-                        const k = localStorage.key(i) as string
-                        if (k.startsWith('e21:readstate:bootstrap:')) {
-                            return Number(localStorage.getItem(k)) || 0
-                        }
-                    }
-                    return 0
-                })),
-            { timeout: 20_000 },
+    // **Der Vor-Login-Fall scheitert SOFORT und benennt den Ausweg.** Ohne diese Prüfung
+    // liefe er in die Warteschleife unten und meldete nach 15 s einen Timeout — also
+    // genau die Fehlerform, deren Diagnose diese Datei schon zweimal bezahlt hat. Eine
+    // Seite ohne App-Herkunft (`about:blank`, Origin `null`) hat nie einen Lesestand
+    // gehabt und wird auch keinen bekommen; warten ist dort sinnlos.
+    const herkunft = await page.evaluate(() => location.origin).catch(() => 'null')
+    if (!herkunft.startsWith('http')) {
+        throw new Error(
+            'kein Lesestand-Wasserzeichen: hier wird VOR dem Login publiziert ' +
+                `(Seite steht auf „${herkunft}"). Nimm publishMessageRoh(...) — die Zusicherung ` +
+                'braucht eine angemeldete Sitzung.',
         )
-        .toBeGreaterThan(0)
+    }
+    const lesen = (): Promise<number> =>
+        page.evaluate(() => {
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i) as string
+                if (k.startsWith('e21:readstate:bootstrap:')) {
+                    return Number(localStorage.getItem(k)) || 0
+                }
+            }
+            return 0
+        })
+    // Der Marker kommt nicht beim Klick auf „Anmelden", sondern wenn der Lesestand
+    // geladen ist — gemessen rund 2 s später. 15 s sind dafür reichlich; läuft die Frist
+    // trotzdem ab, ist das kein Timing-Problem mehr, und die Meldung sagt das auch.
+    const frist = Date.now() + 15_000
+    let wm = await lesen()
+    while (wm === 0 && Date.now() < frist) {
+        await page.waitForTimeout(100)
+        wm = await lesen()
+    }
+    if (wm === 0) {
+        throw new Error(
+            'kein Lesestand-Wasserzeichen nach 15 s: entweder wurde vor dem Login publiziert ' +
+                '(dann publishMessageRoh(...) nehmen) oder der Lesestand-Bootstrap ist ausgefallen — ' +
+                'letzteres wäre ein Produktbefund, kein Testproblem.',
+        )
+    }
     return wm
 }
 
@@ -181,7 +224,7 @@ async function bootstrapWasserzeichen(page: Page): Promise<number> {
  * käme es NACH der Nachricht und machte sie ebenso gelesen), dann `created_at` explizit
  * eine Sekunde darüber setzen und das am zurückgelesenen Event prüfen.
  */
-async function ungelesenSicherPublizieren(page: Page, h: string, content: string, versatz = 0): Promise<string> {
+async function publishMessage(page: Page, h: string, content: string, versatz = 0): Promise<string> {
     const wm = await bootstrapWasserzeichen(page)
     // `Math.max(…, jetzt)` statt schlicht `wm + 1`: liegt der Login länger zurück, wäre
     // `wm + 1` ein Zeitstempel in der VERGANGENHEIT und die Nachricht rutschte in der
@@ -190,10 +233,9 @@ async function ungelesenSicherPublizieren(page: Page, h: string, content: string
     // `versatz` staffelt mehrere Nachrichten desselben Tests, damit ihre Reihenfolge
     // eindeutig bleibt (sonst trügen sie bei schnellem Publizieren dieselbe Sekunde).
     const ts = Math.max(wm + 1, Math.floor(Date.now() / 1000)) + versatz
-    const id = publishMessage(h, content, ts)
-    const event = findEvent(h, 9, (e) => e.id === id)
+    const { id, created_at } = publishRoh(h, content, ts)
     expect(
-        event?.created_at,
+        created_at,
         `die Nachricht muss STRIKT jünger als das Wasserzeichen sein (wm=${wm}) — sonst gilt sie nach js/unread.ts:226 als gelesen`,
     ).toBeGreaterThan(wm)
     return id
@@ -204,8 +246,19 @@ async function ungelesenSicherPublizieren(page: Page, h: string, content: string
  * (`E`=Root, `e`=Parent, `k`=Parent-Kind, `h`=Root-Raum, siehe room.spec.ts C6b).
  * Das `h` ist additiv (Thread-Interop) und trägt hier die Raum-Zuordnung, falls die
  * Wurzel noch nicht im Repository liegt.
+ *
+ * **Auch hier `Roh` — dieselbe Falle, nur am Thread-Wasserzeichen.** `js/unread.ts:238`
+ * vergleicht einen Kommentar mit `threadWatermark(...)`, ebenfalls STRIKT größer; ein
+ * Kommentar in der Sekunde des Wasserzeichens gälte genauso als gelesen.
+ *
+ * Eine zugesicherte Schwester gibt es bewusst NOCH nicht: alle fünf heutigen
+ * Aufrufstellen publizieren vor dem Login (Anker 4/5/6/12) oder prüfen keinen
+ * Ungelesen-Zustand (Anker 3) — sie bräuchten sie nicht, und ungenutzter Code wäre
+ * ungeprüfter Code. Wer den ersten Test schreibt, der einen UNGELESENEN Kommentar
+ * braucht, baut sie nach dem Muster von {@link publishMessage}: Wasserzeichen abwarten,
+ * `--ts` darüber setzen, am zurückgelesenen Event prüfen. Der Name steht dafür frei.
  */
-function publishComment(h: string, rootId: string, content: string): void {
+function publishCommentRoh(h: string, rootId: string, content: string): void {
     nak([
         'event', '--auth', '--sec', ADMIN, '-k', '1111',
         '-t', `E=${rootId}`, '-t', `e=${rootId}`, '-t', 'k=9', '-t', `h=${h}`,
@@ -480,7 +533,7 @@ test('Anker 2: Zeile → /rooms/{h}?from=updates, Kopf-Pfeil führt zurück nach
     // NACH dem Login publizieren: vorher läge die Nachricht unter `all = Login-Zeit`
     // und gälte als gelesen — die Zeile entstünde dann aus dem Seed, nicht aus der App.
     const marker = `Deep-${rnd()}`
-    publishMessage(room.h, marker)
+    await publishMessage(page, room.h, marker)
 
     await openUpdates(page)
     const row = roomRow(page, room.name)
@@ -535,10 +588,10 @@ test('Anker 3: Thread-Zeile → /rooms/{h}/thread/{nevent}?from=updates, zweimal
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
 
     const rootMarker = `Wurzel-${rnd()}`
-    const rootId = publishMessage(room.h, rootMarker)
+    const rootId = await publishMessage(page, room.h, rootMarker)
     expect(rootId, 'Thread-Wurzel muss am Relay auffindbar sein').toMatch(/^[0-9a-f]{64}$/)
     const replyMarker = `Antwort-${rnd()}`
-    publishComment(room.h, rootId, replyMarker)
+    publishCommentRoh(room.h, rootId, replyMarker)
 
     await openUpdates(page)
     const row = threadRow(page, room.name)
@@ -588,8 +641,11 @@ test('Anker 4: Kaltstart im Thread ohne from → 2× Zurück auf /spaces, ohne h
 
     const room = makeRoom()
     const rootMarker = `Kalt-${rnd()}`
-    const rootId = publishMessage(room.h, rootMarker)
-    publishComment(room.h, rootId, `KaltAntwort-${rnd()}`)
+    // ROH mit Absicht: hier wird VOR dem Login publiziert — genau das ist die Prämisse
+    // des Kaltstarts. Ein Wasserzeichen gibt es zu diesem Zeitpunkt nicht, und geprüft
+    // wird Navigation, kein Ungelesen-Zustand.
+    const rootId = publishMessageRoh(room.h, rootMarker)
+    publishCommentRoh(room.h, rootId, `KaltAntwort-${rnd()}`)
     const nevent = neventEncode({ id: rootId, relays: [ZOOID_URL], author: ADMIN_PUB })
 
     await spyHistoryBack(page)
@@ -639,8 +695,10 @@ test('Anker 5: kaputtes ?from= landet auf /spaces und taucht in keiner Thread-UR
     // Root + Kommentar, damit an der Nachricht die Antworten-Pille steht: sie ist die
     // Stelle, an der `threadHref()` die Herkunft der aktuellen URL weiterreicht.
     const rootMarker = `Muell-${rnd()}`
-    const rootId = publishMessage(room.h, rootMarker)
-    publishComment(room.h, rootId, `MuellAntwort-${rnd()}`)
+    // ROH mit Absicht: vor dem Login publiziert; geprüft wird die Ziel-URL eines
+    // kaputten `?from=`, kein Ungelesen-Zustand.
+    const rootId = publishMessageRoh(room.h, rootMarker)
+    publishCommentRoh(room.h, rootId, `MuellAntwort-${rnd()}`)
     await login(page)
 
     const JUNK = ['javascript:alert(1)', '//evil.tld', 'https://phish.example']
@@ -695,8 +753,9 @@ test('Anker 6: Thread aus dem Raum öffnen ändert history.length nicht', async 
 
     const room = makeRoom()
     const rootMarker = `Pille-${rnd()}`
-    const rootId = publishMessage(room.h, rootMarker)
-    publishComment(room.h, rootId, `PillenAntwort-${rnd()}`)
+    // ROH mit Absicht: vor dem Login publiziert; gemessen wird `history.length`.
+    const rootId = publishMessageRoh(room.h, rootMarker)
+    publishCommentRoh(room.h, rootId, `PillenAntwort-${rnd()}`)
 
     await login(page)
     await page.goto(`/rooms/${room.h}`)
@@ -752,8 +811,8 @@ test('Anker 7: aria-label beginnt mit dem Ungelesen-Zustand, kappt den Snippet u
     const longBody = `${LONG_SNIPPET}${marker}`
     // Nicht `publishMessage`: die Nachricht muss NACHWEISLICH jünger sein als das
     // Lesestand-Wasserzeichen, sonst gilt sie als gelesen und das geprüfte Präfix kann
-    // gar nicht entstehen. Herleitung und Messung bei `ungelesenSicherPublizieren`.
-    await ungelesenSicherPublizieren(page, room.h, longBody)
+    // gar nicht entstehen. Herleitung und Messung bei `publishMessage`.
+    await publishMessage(page, room.h, longBody)
 
     await openUpdates(page)
     const row = roomRow(page, room.name)
@@ -837,9 +896,9 @@ test('Anker 8: Ungelesen-Zahlen erscheinen an den vorgesehenen Orten — Nav ble
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
     // Ungelesen-sicher (2026-08-16): dieser Test misst Ungelesen-ZAHLEN — fiele eine
     // Nachricht in die Sekunde des Lesestand-Wasserzeichens, zählte sie als gelesen und
-    // die Pille zeigte „1" statt „2". Herleitung bei `ungelesenSicherPublizieren`.
-    await ungelesenSicherPublizieren(page, room.h, `Zahl-${rnd()}`)
-    await ungelesenSicherPublizieren(page, room.h, `Zahl-${rnd()}`, 1) // zwei ⇒ die Raum-Pille muss "2" zeigen, nicht nur "> 0"
+    // die Pille zeigte „1" statt „2". Herleitung bei `publishMessage`.
+    await publishMessage(page, room.h, `Zahl-${rnd()}`)
+    await publishMessage(page, room.h, `Zahl-${rnd()}`, 1) // zwei ⇒ die Raum-Pille muss "2" zeigen, nicht nur "> 0"
 
     const roomButton = page.getByRole('button', { name: new RegExp(room.name) })
     const roomPill = roomButton.locator('span.bg-brand-500.rounded-pill')
@@ -921,7 +980,7 @@ test('Anker 9: Zeilenhöhe ≥ 76 px, Glocke ≥ 44×44, kein Querlauf bei 320 p
     const room = makeRoom()
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
-    publishMessage(room.h, `Geometrie-${rnd()} — eine Zeile mit genug Text, damit der Snippet zwei Zeilen füllt.`)
+    await publishMessage(page, room.h, `Geometrie-${rnd()} — eine Zeile mit genug Text, damit der Snippet zwei Zeilen füllt.`)
 
     // ── Glocke auf /spaces ────────────────────────────────────────────────────
     await expect(bell(page)).toBeVisible({ timeout: 25_000 })
@@ -980,7 +1039,7 @@ test('Anker 10: leer nach Filter zeigt den Ausweg, nicht den Nullzustand', async
     const room = makeRoom()
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
-    publishMessage(room.h, `Filter-${rnd()}`)
+    await publishMessage(page, room.h, `Filter-${rnd()}`)
 
     await openUpdates(page)
     await expect(roomRow(page, room.name)).toBeVisible({ timeout: 30_000 })
@@ -1045,7 +1104,7 @@ test('Anker 11: zweiter Tap auf „Alles" zerstört das Rückgängig nicht — K
     // das `markAllRead()` gerade gesetzt hat — dort ist `awaitNextSecond` das richtige
     // Mittel, und eine Bootstrap-Zusicherung wäre sogar falsch: ihr Zeitstempel läge VOR
     // dem frisch gesetzten Stand und die Nachricht gälte zu Recht als gelesen.
-    await ungelesenSicherPublizieren(page, roomX.h, `Undo-A-${rnd()}`)
+    await publishMessage(page, roomX.h, `Undo-A-${rnd()}`)
 
     await openUpdates(page)
     const rowA = roomRow(page, roomX.name)
@@ -1075,7 +1134,7 @@ test('Anker 11: zweiter Tap auf „Alles" zerstört das Rückgängig nicht — K
     // Wasserzeichen gerade auf die laufende Sekunde gesetzt; eine in DERSELBEN Sekunde
     // publizierte Nachricht gälte korrekt als gelesen und der Knopf bliebe weg.
     await awaitNextSecond(page)
-    publishMessage(roomY.h, `Undo-B-${rnd()}`)
+    publishMessageRoh(roomY.h, `Undo-B-${rnd()}`)
     const rowB = roomRow(page, roomY.name)
     await expect(rowB, 'die zweite Nachricht muss als EIGENE Zeile ankommen').toBeVisible({ timeout: 25_000 })
     await expect(allesKnopf, 'neues Ungelesenes ⇒ Knopf wieder da').toBeVisible({ timeout: 25_000 })
@@ -1122,8 +1181,10 @@ test('Anker 12: geteilter Thread-Link im frischen Tab — zweimal Zurück landet
     test.setTimeout(180_000)
 
     const room = makeRoom()
-    const rootId = publishMessage(room.h, `Geteilt-${rnd()}`)
-    publishComment(room.h, rootId, `GeteiltAntwort-${rnd()}`)
+    // ROH mit Absicht: die Nachricht muss existieren, BEVOR der frische Browser-Kontext
+    // aufgemacht wird — hier gibt es noch nicht einmal eine Seite.
+    const rootId = publishMessageRoh(room.h, `Geteilt-${rnd()}`)
+    publishCommentRoh(room.h, rootId, `GeteiltAntwort-${rnd()}`)
     const nevent = neventEncode({ id: rootId, relays: [ZOOID_URL], author: ADMIN_PUB })
 
     const context = await browser.newContext({ baseURL })
@@ -1201,7 +1262,7 @@ test('Anker 13: verwaiste Zeile ist deaktiviert und navigiert auch programmatisc
         page.getByRole('button', { name: new RegExp(room.name) }),
         'Vorbedingung: der frisch angelegte Raum steht in der Liste (Relay-Seed + 39002 da)',
     ).toBeVisible({ timeout: 25_000 })
-    publishMessage(room.h, `Waise-${rnd()}`)
+    await publishMessage(page, room.h, `Waise-${rnd()}`)
     await openUpdates(page)
     await expect(
         roomRow(page, room.name),
@@ -1296,7 +1357,7 @@ test('Anker 14: kalter Direkteinstieg auf /updates zeigt dieselbe Zeile wie die 
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
     const marker = `Kalt-${rnd()}`
-    await ungelesenSicherPublizieren(page, room.h, marker)
+    await publishMessage(page, room.h, marker)
 
     // ── warm: über die Glocke ────────────────────────────────────────────────
     await openUpdates(page)
@@ -1491,7 +1552,7 @@ test('Anker 15: langer Snippet wird gekürzt — Zeile bleibt unter der Obergren
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
     const mark = `Lang-${rnd()}`
-    publishMessage(room.h, LONG_SNIPPET + mark)
+    await publishMessage(page, room.h, LONG_SNIPPET + mark)
 
     await openUpdates(page)
     const row = roomRow(page, room.name)
@@ -1554,7 +1615,7 @@ test('Anker 16: Admin-Löschung (9005) räumt die Zeile im offenen /updates ab',
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
 
     const marker = `Loesch-${rnd()}`
-    const messageId = publishMessage(room.h, marker)
+    const messageId = await publishMessage(page, room.h, marker)
     expect(messageId, 'ohne Event-id lässt sich nichts löschen').toMatch(/^[0-9a-f]{64}$/)
 
     await openUpdates(page)
@@ -1577,7 +1638,7 @@ test('Anker 16: Admin-Löschung (9005) räumt die Zeile im offenen /updates ab',
     // unberührt bleibt — eine zweite Nachricht im selben Raum hielte sie am Leben.
     const probeRoom = makeRoom()
     const probeMarker = `Live-${rnd()}`
-    publishMessage(probeRoom.h, probeMarker)
+    await publishMessage(page, probeRoom.h, probeMarker)
     await expect(
         roomRow(page, probeRoom.name),
         'die Live-Subscription steht nicht — ohne sie sagt das Löschen nichts aus',
@@ -1629,7 +1690,7 @@ test('Anker 17: Fokus wandert nach „Alles", „Rückgängig" und „Alle anzei
     const room = makeRoom()
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
-    publishMessage(room.h, `Fokus-${rnd()}`)
+    await publishMessage(page, room.h, `Fokus-${rnd()}`)
 
     await openUpdates(page)
     await expect(roomRow(page, room.name)).toBeVisible({ timeout: 30_000 })
@@ -1747,7 +1808,7 @@ test('Anker 18: „Rückgängig" nach Ablauf der Frist stellt nichts wieder her'
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 45_000 })
     const marker = `Frist-${rnd()}`
-    await ungelesenSicherPublizieren(page, room.h, marker)
+    await publishMessage(page, room.h, marker)
 
     await openUpdates(page)
     const row = roomRow(page, room.name)
@@ -1839,7 +1900,7 @@ test('Anker 19: Raum-Badge zeigt exakt N — Badge und Rauminhalt stimmen übere
     const COUNT = 5
     const markers = Array.from({ length: COUNT }, (_, i) => `Gate3-${runId}-${i}`)
     for (const [i, m] of markers.entries()) {
-        await ungelesenSicherPublizieren(page, room.h, m, i)
+        await publishMessage(page, room.h, m, i)
     }
 
     const roomButton = page.getByRole('button', { name: new RegExp(room.name) })
@@ -1910,7 +1971,7 @@ test('Anker 20: Glockenzahl entspricht exakt den ungelesenen /updates-Zeilen (Ga
     const room = makeRoom()
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
-    await ungelesenSicherPublizieren(page, room.h, `Glocke-${rnd()}`)
+    await publishMessage(page, room.h, `Glocke-${rnd()}`)
 
     await expect(bell(page)).toBeVisible({ timeout: 25_000 })
     const readBellCount = async (): Promise<number> => {
