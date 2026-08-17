@@ -265,6 +265,18 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         // Die Zeitleiste steht auf dem ersten Tab und trägt Sätze, keine Kinds.
         await expect(page.locator('[data-forge-activity][data-type="repo-created"]').first()).toBeVisible()
 
+        // P5: die Zeilen stehen unter einem Tages-Trenner, und der spricht die
+        // Sprache von `/updates` (die Zuordnung selbst prüft `forgeTimeline.test.ts`
+        // — hier geht es nur darum, DASS die Gruppe im echten Browser rendert).
+        const trenner = page.locator('section:has([data-forge-activity]) > h2')
+        await expect(trenner.first()).toBeVisible()
+        await expect(trenner.first()).toHaveText(/^(Heute|Gestern|Diese Woche|Älter)$/)
+
+        // Und die Zeile selbst trägt die kurze Angabe; die Uhrzeit steht im Tooltip.
+        const zeit = page.locator('[data-forge-activity]').first().locator('span[title]').first()
+        await expect(zeit).toHaveAttribute('title', /\d{2}:\d{2}/)
+        await expect(zeit).not.toHaveText(/\d{2}:\d{2}/)
+
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await expect(page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first()).toBeVisible()
     })
