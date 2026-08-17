@@ -29,6 +29,13 @@ import { loginNsec } from './support/login'
  * gesetzt, die das Forge-Abo sonst füllt (`forgeRepos`/`forgeProjects`/`workspace`),
  * und alles danach — Baumbildung, Kürzung, Markup, CSS — läuft echt.
  *
+ * **Wer Zustand setzt, muss den echten Schreiber vorher entfernen.** Die Rail
+ * hält gegen denselben Stack Live-Subscriptions offen, die genau diese Felder
+ * jederzeit mit den echten (hier: leeren) Relay-Daten überschreiben. Der erste
+ * Entwurf dieser Datei tat das nicht und war deshalb in 8 von 10 Läufen rot —
+ * ohne Parallellast, ohne Bezug zum Prüfgegenstand. Siehe {@link einfrieren};
+ * der Nachweis, dass es gewirkt hat, steht in {@link messen}.
+ *
  * ── Der Dateiname ist Teil der Mechanik ─────────────────────────────────────
  * `playwright.config.ts` fährt im Buzz-Modus nur `buzz-*.spec.ts` und überspringt
  * alles andere LAUTLOS („Total: 0 tests", kein Fehler).
@@ -114,15 +121,63 @@ const zustaende = (name: string): { id: string; titel: string; fixture: Fixture 
 type Messung = { id: string; label: string; scroll: number; client: number; frei: number }
 
 /**
+ * **Die Live-Abos abbestellen, BEVOR irgendein Zustand gesetzt wird.**
+ *
+ * Ohne diesen Schritt ist die ganze Datei ein Rennen, und sie verliert es oft:
+ * die Rail hält gegen denselben Buzz-Stack echte Subscriptions offen
+ * (`rail.ts`, `_unsubForge` → `forgeRepos`/`forgeProjects`, `_unsubWorkspace` →
+ * `workspace`). Trifft eine Relay-Antwort NACH dem synthetischen Setzen ein,
+ * überschreibt sie die Felder mit den echten — hier leeren — Daten; `forgeNav`
+ * liefert dann `{nodes: [], total: 0}`, es steht keine einzige Zeile im DOM, und
+ * der Test misst nichts. **Gemessen: 8 von 10 Läufen rot auf einem
+ * wiederverwendeten Stack, 2 von 5 auf einem frisch aufgesetzten.**
+ *
+ * **Warum kein `waitForFunction` auf die Daten.** Das Rennen bliebe bestehen und
+ * würde nur seltener verloren — ein Abo, das noch läuft, feuert auch nach dem
+ * Warten. Weg muss der Schreiber, nicht die Wartezeit.
+ *
+ * Abbestellen und nicht etwa den Netzweg abschalten: `subscribeForgeNav` ist
+ * modulweit und idempotent, der Weg bleibt bewusst über `wire:navigate` stehen.
+ * Was hier zählt, ist allein, dass NIEMAND mehr in diese Felder schreibt.
+ */
+const einfrieren = (page: Page): Promise<string[]> =>
+    page.evaluate(() => {
+        const el = document.querySelector('[data-rail]') as (HTMLElement & { _x_dataStack?: Record<string, unknown>[] }) | null
+        const state = el?._x_dataStack?.[0] as Record<string, unknown> | undefined
+        if (!state) {
+            return ['keine Rail-Insel gefunden']
+        }
+        const offen: string[] = []
+        for (const handle of ['_unsubForge', '_unsubWorkspace', '_unsubPrefs'] as const) {
+            const ab = state[handle]
+            if (typeof ab === 'function') {
+                ;(ab as () => void)()
+                state[handle] = null
+            }
+            if (state[handle] !== null && state[handle] !== undefined) {
+                offen.push(handle)
+            }
+        }
+
+        return offen
+    })
+
+/**
  * Fixture in die Rail setzen, alles aufklappen, jede Beschriftung vermessen.
  *
  * `_x_dataStack[0]` ist derselbe Zugriff, den `buzz-rail-forge.spec.ts` für die
  * Sprungliste benutzt — Alpine legt den Komponentenzustand dort ab.
+ *
+ * Setzt {@link einfrieren} voraus. Der Nachweis dafür steht am Ende dieser
+ * Funktion und nicht im Vertrauen: nach dem Messen wird geprüft, ob der gesetzte
+ * Bestand noch steht. Täte er es nicht, hätte ein Schreiber überlebt — dann
+ * scheitert der Test mit genau diesem Satz, statt still null Zeilen zu messen.
  */
 const messen = (page: Page, fixture: Fixture): Promise<Messung[]> =>
     page.evaluate((data) => {
         const el = document.querySelector('[data-rail]') as (HTMLElement & { _x_dataStack?: Record<string, unknown>[] }) | null
-        const state = el?._x_dataStack?.[0] as (Record<string, unknown> & { open: Record<string, boolean> }) | undefined
+        const state = el?._x_dataStack?.[0] as
+            (Record<string, unknown> & { open: Record<string, boolean>; forgeRepos: unknown[]; forgeProjects: unknown[] }) | undefined
         if (!state) {
             return []
         }
@@ -141,9 +196,20 @@ const messen = (page: Page, fixture: Fixture): Promise<Messung[]> =>
         }
         state.open = offen
 
-        return new Promise<Messung[]>((resolve) => {
+        return new Promise<Messung[]>((resolve, reject) => {
             // Zwei Frames: einer für Alpines Re-Render, einer für das Layout.
             requestAnimationFrame(() => requestAnimationFrame(() => {
+                // Der Riegel: steht der gesetzte Bestand noch? Wenn nicht, hat ein
+                // Live-Abo hineingeschrieben, und jede Zahl unten wäre die eines
+                // anderen Zustands.
+                if (state.forgeRepos.length !== data.repos.length || state.forgeProjects.length !== data.projects.length) {
+                    reject(new Error(
+                        `ZUSTAND ÜBERSCHRIEBEN: gesetzt waren ${data.repos.length} Repos / ${data.projects.length} Projekte, ` +
+                        `gemessen wurden ${state.forgeRepos.length} / ${state.forgeProjects.length} — ein Live-Abo hat überlebt`,
+                    ))
+
+                    return
+                }
                 const out: Messung[] = []
                 for (const row of document.querySelectorAll('[data-node-id]')) {
                     const span = row.querySelector('span.truncate') as HTMLElement | null
@@ -182,6 +248,11 @@ async function bootRail(page: Page): Promise<void> {
     }, BUZZ_URL)
     await loginNsec(page, BUZZ_USER_NSEC)
     await expect(page.locator('[data-rail]')).toBeVisible({ timeout: 20_000 })
+
+    // Erst einfrieren, dann messen — und die Vorbedingung selbst prüfen. Bliebe
+    // ein Handle stehen (etwa weil ein Feld umbenannt wurde), liefe die Datei
+    // wieder ins Rennen, und zwar unsichtbar: sie wäre meistens grün.
+    expect(await einfrieren(page), 'ein Live-Abo der Rail ließ sich nicht abbestellen').toEqual([])
 }
 
 test.describe('Buzz-Workspace: die Breite der Nav-Zeilen (E2E, nur E2E_RELAY=buzz)', () => {
