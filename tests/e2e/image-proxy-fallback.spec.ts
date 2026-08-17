@@ -332,8 +332,21 @@ test('Lightbox: der Rückfall-Zustand überlebt den Bildwechsel NICHT — sonst 
     const dialog = page.getByRole('dialog', { name: 'Bild in voller Größe' })
     const schliessen = page.getByRole('button', { name: 'Schließen' })
 
+    // **Über `data-full` gezielt, nicht über `nth()`.** `⚡room.blade.php` rendert den
+    // Verlauf in einem `flex-col-reverse`-Container (Kommentar dort: „ältere Nachrichten
+    // voranstellen verschiebt die Leseposition nicht") — die DOM-Reihenfolge ist damit
+    // NEUESTE ZUERST, nicht Publish-Reihenfolge. `bilder.nth(0)` traf deshalb B (die
+    // zuletzt veröffentlichte, neuere Nachricht), nicht A: der Test öffnete die
+    // Angriffs-URL zuerst und maß den falschen Zweig — gemessen reproduzierbar (8 von 8
+    // Läufen nach einem Fix-Versuch, der die Zeitstempel nur eindeutiger auseinanderzog
+    // und die falsche Reihenfolge dadurch erst recht deterministisch machte, statt sie
+    // zu beheben). `data-full` trägt die proxifizierte Ziel-URL (`feeds.ts
+    // renderMessageLink`) und ist unabhängig von der Render-Reihenfolge.
+    const bildA = page.locator('img.chat-image[data-full*="a.png"]')
+    const bildB = page.locator('img.chat-image[data-full*="b.png"]')
+
     // ── A: legitim → Umschaltung auf das Original, `imgOrig` steht auf wahr ──────────
-    await bilder.nth(0).click()
+    await bildA.click()
     await expect(dialog).toBeVisible({ timeout: 10_000 })
     await expect(lightbox).toHaveAttribute('data-img-orig', '1', { timeout: 15_000 })
 
@@ -341,7 +354,7 @@ test('Lightbox: der Rückfall-Zustand überlebt den Bildwechsel NICHT — sonst 
     await expect(dialog).toBeHidden({ timeout: 10_000 })
 
     // ── B: Angriffs-URL → der Zustand MUSS zurückgesetzt sein ───────────────────────
-    await bilder.nth(1).click()
+    await bildB.click()
     await expect(dialog).toBeVisible({ timeout: 10_000 })
     await expect(lightbox).toHaveAttribute('data-img-error', '1', { timeout: 15_000 })
     await expect(

@@ -436,6 +436,28 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
 
         await loginNsec(page, BUZZ_USER_NSEC)
         await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
+        // Idempotent beitreten (wie im Fall „Login + Raumliste…" oben): dieser Test darf
+        // NICHT davon abhängen, dass BUZZ_USER_NSEC bereits Raum-Mitglied ist. Isoliert
+        // gefahren (z. B. per `-g`, ohne den vorherigen Fall im selben File) war das genau
+        // die Lücke — auf frischem Stack ohne vorherigen Join bleibt der Composer verborgen
+        // und der Fall dieser Datei täuscht einen Regress vor, den es im vollen Lauf nicht
+        // gibt (dort joint der frühere Fall BUZZ_USER_NSEC bereits mit).
+        const joinButton = page.getByRole('button', { name: 'Beitreten' })
+        // `isVisible({ timeout })` wartet NICHT — Playwright ignoriert die Option und
+        // prüft sofort (dokumentiert, `locator.isVisible()`: "does not wait for the
+        // element to become visible and returns immediately"). Auf frischem Stack ist
+        // `membershipReady` (39002-Read) zum Zeitpunkt dieser sofortigen Prüfung oft noch
+        // nicht durch — der Sofort-Check sagt „nicht sichtbar", der Knopf ploppt aber kurz
+        // danach doch auf, der Klick verpufft, der Composer bleibt verborgen. `waitFor`
+        // pollt wirklich; bleibt der Knopf ganz aus (Nutzer schon Mitglied), läuft es in
+        // den Timeout und das `catch` lässt den Test unverändert weiterlaufen.
+        const joined = await joinButton
+            .waitFor({ state: 'visible', timeout: 15_000 })
+            .then(() => true)
+            .catch(() => false)
+        if (joined) {
+            await joinButton.click()
+        }
         await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
         // Der Probe-Aufruf hing an der Admin-Ableitung beim Seitenaufbau; nach dem
         // ersten Paint ist er entweder passiert oder er passiert nicht mehr.

@@ -203,17 +203,29 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         )
         const closedId = issueIdBySubject(address, ISSUE_CLOSED)
         expect(closedId).toHaveLength(64)
+        // **Fester Abstand statt realer Zeit.** `foldRepoState`/`issueStatusFrom`
+        // (forgeModels.ts:168-169) entscheiden bei GLEICHEM `created_at` über die
+        // kleinere Id — deterministisch, aber die Id ist ein Hash und damit pro Lauf
+        // effektiv zufällig. Ohne festen Abstand hängt „1632 schlägt 1630" an der
+        // WIRKLICHEN Zeit zwischen den beiden `nak`-Aufrufen (Signieren + Relay-
+        // Roundtrip): isoliert ~1s (gemessen), unter Last (parallele Docker-Stacks)
+        // reicht das nicht immer — landen beide in derselben Sekunde, entscheidet ein
+        // Münzwurf statt der Fixture, welcher Status gewinnt. Per Parallellauf
+        // reproduziert: 4 von 5 Läufen zeigten „open" statt „closed"
+        // (`buzz-forge.spec.ts:313`), bevor dieser feste Abstand kam.
+        // `--created-at` macht die Reihenfolge unabhängig von der Ausführungsgeschwindigkeit.
+        const now = Math.floor(Date.now() / 1000)
         publishOnce(
             BUZZ_OWNER_SEC_HEX,
             ['-k', '1630', '-t', `a=${address}`],
             closedId,
-            ['-k', '1630', '--tag', `e=${closedId};;root`, '-t', `a=${address}`],
+            ['-k', '1630', '--tag', `e=${closedId};;root`, '-t', `a=${address}`, '--created-at', String(now)],
         )
         publishOnce(
             BUZZ_OWNER_SEC_HEX,
             ['-k', '1632', '-t', `a=${address}`],
             closedId,
-            ['-k', '1632', '--tag', `e=${closedId};;root`, '-t', `a=${address}`],
+            ['-k', '1632', '--tag', `e=${closedId};;root`, '-t', `a=${address}`, '--created-at', String(now + 5)],
         )
 
         // ── Ein Pull Request mit einem Update (1619 referenziert über `E`) ──
@@ -282,6 +294,12 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
      * der 1632 das ältere 1630 schlägt.
      */
     test('das Repo-Detail zeigt Branch-Zustand, Schutz und die gefalteten Status', async ({ page }) => {
+        // Mehrere `{ timeout: 30_000 }`-Wartepunkte HINTEREINANDER (Überschrift, Branch,
+        // Person, PR-Tab) passen unter Last nicht mehr in Playwrights Test-Default von
+        // 30s — der ÄUSSERE Test-Timeout schlägt dann zu, bevor der INNERE je ausgeschöpft
+        // wird ("Test timeout of 30000ms exceeded" statt der eigentlichen Assertion).
+        // Gemessen unter vierfacher Parallellast (vier gleichzeitige Docker-Stacks).
+        test.setTimeout(90_000)
         await useWorkspace(page)
         await page.goto('/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
@@ -291,13 +309,20 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await expect(page.locator('[data-forge-clone]')).toContainText('example.invalid')
 
         // Punkt 2 — der Branch-Zustand steht mit Kurzhash da.
+        //
+        // `{ timeout: 30_000 }` wie bei der Überschrift oben, nicht das Default-5s-
+        // Fenster: Branch/Person/PR kommen über eigene REQs NACH dem Routenwechsel an,
+        // nicht mit der Überschrift zusammen. Unter Parallellast (mehrere Docker-Stacks
+        // gleichzeitig) gemessen: 3 von 5 Läufen scheiterten genau hier, weil 5s dafür
+        // nicht reichten — isoliert reicht es fast immer, was die Lücke unsichtbar
+        // machte.
         const branch = page.locator('[data-forge-branch][data-branch="master"]')
-        await expect(branch).toBeVisible()
+        await expect(branch).toBeVisible({ timeout: 30_000 })
         await expect(branch).toContainText(COMMIT.slice(0, 7))
         await expect(branch).toContainText('HEAD')
 
         await expect(page.locator('[data-forge-protection]').first()).toContainText('no-force-push')
-        await expect(page.locator('[data-forge-person]').first()).toBeVisible()
+        await expect(page.locator('[data-forge-person]').first()).toBeVisible({ timeout: 30_000 })
 
         // Punkt 3 — zwei Statusereignisse auf dasselbe Issue, der neuere gewinnt.
         const offen = page.locator('[data-forge-issue]').filter({ hasText: ISSUE_OPEN }).first()
@@ -313,7 +338,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         // Der PR-Tab trägt den Vorschlag samt Kurzhash und Quell-Branch.
         await page.getByRole('tab', { name: 'Pull Requests' }).click()
         const pr = page.locator('[data-forge-pr]').filter({ hasText: PR_SUBJECT }).first()
-        await expect(pr).toBeVisible()
+        await expect(pr).toBeVisible({ timeout: 30_000 })
         await expect(pr).toHaveAttribute('data-status', 'open')
         await expect(pr).toContainText('feat/zwergotter')
         await expect(pr).toContainText(COMMIT.slice(0, 7))

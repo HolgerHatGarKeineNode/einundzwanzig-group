@@ -376,7 +376,7 @@ test.describe('Suche: kein Treffer aus einem fremden Space', () => {
     })
 })
 
-// ── 5) "Volltextsuche" kommt nirgends vor ───────────────────────────────────────────
+// ── 5) "Volltextsuche" kommt in der RAUM-LOKALEN Suche nirgends vor ─────────────────
 
 test('"Volltextsuche" kommt in UI, Code und Commits von P6a nicht vor (per Grep belegt)', () => {
     // Prozess-cwd beim Testlauf ist die Host-Wurzel (`npm run test:e2e` läuft von dort;
@@ -396,8 +396,30 @@ test('"Volltextsuche" kommt in UI, Code und Commits von P6a nicht vor (per Grep 
         }
     }
 
-    const uiAndCodeHits = grepQuiet(['-rniI', 'Volltextsuche', `${PKG}/resources/`, `${PKG}/js/`])
-    expect(uiAndCodeHits, `„Volltextsuche" darf in UI/Code nicht vorkommen, gefunden:\n${uiAndCodeHits}`).toBe('')
+    // P6a (diese Datei) prüft die RAUM-LOKALE Suche (js/search.ts, js/roomSearch.ts,
+    // #room-search-panel in ⚡room.blade.php) — für SIE bleibt "Volltextsuche" verboten,
+    // weil sie genau das nicht ist (p1-suche.md: nur `LIKE`-Teilstring über bereits
+    // geladenes `repository`, kein Tokenizing, kein Relay-Request).
+    //
+    // Ausgenommen sind drei Dateien der SPÄTEREN, eigenständigen und vom `reviewer`
+    // abgenommenen Workspace-Suche (Commit 0b0f94a, "P5 — relay-seitige Volltextsuche
+    // über den Workspace (NIP-50)"): dort IST es eine echte relay-seitige Suche, auf
+    // Buzz beschränkt und in `space-search-results.blade.php:48` korrekt als das
+    // benannt, was sie NICHT kann ("Dieser Workspace beantwortet keine Volltextsuche"
+    // für Nicht-Buzz-Spaces) — exakt die Empfehlung aus `p1-suche.md`: "Wird eine
+    // serverseitige Suche gewollt, muss der Plan sie auf Buzz-Räume beschränken … und
+    // die Semantik als das benennen, was sie ist." Eine vierte Datei, die das Wort neu
+    // einführt, bleibt weiterhin rot.
+    const uiAndCodeHits = grepQuiet([
+        '-rniI',
+        '--exclude=space-search-results.blade.php',
+        '--exclude=spaceSearch.ts',
+        '--exclude=paletteItems.ts',
+        'Volltextsuche',
+        `${PKG}/resources/`,
+        `${PKG}/js/`,
+    ])
+    expect(uiAndCodeHits, `„Volltextsuche" darf außerhalb der Workspace-NIP-50-Suche nicht vorkommen, gefunden:\n${uiAndCodeHits}`).toBe('')
 
     const commitHits = execFileSync('git', ['log', '--oneline', '-i', '--grep=Volltextsuche'], { encoding: 'utf8', cwd: PKG }).trim()
     expect(commitHits, `„Volltextsuche" darf in keiner Commit-Nachricht des Package vorkommen, gefunden:\n${commitHits}`).toBe('')

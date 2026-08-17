@@ -54,7 +54,7 @@ const isBuzz = process.env.E2E_RELAY === 'buzz'
  * Fehler, kein Hinweis, nur Stille. Der Buzz-Pin war dabei komplett kaputt und wäre
  * unentdeckt geblieben. Wer hier eine Spec ergänzt, ergänzt sie in DIESER Liste.
  */
-const BUZZ_SPECS = /(?:buzz-.*|pin-room)\.spec\.ts$/
+const BUZZ_SPECS = /(?:^|\/)(?:buzz-.*|pin-room)\.spec\.ts$/
 
 /** Host-Chromium, kein von Playwright heruntergeladenes Binary — gilt für JEDES Projekt. */
 const hostChromium = {

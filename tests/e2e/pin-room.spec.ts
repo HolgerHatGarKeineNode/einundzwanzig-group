@@ -380,18 +380,35 @@ function publishBuzzRaw(h: string, sec: string, content: string): string {
     throw new Error(`Buzz-Seed-Nachricht ${content} kam nicht an`)
 }
 
-/** Das aktuelle 40004 auf `targetId` — für die "target event not found"-Race unten. */
+/**
+ * Das aktuelle 40004 auf `targetId` — für die "target event not found"-Race unten.
+ *
+ * Mit Wiederholung, wie `publishBuzzRaw`: die UI zeigt den Pin sofort optimistisch
+ * (Local-Echo im `#room-pin-list`), die anschließende `nak req` fragt aber den ECHTEN
+ * Relay-Zustand ab — die Sicht ist erst dort, wenn Buzz das 40004 durchgeschrieben hat.
+ * Ohne Wiederholung traf die Abfrage gemessen 3 von 5 Läufen VOR diesem Zeitpunkt und
+ * lieferte `undefined`, obwohl der Pin Sekundenbruchteile später auffindbar war — der
+ * Test scheiterte an der eigenen Prüfvoraussetzung, nicht an der Race, die er misst.
+ */
 function findBuzzPinEvent(h: string, targetId: string): RelayEvent | undefined {
-    const out = execFileSync(NAK, ['req', '-k', '40004', '-t', `h=${h}`, '--auth', '--sec', BUZZ_OWNER_SEC_HEX, BUZZ_WS], {
-        encoding: 'utf8',
-        timeout: 20_000,
-    })
-    return out
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as RelayEvent)
-        .find((e) => e.tags.some((t) => t[0] === 'e' && t[1] === targetId))
+    for (let attempt = 0; attempt < 12; attempt++) {
+        const out = execFileSync(NAK, ['req', '-k', '40004', '-t', `h=${h}`, '--auth', '--sec', BUZZ_OWNER_SEC_HEX, BUZZ_WS], {
+            encoding: 'utf8',
+            timeout: 20_000,
+        })
+        const hit = out
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map((l) => JSON.parse(l) as RelayEvent)
+            .find((e) => e.tags.some((t) => t[0] === 'e' && t[1] === targetId))
+        if (hit) {
+            return hit
+        }
+        execFileSync('sleep', ['0.3'])
+    }
+
+    return undefined
 }
 
 test.describe('Pin/Unpin (D, Buzz — nur E2E_RELAY=buzz)', () => {
