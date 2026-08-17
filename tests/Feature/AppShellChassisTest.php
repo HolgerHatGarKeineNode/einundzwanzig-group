@@ -270,3 +270,31 @@ test('app-frame rendert GENAU EIN Wurzelelement (Livewire-Vertrag)', function ()
     // dann erfüllt, wenn der Inhalt ganz verloren ginge.
     expect($dom->getElementById('sonde'))->not->toBeNull();
 });
+
+/**
+ * P1 (Restposten-Plan, „Forge in die Workspace-Nav einweben") — der Zugang zur
+ * Forge-Übersicht.
+ *
+ * **Warum dieser Test entsteht, obwohl die Palette schon vor P1 einen
+ * Forge-Befehl trug:** Mit P1 ist der eigene „Forge"-Eintrag am Fuß der Rail
+ * ENTFALLEN — der Workspace ist jetzt die Forge, und die Übersicht hängt am
+ * Sektionskopf. Damit ist die Befehlspalette vom Zweitweg zum tragenden Weg
+ * geworden: fiele ihr Eintrag irgendwann still weg, wäre `/forge` nur noch über
+ * die Adresszeile erreichbar, und kein Test würde rot. Der Eintrag ist bewusst
+ * an einen konfigurierten Workspace gebunden — ein Befehl, der in einen
+ * Leerzustand führt, wäre schlechter als keiner.
+ */
+test('P1 Forge: die Befehlspalette führt zur Übersicht — mit Workspace, und nur dann', function () {
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
+
+    // `@js()` escapt die Anführungszeichen als `\u0022` — geprüft wird also die
+    // Zeichenkette, die WIRKLICH im Attribut steht, nicht die, die man erwartet.
+    $res->assertSee('\u0022id\u0022:\u0022forge\u0022', false);
+    $res->assertSee('\u0022label\u0022:\u0022Forge\u0022', false);
+
+    config(['group.workspace_url' => null]);
+    $ohne = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
+
+    $ohne->assertDontSee('\u0022id\u0022:\u0022forge\u0022', false);
+});
