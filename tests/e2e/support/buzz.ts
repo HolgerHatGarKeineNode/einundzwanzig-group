@@ -41,6 +41,21 @@ export const BUZZ_ROOM_GENERAL = '99cf94aa-b89d-5545-8905-495ea28a288e'
  * Thema (45001) mit zwei Antworten — je eine als 45003 und als kind 9.
  */
 export const BUZZ_ROOM_FORUM = '177e0faf-0ff5-553e-aaca-84d0632084c0'
+/**
+ * Das PRIVATE Forum des Seeds (N1) — `uuid5(NS, "meetup:e2e-forum-privat")`.
+ *
+ * Es entsteht aus demselben 9007 wie {@link BUZZ_ROOM_FORUM}, plus genau einem
+ * Tag: `["visibility","private"]`. Am Relay gemessen (2026-08-18) ist das der
+ * einzige Unterschied — das 39000 trägt danach `["private"]` statt `["public"]`,
+ * `["closed"]` steht bei Buzz auf JEDEM Kanal und bedeutet nichts über die
+ * Sichtbarkeit.
+ *
+ * `BUZZ_USER_NSEC` ist dort **Kanal**mitglied (kind 9000 im Seed) — eine reine
+ * Relay-Mitgliedschaft (9030) reicht nicht: für jeden anderen Schlüssel fällt
+ * dieses 39000 lautlos aus der Kanalliste und ein `#h`-REQ endet mit
+ * `CLOSED restricted: not a channel member`.
+ */
+export const BUZZ_ROOM_FORUM_PRIVATE = '9ad96d2d-d9a5-5825-bda8-671c3f67ef6a'
 
 /**
  * Zeigt welshman im Test auf den lokalen buzz-test-Stack statt auf öffentliche Relays

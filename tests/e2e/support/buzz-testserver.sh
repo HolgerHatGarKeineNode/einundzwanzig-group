@@ -117,6 +117,21 @@ GENERAL_H=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.UUID('$NS'), 'mee
 # UUIDv5-Ableitung wie oben, damit auch dieser Seed beim zweiten Lauf ein
 # `duplicate: channel already exists` erzeugt statt eines zweiten Kanals.
 FORUM_H=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.UUID('$NS'), 'meetup:e2e-forum'))")
+# Vierter Testraum (N1): ein PRIVATES Forum — die Lage des Nutzers.
+#
+# Sein echtes Forum ist bewusst privat (er laedt von Hand ein); P3 war nur an
+# einem OFFENEN Forum belegt. Der Unterschied ist am Relay gemessen und liegt an
+# genau EINEM Tag am 9007: `["visibility","private"]` (Default ist `open`,
+# `ingest.rs:2596-2607` liest ihn schon vor der Speicherung, `side_effects.rs:1768`
+# noch einmal). Der Relay macht daraus ein 39000 mit `["private"]` statt
+# `["public"]` — gemessen am Stack :3005 am 2026-08-18:
+#
+#   offen:  [["d",…],["name","E2E-Forum"],…,["public"],["closed"],["t","forum"]]
+#   privat: [["d",…],["name","E2E-Forum-Privat"],…,["private"],["closed"],["t","forum"]]
+#
+# `["closed"]` traegt JEDER Buzz-Kanal (`side_effects.rs:1974`, „Buzz channels
+# always require explicit membership") — es ist deshalb KEIN Privatheits-Merkmal.
+PRIV_FORUM_H=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.UUID('$NS'), 'meetup:e2e-forum-privat'))")
 
 # welcome-Seed-Baseline (wie zooid: WELCOME_SEED) — Bloat-Guard.
 WELCOME_SEED_CAP=10
@@ -138,8 +153,11 @@ WELCOME_SEED_CAP=10
 # (50 je 5 s je Pubkey, siehe relayNotices.ts im Package) — ein aufgeblaehter Kanalbestand
 # vergroessert die Raumliste, damit die `#h`-Filter und damit den Frame-Verbrauch. Hier
 # kostet Muell nicht nur Platz, sondern Messgenauigkeit.
-# Seit P3 sind es DREI: welcome + general + forum.
-CHANNEL_SEED=3
+# Seit P3 sind es DREI: welcome + general + forum. Seit N1 VIER — das private
+# Forum kommt dazu. Es zaehlt in dieser Messung mit, weil `stack_seeded_and_clean`
+# mit USER_SEC liest und der USER dort Kanalmitglied ist; fuer einen
+# Nicht-Kanalmitglied-Schluessel waeren es weiterhin drei (gemessen).
+CHANNEL_SEED=4
 CHANNEL_CAP=$((CHANNEL_SEED + 4))
 
 compose() {
@@ -168,6 +186,12 @@ stack_seeded_and_clean() {
     # Forum-Spec liefe gegen einen Kanal, den es nicht gibt — ein Rot, dessen
     # Ursache im Stack liegt und nicht im Code. Deshalb hier und nicht nur unten.
     timeout 8 nak req -k 45001 -t "h=$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Forum-Thema' || return 1
+    # Privates Forum (N1) — derselbe Grund wie eine Zeile darueber, plus einer:
+    # ein Stack aus einem AELTEREN Lauf kennt den Kanal gar nicht, und die
+    # Privat-Faelle liefen dann gegen ein Nichts. Geprueft wird das THEMA, nicht
+    # der Kanal: nur das Thema beweist zugleich, dass der USER dort Kanalmitglied
+    # ist (ohne 9000 antwortet der Relay mit `restricted: not a channel member`).
+    timeout 8 nak req -k 45001 -t "h=$PRIV_FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Privatforum-Thema' || return 1
     local n
     n=$(timeout 8 nak req -k 9 -t "h=$WELCOME_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -c '"kind":9')
     [ "${n:-999}" -le "$WELCOME_SEED_CAP" ] || return 1
@@ -263,12 +287,29 @@ seed_event() {
 seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$WELCOME_H" -t name=E2E-Welcome -t about=E2E-Startkanal "$R"
 seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$GENERAL_H" -t name=E2E-General -t about=E2E-Zweitraum "$R"
 seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$FORUM_H" -t name=E2E-Forum -t about=E2E-Forumkanal -t channel_type=forum "$R"
+# N1: dasselbe noch einmal, nur PRIVAT. Ein einziger Tag trennt die beiden Lagen.
+seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$PRIV_FORUM_H" -t name=E2E-Forum-Privat -t about=E2E-Privatforum -t channel_type=forum -t visibility=private "$R"
 
 # Mitglied (Ersatz für NIP-86 allowpubkey, das es bei Buzz nicht gibt): kind 9030,
 # ["p",<hex>] + ["role","member"], vom Owner gesendet. created_at muss frisch sein
 # (±120s) — nak signiert mit `now()`, kein --ts, also automatisch erfüllt. Idempotent:
 # existiert der Member schon, ist es laut Handler ein stiller No-op.
 seed_event --auth --sec "$OWNER_SEC" -k 9030 -t "p=$USER_PUB" -t role=member "$R"
+
+# KANAL-Mitgliedschaft im privaten Forum (N1) — kind 9000, NICHT 9030.
+#
+# Die beiden Kinds sind zwei verschiedene Ebenen und nicht austauschbar: 9030
+# macht relay-weit ein Mitglied (das reicht fuer JEDEN offenen Kanal), 9000 macht
+# ein Mitglied EINES Kanals. Ein privater Kanal ist genau der Fall, in dem der
+# Unterschied sichtbar wird — ohne das 9000 beantwortet der Relay dem USER jedes
+# `#h`-REQ auf diesen Kanal mit `CLOSED restricted: not a channel member` und
+# laesst sein 39000 lautlos aus der Kanalliste fallen (beides gemessen).
+#
+# Absender ist der OWNER: er ist Ersteller und damit Kanal-Eigentuemer, und bei
+# `visibility=private` verlangt `validate_admin_event` (9000-Arm,
+# `side_effects.rs:364-367`) vom Absender eine bestehende Mitgliedschaft.
+# Idempotent — ein zweites 9000 auf dieselbe Rolle ist ein No-op (`add_member`).
+seed_event --auth --sec "$OWNER_SEC" -k 9000 -t "h=$PRIV_FORUM_H" -t "p=$USER_PUB" -t role=member "$R"
 
 # Chat (kind 9) — content-guarded wie bei zooid (nak-Events sind nicht replaceable).
 if ! timeout 8 nak req -k 9 -t "h=$WELCOME_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-welcome'; then
@@ -288,24 +329,46 @@ fi
 # und der Guard umschliesst BEIDE Schritte, weil die Antworten die id des Themas
 # brauchen: ohne die Klammer legte jeder Lauf ein zweites Thema an, und der Stack
 # waechst genau so, wie es P4 fuer die Schreib-Spec dokumentiert hat.
-if ! timeout 8 nak req -k 45001 -t "h=$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Forum-Thema'; then
-    seed_event --auth --sec "$USER_SEC" -k 45001 -t "h=$FORUM_H" \
-        -c 'E2E-Forum-Thema: Wie kommt das Bier in die Flasche?
-Zweite Zeile des Themas — sie gehoert in die Vorschau, nicht in den Titel.' "$R"
+#
+# Seit N1 wird derselbe Inhalt in ZWEI Kanaele geseedet (offen + privat), deshalb
+# steht er in einer Funktion statt zweimal untereinander: eine zweite Kopie waere
+# beim naechsten Formwechsel genau die Haelfte, die jemand vergisst. Die Marker
+# unterscheiden sich je Kanal ("E2E-Forum-*" vs. "E2E-Privatforum-*") — gleiche
+# Marker haetten den Inhalts-Guard des einen Kanals durch den anderen erfuellt.
+#
+# $1 Kanal-h · $2 Themenmarker · $3 Themen-Inhalt · $4 45003-Antwort · $5 kind-9-Antwort
+seed_forum_topic() {
+    local h="$1" marker="$2" body="$3" reply_a="$4" reply_b="$5" root
+    if timeout 8 nak req -k 45001 -t "h=$h" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q "$marker"; then
+        return 0
+    fi
+    seed_event --auth --sec "$USER_SEC" -k 45001 -t "h=$h" -c "$body" "$R"
     # Die Wurzel-id zurueckholen (`nak event` gibt sie nur auf stdout aus, das
     # seed_event verwirft — hier ist die Abfrage die verlaesslichere Quelle: sie
     # beweist zugleich, dass das Thema wirklich gespeichert wurde).
-    FORUM_ROOT=$(timeout 8 nak req -k 45001 -t "h=$FORUM_H" -l 5 --auth --sec "$USER_SEC" "$R" 2>/dev/null \
-        | grep 'E2E-Forum-Thema' | head -1 | python3 -c 'import json,sys; line=sys.stdin.readline(); print(json.loads(line)["id"] if line.strip() else "")')
-    if [ -n "$FORUM_ROOT" ]; then
-        seed_event --auth --sec "$OWNER_SEC" -k 45003 -t "h=$FORUM_H" -t "e=$FORUM_ROOT;;reply" \
-            -c 'E2E-Forum-Antwort: Mit Druck und Geduld.' "$R"
-        seed_event --auth --sec "$USER_SEC" -k 9 -t "h=$FORUM_H" -t "e=$FORUM_ROOT;;reply" \
-            -c 'E2E-Forum-Chatantwort: und mit Kohlensaeure.' "$R"
-    else
-        echo "buzz-test: Forum-Thema nach dem Seed nicht abrufbar — Forum-Spec wird rot." >&2
+    root=$(timeout 8 nak req -k 45001 -t "h=$h" -l 5 --auth --sec "$USER_SEC" "$R" 2>/dev/null \
+        | grep "$marker" | head -1 | python3 -c 'import json,sys; line=sys.stdin.readline(); print(json.loads(line)["id"] if line.strip() else "")')
+    if [ -z "$root" ]; then
+        echo "buzz-test: Forum-Thema ($marker) nach dem Seed nicht abrufbar — Forum-Spec wird rot." >&2
+        return 0
     fi
-fi
+    seed_event --auth --sec "$OWNER_SEC" -k 45003 -t "h=$h" -t "e=$root;;reply" -c "$reply_a" "$R"
+    seed_event --auth --sec "$USER_SEC" -k 9 -t "h=$h" -t "e=$root;;reply" -c "$reply_b" "$R"
+}
+
+seed_forum_topic "$FORUM_H" 'E2E-Forum-Thema' \
+    'E2E-Forum-Thema: Wie kommt das Bier in die Flasche?
+Zweite Zeile des Themas — sie gehoert in die Vorschau, nicht in den Titel.' \
+    'E2E-Forum-Antwort: Mit Druck und Geduld.' \
+    'E2E-Forum-Chatantwort: und mit Kohlensaeure.'
+
+# N1: derselbe Aufbau im PRIVATEN Forum. Dass der USER hier ueberhaupt schreiben
+# und lesen darf, haengt allein am 9000 weiter oben.
+seed_forum_topic "$PRIV_FORUM_H" 'E2E-Privatforum-Thema' \
+    'E2E-Privatforum-Thema: Wer darf hier eigentlich mitlesen?
+Zweite Zeile des Privatthemas — Vorschau, nicht Titel.' \
+    'E2E-Privatforum-Antwort: Nur wer eingeladen wurde.' \
+    'E2E-Privatforum-Chatantwort: und der Owner.'
 
 # Verifikation: erst zurückkehren, wenn Raum + Mitgliedschaft + Nachricht wirklich als
 # Relay-Member abrufbar sind — DAS beseitigt den Bind-vor-Seed-Race, wie bei zooid.
@@ -314,7 +377,9 @@ for _ in $(seq 1 40); do
     if timeout 5 nak req -k 39000 -d "$WELCOME_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Welcome' \
         && timeout 5 nak req -k 9 -t "h=$GENERAL_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-general' \
         && timeout 5 nak req -k 39000 -d "$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q '"forum"' \
-        && timeout 5 nak req -k 45003 -t "h=$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Forum-Antwort'; then
+        && timeout 5 nak req -k 45003 -t "h=$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Forum-Antwort' \
+        && timeout 5 nak req -k 39000 -d "$PRIV_FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q '"private"' \
+        && timeout 5 nak req -k 45003 -t "h=$PRIV_FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Privatforum-Antwort'; then
         OK=1
         break
     fi
@@ -327,4 +392,4 @@ if [ "$OK" -ne 1 ]; then
 fi
 
 touch "$RUNMARK"
-echo "buzz-test:$BUZZ_PORT frisch aufgesetzt + geseedet + verifiziert (welcome=$WELCOME_H, general=$GENERAL_H, forum=$FORUM_H)"
+echo "buzz-test:$BUZZ_PORT frisch aufgesetzt + geseedet + verifiziert (welcome=$WELCOME_H, general=$GENERAL_H, forum=$FORUM_H, forum-privat=$PRIV_FORUM_H)"
