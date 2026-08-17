@@ -35,6 +35,12 @@ export const BUZZ_USER_PUB = '9db3b9da10ee79e56871f101051d2df7693b07927733dd12d0
 // siehe buzz-testserver.sh) — fest, weil deterministisch aus dem Slug abgeleitet.
 export const BUZZ_ROOM_WELCOME = 'a956ca5e-f2f7-5bed-bfe9-3313a8ee8718'
 export const BUZZ_ROOM_GENERAL = '99cf94aa-b89d-5545-8905-495ea28a288e'
+/**
+ * Der FORUM-Kanal des Seeds (P3): `uuid5(NS, "meetup:e2e-forum")`, angelegt per
+ * 9007 mit `["channel_type","forum"]` → 39000 mit `["t","forum"]`. Er trägt ein
+ * Thema (45001) mit zwei Antworten — je eine als 45003 und als kind 9.
+ */
+export const BUZZ_ROOM_FORUM = '177e0faf-0ff5-553e-aaca-84d0632084c0'
 
 /**
  * Zeigt welshman im Test auf den lokalen buzz-test-Stack statt auf öffentliche Relays

@@ -323,8 +323,24 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // I18n-Korrektur (2026-08-17) im `aria-label` der Zeile steht statt in einem
     // sr-only-Geschwistertext. Multiset-Diff (`array_count_values`, pre-P7 gegen
     // HEAD) bestätigt: exakt +2 `aria-hidden="true"`, sonst keine Abweichung.
+    // P3 des Restposten-Plans (2026-08-17, Forum-Modus): NACHGEMESSEN, Ergebnis
+    // 'room' 35 → 40. Multiset-Diff (`array_count_values`, `git show
+    // HEAD:…⚡room.blade.php` gegen den Arbeitsbaum) ist EINSEITIG — es fiel kein
+    // Träger weg, es kamen genau fünf dazu, alle in der neuen Themenliste:
+    //   +1 `aria-live="polite"`  — die sr-only-Ladeansage des Themen-Skeletts
+    //                             („Themen werden geladen…"), dasselbe Muster wie
+    //                             die Ansage über dem Verlaufs-Skelett darüber.
+    //   +1 `role="list"`         — die Themenliste IST eine Liste, kein `log`:
+    //                             es kommt nichts unten an, es wird gesprungen.
+    //   +3 `aria-hidden="true"`  — zwei Mittelpunkte als Interpunktion zwischen
+    //                             Autor · Antwortzahl · Zeit (der ganze Satz steht
+    //                             im `aria-label` des Knopfes) und das Info-Icon
+    //                             des Hinweises, der im Forum an der Stelle des
+    //                             Composers steht.
+    // Alle fünf sind bewusste Landmarken, keine Regression — die Zahl steigt
+    // entsprechend. 'directory' und 'spaces' unverändert.
     $expected = [
-        'room' => 35,
+        'room' => 40,
         'directory' => 3,
         'spaces' => 11,
     ];

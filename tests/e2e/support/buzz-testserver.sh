@@ -111,6 +111,12 @@ HTTP="http://localhost:$BUZZ_PORT"
 NS=d3a2a246-e0b6-45be-a1c4-367c2bd857ad
 WELCOME_H=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.UUID('$NS'), 'meetup:e2e-welcome'))")
 GENERAL_H=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.UUID('$NS'), 'meetup:e2e-general'))")
+# Dritter Testraum (P3): ein FORUM-Kanal. Er entsteht wie die anderen per 9007,
+# nur mit `["channel_type","forum"]` — der Relay macht daraus ein 39000 mit
+# `["t","forum"]` (`side_effects.rs:1096`, am Stack nachgemessen). Dieselbe
+# UUIDv5-Ableitung wie oben, damit auch dieser Seed beim zweiten Lauf ein
+# `duplicate: channel already exists` erzeugt statt eines zweiten Kanals.
+FORUM_H=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.UUID('$NS'), 'meetup:e2e-forum'))")
 
 # welcome-Seed-Baseline (wie zooid: WELCOME_SEED) — Bloat-Guard.
 WELCOME_SEED_CAP=10
@@ -132,7 +138,8 @@ WELCOME_SEED_CAP=10
 # (50 je 5 s je Pubkey, siehe relayNotices.ts im Package) — ein aufgeblaehter Kanalbestand
 # vergroessert die Raumliste, damit die `#h`-Filter und damit den Frame-Verbrauch. Hier
 # kostet Muell nicht nur Platz, sondern Messgenauigkeit.
-CHANNEL_SEED=2
+# Seit P3 sind es DREI: welcome + general + forum.
+CHANNEL_SEED=3
 CHANNEL_CAP=$((CHANNEL_SEED + 4))
 
 compose() {
@@ -157,6 +164,10 @@ stack_seeded_and_clean() {
     timeout 5 curl -sf -H 'Accept: application/nostr+json' "$HTTP" >/dev/null 2>&1 || return 1
     # Letztes Seed-Artefakt: die general-Nachricht (als Relay-Member abrufbar).
     timeout 8 nak req -k 9 -t "h=$GENERAL_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-general' || return 1
+    # Forum-Seed (P3): ohne ihn ist der Stack aus einem AELTEREN Lauf und die
+    # Forum-Spec liefe gegen einen Kanal, den es nicht gibt — ein Rot, dessen
+    # Ursache im Stack liegt und nicht im Code. Deshalb hier und nicht nur unten.
+    timeout 8 nak req -k 45001 -t "h=$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Forum-Thema' || return 1
     local n
     n=$(timeout 8 nak req -k 9 -t "h=$WELCOME_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -c '"kind":9')
     [ "${n:-999}" -le "$WELCOME_SEED_CAP" ] || return 1
@@ -251,6 +262,7 @@ seed_event() {
 # derselben UUID → "duplicate: channel already exists" (Idempotenz gratis, wie bei zooid 9007).
 seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$WELCOME_H" -t name=E2E-Welcome -t about=E2E-Startkanal "$R"
 seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$GENERAL_H" -t name=E2E-General -t about=E2E-Zweitraum "$R"
+seed_event --auth --sec "$OWNER_SEC" -k 9007 -t "h=$FORUM_H" -t name=E2E-Forum -t about=E2E-Forumkanal -t channel_type=forum "$R"
 
 # Mitglied (Ersatz für NIP-86 allowpubkey, das es bei Buzz nicht gibt): kind 9030,
 # ["p",<hex>] + ["role","member"], vom Owner gesendet. created_at muss frisch sein
@@ -267,12 +279,42 @@ if ! timeout 8 nak req -k 9 -t "h=$GENERAL_H" --auth --sec "$USER_SEC" "$R" 2>/d
     seed_event --auth --sec "$USER_SEC" -k 9 -t "h=$GENERAL_H" -c 'E2E-Buzz-general: Zweiter Raum' "$R"
 fi
 
+# Forum-Inhalt (P3): EIN Thema (45001) mit ZWEI Antworten — eine als 45003, eine
+# als kind 9. Beide Formen sind am Relay gemessen und beide zaehlen bei Buzz als
+# Forum-Antwort (`get_forum_thread` fragt `kinds:[9,45003]`); waere nur eine davon
+# geseedet, ginge die haeufigere Form ungeprueft durch.
+#
+# Idempotenz wie beim Chat ueber den INHALT (nak-Events sind nicht replaceable) —
+# und der Guard umschliesst BEIDE Schritte, weil die Antworten die id des Themas
+# brauchen: ohne die Klammer legte jeder Lauf ein zweites Thema an, und der Stack
+# waechst genau so, wie es P4 fuer die Schreib-Spec dokumentiert hat.
+if ! timeout 8 nak req -k 45001 -t "h=$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Forum-Thema'; then
+    seed_event --auth --sec "$USER_SEC" -k 45001 -t "h=$FORUM_H" \
+        -c 'E2E-Forum-Thema: Wie kommt das Bier in die Flasche?
+Zweite Zeile des Themas — sie gehoert in die Vorschau, nicht in den Titel.' "$R"
+    # Die Wurzel-id zurueckholen (`nak event` gibt sie nur auf stdout aus, das
+    # seed_event verwirft — hier ist die Abfrage die verlaesslichere Quelle: sie
+    # beweist zugleich, dass das Thema wirklich gespeichert wurde).
+    FORUM_ROOT=$(timeout 8 nak req -k 45001 -t "h=$FORUM_H" -l 5 --auth --sec "$USER_SEC" "$R" 2>/dev/null \
+        | grep 'E2E-Forum-Thema' | head -1 | python3 -c 'import json,sys; line=sys.stdin.readline(); print(json.loads(line)["id"] if line.strip() else "")')
+    if [ -n "$FORUM_ROOT" ]; then
+        seed_event --auth --sec "$OWNER_SEC" -k 45003 -t "h=$FORUM_H" -t "e=$FORUM_ROOT;;reply" \
+            -c 'E2E-Forum-Antwort: Mit Druck und Geduld.' "$R"
+        seed_event --auth --sec "$USER_SEC" -k 9 -t "h=$FORUM_H" -t "e=$FORUM_ROOT;;reply" \
+            -c 'E2E-Forum-Chatantwort: und mit Kohlensaeure.' "$R"
+    else
+        echo "buzz-test: Forum-Thema nach dem Seed nicht abrufbar — Forum-Spec wird rot." >&2
+    fi
+fi
+
 # Verifikation: erst zurückkehren, wenn Raum + Mitgliedschaft + Nachricht wirklich als
 # Relay-Member abrufbar sind — DAS beseitigt den Bind-vor-Seed-Race, wie bei zooid.
 OK=0
 for _ in $(seq 1 40); do
     if timeout 5 nak req -k 39000 -d "$WELCOME_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Welcome' \
-        && timeout 5 nak req -k 9 -t "h=$GENERAL_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-general'; then
+        && timeout 5 nak req -k 9 -t "h=$GENERAL_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Buzz-general' \
+        && timeout 5 nak req -k 39000 -d "$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q '"forum"' \
+        && timeout 5 nak req -k 45003 -t "h=$FORUM_H" --auth --sec "$USER_SEC" "$R" 2>/dev/null | grep -q 'E2E-Forum-Antwort'; then
         OK=1
         break
     fi
@@ -285,4 +327,4 @@ if [ "$OK" -ne 1 ]; then
 fi
 
 touch "$RUNMARK"
-echo "buzz-test:$BUZZ_PORT frisch aufgesetzt + geseedet + verifiziert (welcome=$WELCOME_H, general=$GENERAL_H)"
+echo "buzz-test:$BUZZ_PORT frisch aufgesetzt + geseedet + verifiziert (welcome=$WELCOME_H, general=$GENERAL_H, forum=$FORUM_H)"
