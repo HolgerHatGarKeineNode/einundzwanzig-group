@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import type { FullConfig } from '@playwright/test'
+import { ownedRunMarkerPaths } from './runMarkers'
 
 /**
  * Läuft EINMAL vor allen Workern. Baut die geteilten Artefakte, die sonst mehrere
@@ -63,13 +65,31 @@ function needsBuild(): { build: boolean; reason: string } {
 /** `E2E_RELAY=buzz|zooid` (Default zooid) — siehe playwright.config.ts + fixtures.ts. */
 const relayMode = (): 'zooid' | 'buzz' => (process.env.E2E_RELAY === 'buzz' ? 'buzz' : 'zooid')
 
-export default function globalSetup(): void {
-    // Lauf-Marker der zooid-Instanzen loeschen. Sie schuetzen INNERHALB eines Laufs
-    // davor, dass ein neu gestarteter Worker den Relay neu aufsetzt und damit den
-    // gerade laufenden Test mitreisst (Begruendung in zooid-testserver.sh, RUNMARK).
+export default function globalSetup(config: FullConfig): void {
+    // Lauf-Marker loeschen. Sie schuetzen INNERHALB eines Laufs davor, dass ein neu
+    // gestarteter Worker den Relay neu aufsetzt und damit den gerade laufenden Test
+    // mitreisst (Begruendung in zooid-testserver.sh/buzz-testserver.sh, RUNMARK).
     // Zu Lauf-Beginn muessen sie weg, sonst wuerde der Bloat-Guard nie wieder greifen
     // und die Raeume wuechsen ueber Laeufe hinweg unbegrenzt.
-    execFileSync('bash', ['-c', 'rm -f /tmp/e2e-zooid-*.run /tmp/e2e-buzz-*.run'], { stdio: 'inherit' })
+    //
+    // NUR DIE EIGENE PORTREIHE (N9, 2026-08-18). Hier stand `rm -f /tmp/e2e-buzz-*.run`
+    // — ein Glob ueber ALLE Slots. Laufen mehrere Suiten gleichzeitig auf verschiedenen
+    // `E2E_SLOT_OFFSET` (der Normalfall, seit mehrere Agenten parallel arbeiten), nimmt
+    // ein startender Lauf den anderen genau den Schutz weg, fuer den der Marker da ist.
+    // Gemessen am 2026-08-18: das Glob traf mit den eigenen vier Markern zugleich die
+    // beiden eines fremden, laufenden Stacks.
+    //
+    // Kein Shell-Glob mehr, sondern eine aufgezaehlte Liste aus `config.workers` +
+    // `E2E_SLOT_OFFSET` (Herleitung und Test in `runMarkers.ts`): ein Glob kann sich
+    // still wieder aufweiten, eine Liste nicht.
+    const markers = ownedRunMarkerPaths({
+        workers: config.workers,
+        slotOffset: Number(process.env.E2E_SLOT_OFFSET ?? '0'),
+    })
+    for (const marker of markers) {
+        rmSync(marker, { force: true })
+    }
+    console.log(`[global-setup] Lauf-Marker der eigenen Slots entfernt: ${markers.join(' ')}`)
 
     if (relayMode() === 'buzz') {
         // Nichts zu tun: der Buzz-Stack entsteht seit der Parallelisierung PRO WORKER

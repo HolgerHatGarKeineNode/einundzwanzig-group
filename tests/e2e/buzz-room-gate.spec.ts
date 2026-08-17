@@ -304,4 +304,136 @@ test.describe('Buzz-Workspace: das Raum-Gate (E2E, nur E2E_RELAY=buzz)', () => {
 
         asOwner(['-k', '9008', '-t', `h=${h}`])
     })
+
+    /**
+     * **Fall 4 (N8) — der Raum kippt offen→privat, das KANALMITGLIED behält alles.**
+     *
+     * Für ein Kanalmitglied ändert `open → private` nichts: es war drin, es bleibt
+     * drin. Die Gefahr liegt allein bei uns — der Relay benutzt beim Umschalten
+     * denselben Grund wie beim Fremd-Rauswurf (`restricted: channel access
+     * revoked`), und P9 lässt jede `restricted:`-Ablehnung die eigene Mitgliedschaft
+     * auf *unbestätigt* setzen. Träfe dieses Signal auch das Mitglied, verschwände
+     * der Composer bei jemandem, der weiterhin schreiben darf — die teure
+     * Fehlerrichtung, nur spiegelverkehrt zu N3.
+     *
+     * **Am laufenden Relay gemessen (2026-08-18, Wegwerf-Stack `buzz-test:3021`),
+     * und die Messung ist der Grund, warum dieser Test so aussieht:** Buzz räumt
+     * beim Umschalten NUR die Subs von Nicht-Mitgliedern ab
+     * (`side_effects.rs::evict_non_member_channel_subscriptions`, aufgerufen aus
+     * dem `visibility`-Arm von `handle_edit_metadata` genau bei `was_open && val ==
+     * "private"`). Zwei Verbindungen auf demselben Kanal, dasselbe REQ:
+     *
+     * | Verbindung | nach dem 9002 | frisches REQ danach |
+     * |---|---|---|
+     * | Kanalmitglied  | **nichts** (Sub läuft weiter) | `EOSE` — weiter lesbar |
+     * | Nichtmitglied  | `CLOSED restricted: channel access revoked` (+7 ms) | `CLOSED restricted: not a channel member` |
+     *
+     * Der Test hält also fest, dass wir aus einem Signal, das gar nicht kommt,
+     * auch nichts ableiten — und dass die Fläche nicht auf anderem Weg (neue
+     * 39002: der Relay stellt beim Umschalten eine mit gleichem Inhalt und neuem
+     * `created_at` aus) den Composer verliert. Ohne den Sendeversuch am Ende wäre
+     * das nur „sichtbar"; mit ihm ist es „benutzbar".
+     */
+    test('offen→privat: das Kanalmitglied behält Composer und Schreibrecht', async ({ page }) => {
+        const { nsec, pub } = freshMember()
+        const h = randomUUID()
+
+        expect(
+            asOwner(['-k', '9007', '-t', `h=${h}`, '-t', 'name=E2E-Kipp-Mitglied']),
+            'offener Testraum konnte nicht angelegt werden',
+        ).toContain('success')
+        // KANAL-Mitgliedschaft (9000), nicht bloß Relay-Mitgliedschaft (9030) — nur
+        // sie überlebt das Umschalten auf privat.
+        expect(
+            asOwner(['-k', '9000', '-t', `h=${h}`, '-t', `p=${pub}`, '-t', 'role=member']),
+            'Raum-Mitgliedschaft konnte nicht gesetzt werden',
+        ).toContain('success')
+
+        await useBuzz(page)
+        await loginNsec(page, nsec)
+        await page.goto(`/rooms/${h}`)
+
+        await expect(composer(page), 'Vorbedingung: das Mitglied schreibt im offenen Raum').toBeVisible({
+            timeout: 30_000,
+        })
+
+        // Das Umschalten — von außen, durch den Eigentümer.
+        expect(
+            asOwner(['-k', '9002', '-t', `h=${h}`, '-t', 'visibility=private']),
+            'Umschalten auf privat abgelehnt',
+        ).toContain('success')
+
+        // Fenster für das Signal, das nicht kommen darf: gemessen liegt das `CLOSED`
+        // an die Nicht-Mitglieder 7 ms hinter dem `OK` des 9002. Drei Sekunden sind
+        // dagegen großzügig, und ohne diese Wartezeit wäre der Test auch dann grün,
+        // wenn die Fläche eine Sekunde später zusammenklappt.
+        await page.waitForTimeout(3_000)
+
+        await expect(gate(page), 'ein Kanalmitglied gehört nicht hinter das Gate').toHaveCount(0)
+        await expect(composer(page), 'DIE ZUSAGE: der Composer bleibt beim Kanalmitglied').toBeVisible()
+
+        // Und er ist nicht nur da, er trägt: der Relay nimmt die Nachricht an und
+        // die eigene, weiterlaufende Sub spielt sie zurück.
+        const text = `N8-KIPP-${Date.now()}`
+        await composer(page).fill(text)
+        await page.getByRole('button', { name: 'Senden' }).click()
+        await expect(
+            page.getByText(text, { exact: true }),
+            'nach dem Umschalten muss das Mitglied weiter senden können',
+        ).toBeVisible({ timeout: 30_000 })
+
+        asOwner(['-k', '9008', '-t', `h=${h}`])
+    })
+
+    /**
+     * **Fall 5 (N8) — derselbe Umschalter, aber aus der Sicht des NICHTMITGLIEDS.**
+     *
+     * Die Gegenrichtung, und ohne sie wäre Fall 4 mit einer Fläche zu erfüllen, die
+     * auf gar nichts mehr reagiert: Wer den offenen Raum bisher nur LESEN durfte
+     * (Relay-Mitglied per 9030, nie beigetreten), muss ihn **sofort** verlieren —
+     * ohne Reload, denn genau dafür gibt es die Auswertung des `CLOSED`.
+     *
+     * Gemessen kommen dabei ZWEI Ablehnungen nacheinander, und beide werden
+     * gebraucht: das `CLOSED restricted: channel access revoked` sagt nur „die
+     * Mitgliedschaftslage hat sich geändert" (kein Zugriffsurteil, `roomGate.ts`),
+     * woraufhin die Insel dieselbe Sub neu aufsetzt; erst deren Antwort
+     * `CLOSED restricted: not a channel member` ist das Urteil und setzt das Gate.
+     *
+     * Der Beitreten-Knopf muss dabei verschwinden: ein 9021 in einen privaten Kanal
+     * lehnt Buzz mit `restricted: channel is private` ab — der Knopf führte ins
+     * Leere. Dieselbe Zusage wie in Fall 2, nur über einen anderen Weg erreicht.
+     */
+    test('offen→privat: das Nichtmitglied verliert den Raum sofort', async ({ page }) => {
+        const { nsec } = freshMember()
+        const h = randomUUID()
+
+        expect(
+            asOwner(['-k', '9007', '-t', `h=${h}`, '-t', 'name=E2E-Kipp-Fremd']),
+            'offener Testraum konnte nicht angelegt werden',
+        ).toContain('success')
+
+        await useBuzz(page)
+        await loginNsec(page, nsec)
+        await page.goto(`/rooms/${h}`)
+
+        // Vorbedingung: offener Raum, also lesbar und mit Weg hinein — und genau das
+        // ist gleich weg. Ohne diese Prüfung wäre der Test auch dann grün, wenn der
+        // Nutzer nie Zugriff gehabt hätte.
+        await expect(joinButton(page), 'Vorbedingung: der offene Raum steht dem Nichtmitglied offen').toBeVisible({
+            timeout: 30_000,
+        })
+        await expect(gate(page)).toHaveCount(0)
+
+        expect(
+            asOwner(['-k', '9002', '-t', `h=${h}`, '-t', 'visibility=private']),
+            'Umschalten auf privat abgelehnt',
+        ).toContain('success')
+
+        // DIE ZUSAGE: ohne Reload, allein aus den beiden `CLOSED`-Zeilen.
+        await expect(gate(page), 'nach dem Umschalten gehört das Gate an die Fläche').toBeVisible({ timeout: 30_000 })
+        await expect(joinButton(page), 'ein Beitreten-Knopf führte hier ins Leere').toHaveCount(0)
+        await expect(composer(page), 'und erst recht kein Eingabefeld').toBeHidden()
+
+        asOwner(['-k', '9008', '-t', `h=${h}`])
+    })
 })
