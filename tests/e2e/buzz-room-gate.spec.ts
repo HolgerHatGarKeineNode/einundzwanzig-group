@@ -225,22 +225,83 @@ test.describe('Buzz-Workspace: das Raum-Gate (E2E, nur E2E_RELAY=buzz)', () => {
         // Die eigentliche Zusage dieses Tests.
         await expect(joinButton(page), 'ein Beitreten-Knopf führte von hier ins Leere').toHaveCount(0)
 
-        // **Was hier NICHT geprüft wird, und warum es trotzdem hier steht.**
-        // Der Composer bleibt nach einem FREMD-Rauswurf stehen — am Teststack
-        // gemessen (2026-08-17), reproduzierbar. Das ist die sichtbare Seite eines
-        // bereits offenen Befundes: `joined` wird nur nach dem EIGENEN Join/Leave
-        // nachgeladen, ein Rauswurf durch einen Admin erreicht die Insel nie. Der
-        // Nutzer sieht also das Gate UND ein Eingabefeld, dessen Absenden am Relay
-        // scheitern wird.
+        // **P9 — hier stand bis zum 2026-08-17 eine BEOBACHTUNG, jetzt steht eine
+        // Zusicherung.** Der Composer blieb nach einem Fremd-Rauswurf stehen: die
+        // 39002 wurde nur nach dem EIGENEN Join/Leave nachgeladen, ein Rauswurf
+        // durch einen Admin erreichte die Insel nie, und `joined` stand stale auf
+        // `true`. Der Nutzer sah das Gate UND ein Eingabefeld, dessen Absenden am
+        // Relay scheitert.
         //
-        // Bewusst keine Zusicherung daraus gemacht: ein `expect(...).toBeHidden()`
-        // wäre heute rot und beschriebe eine Absicht, die niemand gebaut hat —
-        // dieser Test würde damit von seiner eigenen Aussage ablenken. Der Befund
-        // gehört an die Stelle, an der die Mitgliedschaft nachgeführt wird, nicht
-        // an die Sichtbarkeitsregel des Composers.
+        // Warum der Fall so teuer ist: Im PRIVATEN Raum gibt es nichts nachzuladen.
+        // Gemessen am Teststack liefert das REQ `{kinds:[39002],"#d":[h]}` nach dem
+        // Rauswurf `EOSE` und **0 Events** — es gibt keine „neue Liste ohne mich",
+        // an der sich `joined` korrigieren ließe, nur Schweigen. Die alte Liste
+        // liegt zudem in der IndexedDB. Deshalb ist der Entzug selbst die Nachricht
+        // (`groups.ts revokeRoomMembership`), und die sichere Annahme bei
+        // unbestätigter Mitgliedschaft ist „kein Mitglied".
+        await expect(
+            composer(page),
+            'nach dem Rauswurf darf kein Eingabefeld stehen, dessen Absenden am Relay scheitert',
+        ).toBeHidden({ timeout: 30_000 })
 
         // Aufräumen: sonst wächst der Kanalbestand je Lauf, und der Bloat-Wächter
         // in `buzz-testserver.sh` reißt irgendwann den ganzen Stack neu auf.
+        asOwner(['-k', '9008', '-t', `h=${h}`])
+    })
+
+    /**
+     * **Fall 3 — Fremd-Rauswurf aus einem OFFENEN Raum: Composer weg, Weg zurück da.**
+     *
+     * Die Gegenprobe zu Fall 2, und sie ist der eigentliche Riegel gegen eine
+     * bequeme Fehllösung: Wer die Mitgliedschaft nach einem Entzug einfach dauerhaft
+     * verwirft, bekommt Fall 2 grün — und sperrt dabei jeden aus, der legitim wieder
+     * hineindarf. Hier ist der Raum offen, der Nutzer ist nach dem Rauswurf also
+     * schlicht kein Raum-Mitglied mehr: kein Gate, kein Composer, aber der
+     * Beitreten-Knopf. Und ein Klick darauf muss den Composer zurückbringen.
+     *
+     * Gemessen (2026-08-17, Buzz-Teststack): Der Relay schickt auch hier genau eine
+     * Zeile von selbst — `CLOSED restricted: channel access revoked`, 11 ms nach dem
+     * 9001. Über die laufende Sub `{kinds:[39002],limit:0}` kam in 10 s **nichts**;
+     * ein aktives REQ lieferte dagegen +202 ms die neue Liste ohne den eigenen
+     * Pubkey.
+     */
+    test('Rauswurf aus einem offenen Raum: kein Composer, aber der Weg zurück', async ({ page }) => {
+        const { nsec, pub } = freshMember()
+        const h = randomUUID()
+
+        // Offener Raum (keine `visibility=private`): nach dem Rauswurf bleibt er
+        // lesbar — genau der Unterschied zu Fall 2.
+        expect(
+            asOwner(['-k', '9007', '-t', `h=${h}`, '-t', 'name=E2E-Offenraum']),
+            'offener Testraum konnte nicht angelegt werden',
+        ).toContain('success')
+        expect(
+            asOwner(['-k', '9000', '-t', `h=${h}`, '-t', `p=${pub}`]),
+            'Raum-Mitgliedschaft konnte nicht gesetzt werden',
+        ).toContain('success')
+
+        await useBuzz(page)
+        await loginNsec(page, nsec)
+        await page.goto(`/rooms/${h}`)
+
+        await expect(composer(page), 'Mitglied des offenen Raums muss schreiben können').toBeVisible({
+            timeout: 30_000,
+        })
+
+        expect(asOwner(['-k', '9001', '-t', `h=${h}`, '-t', `p=${pub}`]), 'Rauswurf abgelehnt').toContain('success')
+
+        await expect(composer(page), 'nach dem Rauswurf ist der Nutzer kein Raum-Mitglied mehr').toBeHidden({
+            timeout: 30_000,
+        })
+        await expect(gate(page), 'ein offener Raum bleibt lesbar — kein Gate').toHaveCount(0)
+
+        // Die zweite Hälfte der Zusage: die Nachführung sperrt nicht dauerhaft aus.
+        await expect(joinButton(page), 'der Weg zurück in einen offenen Raum').toBeVisible({ timeout: 30_000 })
+        await joinButton(page).click()
+        await expect(composer(page), 'nach dem Wiederbeitritt schreibt der Nutzer wieder').toBeVisible({
+            timeout: 30_000,
+        })
+
         asOwner(['-k', '9008', '-t', `h=${h}`])
     })
 })
