@@ -409,13 +409,37 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
         await expect(forumRow).toBeVisible({ timeout: 30_000 })
 
         // POSITIVKONTROLLE zuerst: ohne sie wäre „steht genau einmal da" auch dann
-        // grün, wenn die Raumliste noch gar nicht eingetroffen ist. `general` ist
-        // an kein Repo gebunden und steht deshalb flach — er beweist, dass die
-        // Gruppe überhaupt Bestand hat.
+        // grün, wenn die Raumliste noch gar nicht eingetroffen ist.
+        //
+        // **Gezählt wird über BEIDE Lagen** — flach UND vom Baum beansprucht. Hier
+        // stand bis N7 nur `flat`, mit der Begründung, `general` sei an kein Repo
+        // gebunden. Das gilt isoliert und ist im SAMMELLAUF falsch: `buzz-forge`
+        // legt zwei 30617 mit `buzz-channel=<general>` an (`:153`/`:207`), damit
+        // beansprucht ihn der Baum und er fällt aus der flachen Liste. Der Fall war
+        // isoliert grün und im Sammellauf rot — eine Kopplung über den geteilten
+        // Seed, kein Produktbefund.
+        //
+        // **Die Summe ist trotzdem eine echte Zusage**, weil `flat` und `claimed`
+        // einander per Konstruktion ausschließen (`railGroups.ts:456-457` nimmt die
+        // beanspruchten Kanäle aus der flachen Liste). Sie ist
+        //   0 → die Raumliste ist noch nicht da (genau der Fall, den die Kontrolle
+        //       abfangen soll — die Zusagen darunter wären dann vakuum-grün),
+        //   2 → die Einmaligkeits-Regel ist gebrochen (ein Kanal steht im Baum UND
+        //       flach),
+        //   1 → in beiden Lagen, und nur dann.
+        // Ein Kanal, den kein Repo beansprucht, wäre der einfachere Weg gewesen —
+        // im Sammellauf gibt es keinen: `general` gehört `e2e-forge`, `welcome`
+        // gehört `e2e-railwerk`, und beide Foren beansprucht die Forum-Gruppe.
         await expect
-            .poll(async () => (await railProbe(page)).flat.filter((h) => h === BUZZ_ROOM_GENERAL).length, {
-                timeout: 30_000,
-            })
+            .poll(
+                async () => {
+                    const rail = await railProbe(page)
+
+                    return rail.flat.filter((h) => h === BUZZ_ROOM_GENERAL).length
+                        + rail.claimed.filter((h) => h === BUZZ_ROOM_GENERAL).length
+                },
+                { timeout: 30_000 },
+            )
             .toBe(1)
 
         const probe = await railProbe(page)
@@ -432,11 +456,9 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
     /**
      * **Dasselbe für das PRIVATE Forum — mit einer eigenen Positivkontrolle.**
      *
-     * Der Fall darüber hängt seine Positivkontrolle an `general` **flach**. Diese
-     * Kopplung ist bekannt und Gegenstand einer eigenen Aufgabe (N7): `e2e-forge`
-     * und `e2e-railwerk` beanspruchen denselben Kanal per `buzz-channel`, im
-     * Sammellauf steht er dann nicht mehr flach. Ein zweiter Fall mit derselben
-     * Kontrolle würde diesen Riss verdoppeln, ohne etwas zusätzlich zu belegen.
+     * Der Fall darüber zählt `general` über beide Lagen (flach + beansprucht); das
+     * ist seit N7 von den Forge-Fixtures unabhängig, war es aber nicht immer. Ein
+     * zweiter Fall mit derselben Kontrolle brächte trotzdem nichts Zusätzliches.
      *
      * Hier ist die Kontrolle deshalb **selbsttragend**: die `toHaveLength(1)`-Zusage
      * auf den Baum ist von 0 nicht erfüllbar, sie schließt den „noch nichts da"-Fall
