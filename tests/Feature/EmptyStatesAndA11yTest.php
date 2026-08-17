@@ -307,10 +307,26 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // sr-only-Klasse ist kein ARIA-Attribut. Die neue Fläche (`verein-gate`)
     // bringt ihre eigenen Träger (2× `aria-hidden="true"`) mit, steht aber in
     // einer Datei, die diese Liste bewusst nicht enthält.
+    // P7 (2026-08-17, NIP-38-Status im Verzeichnis): NACHGEMESSEN, Ergebnis
+    // 'directory' 2 → 3. Multiset-Diff (`git show 0b0f94a^:…⚡directory.blade.php`
+    // gegen den Arbeitsbaum) ist einseitig: GENAU EIN `aria-hidden="true"` kam
+    // dazu, keiner fiel weg. Träger ist das Status-Skelett
+    // (`data-status-skeleton aria-hidden="true"`, ⚡directory.blade.php), das
+    // während `statusPending` an der Stelle des NIP-38-Status steht — ein
+    // Platzhalter ohne Vorlesbares, korrekt vor Screenreadern versteckt (dasselbe
+    // Muster wie der aktive Balken in `rail-room-row.blade.php`). Das ist eine
+    // echte, bewusste Landmarke, keine Regression — die Zahl steigt entsprechend.
+    // 'room' unverändert. 'spaces' 9 → 11: derselbe Commit (0b0f94a) fügte der
+    // mobilen Workspace-Raumliste zwei Statuszeilen hinzu (Nadel-/Glocke-Icon je
+    // angehefteter/stummgeschalteter Zeile, `⚡spaces.blade.php` ~Z. 1029/1035),
+    // beide `aria-hidden="true"` — korrekt versteckt, weil ihr Inhalt seit der
+    // I18n-Korrektur (2026-08-17) im `aria-label` der Zeile steht statt in einem
+    // sr-only-Geschwistertext. Multiset-Diff (`array_count_values`, pre-P7 gegen
+    // HEAD) bestätigt: exakt +2 `aria-hidden="true"`, sonst keine Abweichung.
     $expected = [
         'room' => 35,
-        'directory' => 2,
-        'spaces' => 9,
+        'directory' => 3,
+        'spaces' => 11,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
