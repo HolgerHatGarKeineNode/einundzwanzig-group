@@ -1,4 +1,4 @@
-import { test, expect, type Page } from './support/fixtures'
+import { test, expect, type Locator, type Page } from './support/fixtures'
 import { useBuzz, BUZZ_URL, BUZZ_PORT, BUZZ_USER_NSEC, BUZZ_OWNER_SEC_HEX, BUZZ_ROOM_WELCOME } from './support/buzz'
 import { loginNsec } from './support/login'
 import { spawnSync } from 'node:child_process'
@@ -95,11 +95,47 @@ const groupToggle = (page: Page, key: string) => rail(page).locator(`[aria-contr
 /** Das Panel der Workspace-Gruppe: alles, was zwischen Kopf und nächster Gruppe steht. */
 const workspacePanel = (page: Page) => rail(page).locator('#rail-group-workspace')
 
+/** Der Aufklapper EINER Baumzeile. Geschwister des Namensknopfes, nicht sein Kind. */
+const nodeToggle = (page: Page, label: string) =>
+    workspacePanel(page).getByRole('button', { name: `Eintrag ${label} auf- oder zuklappen` })
+
+/**
+ * EINE Baumzeile über ihre Knoten-id (`data-node-id`).
+ *
+ * Nicht über die Beschriftung: „Issues des Repositorys öffnen (1)" nennt das
+ * Repo NICHT, und auf einem Stack, den sich diese Datei mit `buzz-forge.spec.ts`
+ * teilt, gibt es diese Zeile mehrfach — im Sammellauf gemessen, als „strict mode
+ * violation: resolved to 2 elements". Ein `.first()` hätte den Fall grün gemacht,
+ * ohne dass er noch die eigene Zeile prüft.
+ */
+const nodeRow = (page: Page, id: string) => workspacePanel(page).locator(`[data-node-id="${id}"]`)
+
+/**
+ * Einen Klappzustand HERSTELLEN, nicht schalten.
+ *
+ * **Warum das der Kern dieser Datei ist.** Bis P2 stand hier ein blanker
+ * `.click()` mit dem Kommentar „ist per Default ZU". Als P2 den Default drehte,
+ * hätte genau dieser Klick die Gruppe ZUgemacht — fünf Fälle wären gerissen, und
+ * zwar mit einem Bild, das nach Regression aussieht. Schlimmer noch wäre der
+ * umgekehrte Fall: eine Hilfsfunktion, die den Default mitdreht, misst am Ende
+ * grün, was sie gerade nicht mehr prüft. Ein Test, der einen Zustand BRAUCHT,
+ * stellt ihn her und prüft ihn nach; der Default selbst wird an genau einer
+ * Stelle geprüft — im Fall „Beim ersten Laden" unten, und nur dort.
+ */
+async function setExpanded(toggle: Locator, open: boolean): Promise<void> {
+    await expect(toggle).toBeVisible({ timeout: 30_000 })
+    if ((await toggle.getAttribute('aria-expanded')) !== String(open)) {
+        await toggle.click()
+    }
+    await expect(toggle).toHaveAttribute('aria-expanded', String(open))
+}
+
 /**
  * Workspace auf den Testrelay zeigen — und den Desktop-Viewport setzen, BEVOR
- * die App lädt (siehe Mechanik 2 im Dateikopf).
+ * die App lädt (siehe Mechanik 2 im Dateikopf). Klappt NICHTS: der Zustand nach
+ * dem Anmelden ist hier der Prüfgegenstand.
  */
-async function openRail(page: Page): Promise<void> {
+async function bootRail(page: Page): Promise<void> {
     await page.setViewportSize({ width: 1440, height: 900 })
     await useBuzz(page)
     await page.addInitScript((url) => {
@@ -107,10 +143,12 @@ async function openRail(page: Page): Promise<void> {
     }, BUZZ_URL)
     await loginNsec(page, BUZZ_USER_NSEC)
     await expect(rail(page)).toBeVisible({ timeout: 20_000 })
+}
 
-    // Die Workspace-Gruppe ist per Default ZU (`DEFAULT_OPEN` in `rail.ts`).
-    // Geklickt wird das Chevron, nicht der Name: der führt seit P1 auf `/forge`.
-    await groupToggle(page, 'workspace').click()
+/** Wie {@link bootRail}, stellt zusätzlich die Workspace-Gruppe auf OFFEN. */
+async function openRail(page: Page): Promise<void> {
+    await bootRail(page)
+    await setExpanded(groupToggle(page, 'workspace'), true)
     await expect(workspacePanel(page)).toBeVisible()
 }
 
@@ -158,6 +196,88 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
         )
     })
 
+    test('P2: beim ersten Laden ist der Workspace OFFEN — samt seiner Repo-Zeile', async ({ page }) => {
+        // Der EINZIGE Fall, der nichts herstellt: hier IST der Anfangszustand der
+        // Prüfgegenstand. `loginNsec` startet mit leerem `localStorage`, es gilt
+        // also `DEFAULT_OPEN` aus `rail.ts` und `OPEN_BY_DEFAULT` aus
+        // `railForge.ts` — dreht jemand einen der beiden zurück, wird DIESER Fall
+        // rot und kein anderer.
+        await bootRail(page)
+
+        await expect(groupToggle(page, 'workspace')).toHaveAttribute('aria-expanded', 'true')
+        await expect(workspacePanel(page)).toBeVisible()
+
+        const repoRow = workspacePanel(page).getByRole('button', { name: REPO_D, exact: true })
+        await expect(repoRow).toBeVisible({ timeout: 30_000 })
+
+        // Zweite Ebene offen: die Repo-Zeile zeigt ihre Kinder ohne einen Klick.
+        // Das ist die Beschwerde, aus der P2 entstanden ist — „die Repos sind
+        // versteckt" hieß: zwei Klicks bis zum Inhalt.
+        await expect(nodeToggle(page, REPO_D)).toHaveAttribute('aria-expanded', 'true')
+        await expect(workspacePanel(page).getByText('E2E-Welcome', { exact: true }))
+            .toBeVisible({ timeout: 30_000 })
+        await expect(nodeRow(page, `${address}#issues`)).toBeVisible({ timeout: 20_000 })
+    })
+
+    test('P2: ein Bestandsprofil bekommt den neuen Default EINMAL — die eigene Wahl danach bleibt', async ({ page }) => {
+        await bootRail(page)
+
+        // Ein Profil, wie es JEDER Nutzer trägt, der vor P2 irgendeine Gruppe
+        // geklappt hat: `persistOpen` schreibt alle vier Schlüssel, also steht dort
+        // ein `workspace: false`, das nie jemand entschieden hat. Ohne die
+        // Umstellung in `readOpen` erreichte P2 genau diese Profile NICHT — und
+        // damit den einen Nutzer nicht, der die Sektion beanstandet hat.
+        await page.evaluate(() => {
+            localStorage.setItem(
+                'railGroups.open',
+                JSON.stringify({ rooms: true, meetups: true, proposals: false, workspace: false }),
+            )
+            localStorage.removeItem('railGroups.openMigration')
+        })
+        await page.reload()
+
+        await expect(groupToggle(page, 'workspace')).toHaveAttribute('aria-expanded', 'true', { timeout: 20_000 })
+        // Die übrigen Schlüssel bleiben unangetastet — die Umstellung nimmt genau
+        // einen Wert weg, nicht den Zustand.
+        expect(await page.evaluate(() => JSON.parse(localStorage.getItem('railGroups.open') ?? '{}').meetups))
+            .toBe(true)
+
+        // Und ab jetzt gilt wieder die Wahl des Nutzers: einmal zuklappen, neu
+        // laden, zu. Das ist der Unterschied zwischen „Default" und „erzwungen".
+        await groupToggle(page, 'workspace').click()
+        await expect(groupToggle(page, 'workspace')).toHaveAttribute('aria-expanded', 'false')
+        await page.reload()
+        await expect(rail(page)).toBeVisible({ timeout: 20_000 })
+        await expect(groupToggle(page, 'workspace')).toHaveAttribute('aria-expanded', 'false', { timeout: 20_000 })
+    })
+
+    test('P2: Markup-Folge und Tastaturfolge sind DIESELBE Folge — Workspace auf Platz 2', async ({ page }) => {
+        await bootRail(page)
+        await expect(workspacePanel(page)).toBeVisible({ timeout: 20_000 })
+
+        // Die Folge, die Alt+↑/↓ läuft: `railTargets` flatMappt über GENAU dieses
+        // Array (`js/railForge.ts`), es ist also nicht „ungefähr" die
+        // Tastaturfolge, sondern sie.
+        const jumpOrder = await page.evaluate(() => {
+            const el = document.querySelector('[data-rail]') as
+                (HTMLElement & { _x_dataStack?: { groups: { key: string }[] }[] }) | null
+
+            return (el?._x_dataStack?.[0]?.groups ?? []).map((g) => g.key)
+        })
+        expect(jumpOrder).toEqual(['rooms', 'workspace', 'meetups', 'proposals'])
+
+        // Und die Folge, die das Auge sieht. Gruppen ohne Bestand rendern gar
+        // nicht (`rail-group.blade.php`), deshalb wird gegen die GEFILTERTE Liste
+        // verglichen und nicht gegen die volle — sonst prüfte der Fall den Seed.
+        const domOrder = await rail(page).locator('[aria-controls^="rail-group-"]')
+            .evaluateAll((els) => els.map((el) => el.getAttribute('aria-controls')!.replace('rail-group-', '')))
+
+        expect(domOrder.length).toBeGreaterThanOrEqual(2)
+        expect(domOrder, 'Markup und Tastatur dürfen nie zwei Ordnungen sein')
+            .toEqual(jumpOrder.filter((key) => domOrder.includes(key)))
+        expect(domOrder.indexOf('workspace'), 'der Workspace steht direkt unter RÄUME').toBe(1)
+    })
+
     test('B: das Repo steht als EINE Zeile — sein Kanal nicht mehr flach daneben', async ({ page }) => {
         await openRail(page)
 
@@ -167,6 +287,7 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
         // Der Kern der Phase: der gebundene Kanal ist NICHT zusätzlich flach da.
         // Zugeklappt ist er nirgends sichtbar — genau das belegt, dass er aus der
         // flachen Liste HERAUSGENOMMEN und nicht bloß zusätzlich angehängt wurde.
+        // Seit P2 ist „zugeklappt" ein hergestellter Zustand und kein Default.
         //
         // POSITIVKONTROLLE ZUERST. „Nicht da" ist auch dann wahr, wenn noch gar
         // nichts da ist — und in genau diesem Fenster startet der Test. Der
@@ -175,6 +296,7 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
         // eingetroffen und die Aussage darunter ist überhaupt prüfbar.
         await expect.poll(async () => workspaceTotal(page), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
 
+        await setExpanded(nodeToggle(page, REPO_D), false)
         await expect(workspacePanel(page).getByText('E2E-Welcome', { exact: true })).toHaveCount(0)
     })
 
@@ -186,9 +308,7 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
 
         // Das Chevron der Repo-Zeile ist ein GESCHWISTER des Namensknopfes, kein
         // Kind — ein Knopf in einem Knopf wäre ungültiges HTML.
-        await workspacePanel(page)
-            .getByRole('button', { name: `Eintrag ${REPO_D} auf- oder zuklappen` })
-            .click()
+        await setExpanded(nodeToggle(page, REPO_D), true)
 
         await expect(workspacePanel(page).getByText('E2E-Welcome', { exact: true })).toBeVisible()
         // Regel 3, die härtere Hälfte: genau EINMAL. Stünde der Kanal zusätzlich
@@ -198,21 +318,26 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
 
         // Regel 5: eine Null erzeugt keine Zeile. Die Zähler stehen also da —
         // und tragen die Zahl, die auch die Übersichtsseite zeigt.
-        await expect(
-            workspacePanel(page).getByRole('button', { name: 'Issues des Repositorys öffnen (1)' }),
-        ).toBeVisible({ timeout: 20_000 })
-        await expect(
-            workspacePanel(page).getByRole('button', { name: 'Pull Requests des Repositorys öffnen (1)' }),
-        ).toBeVisible({ timeout: 20_000 })
+        await expect(nodeRow(page, `${address}#issues`)).toBeVisible({ timeout: 20_000 })
+        await expect(nodeRow(page, `${address}#pulls`)).toBeVisible({ timeout: 20_000 })
+        // Und die Beschriftung, die der Screenreader vorliest, trägt die Zahl —
+        // geprüft an DIESER Zeile, nicht an der ersten gleichnamigen im Baum.
+        await expect(nodeRow(page, `${address}#issues`).getByRole('button'))
+            .toHaveAccessibleName('Issues des Repositorys öffnen (1)')
     })
 
     test('Der Klick auf den Repo-NAMEN öffnet die Repo-Seite, das Chevron klappt nur', async ({ page }) => {
         await openRail(page)
 
-        const toggle = workspacePanel(page).getByRole('button', { name: `Eintrag ${REPO_D} auf- oder zuklappen` })
-        await expect(toggle).toBeVisible({ timeout: 30_000 })
+        const toggle = nodeToggle(page, REPO_D)
+        await setExpanded(toggle, true)
+        await expect(workspacePanel(page).getByText('E2E-Welcome', { exact: true })).toBeVisible()
 
-        // Chevron: klappt, navigiert NICHT.
+        // Chevron: klappt, navigiert NICHT. Geprüft wird die WIRKUNG in beide
+        // Richtungen — seit P2 startet die Zeile offen, ein einzelner Klick würde
+        // sonst nur noch die halbe Aussage belegen.
+        await toggle.click()
+        await expect(workspacePanel(page).getByText('E2E-Welcome', { exact: true })).toHaveCount(0)
         await toggle.click()
         await expect(workspacePanel(page).getByText('E2E-Welcome', { exact: true })).toBeVisible()
         expect(new URL(page.url()).pathname, 'das Chevron darf nicht navigieren').not.toContain('/forge/')
@@ -239,9 +364,7 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
     test('Alt+↑/↓ erreicht die Baum-Zeilen — Repo, Kanal, Issues und Pull Requests', async ({ page }) => {
         await openRail(page)
 
-        const toggle = workspacePanel(page).getByRole('button', { name: `Eintrag ${REPO_D} auf- oder zuklappen` })
-        await expect(toggle).toBeVisible({ timeout: 30_000 })
-        await toggle.click()
+        await setExpanded(nodeToggle(page, REPO_D), true)
         await expect(workspacePanel(page).getByText('E2E-Welcome', { exact: true })).toBeVisible()
 
         // Erste Hälfte: STEHEN die vier Zeilen in der Sprungliste? Das ist die

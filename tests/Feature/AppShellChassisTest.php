@@ -298,3 +298,41 @@ test('P1 Forge: die Befehlspalette führt zur Übersicht — mit Workspace, und 
 
     $ohne->assertDontSee('\u0022id\u0022:\u0022forge\u0022', false);
 });
+
+/**
+ * P2 (Restposten-Plan, „Redesign des Workspace-Sektionskopfs") — die Reihenfolge
+ * der vier Rail-Sektionen.
+ *
+ * **Warum das ein Test ist und keine Konvention.** Die Folge existiert an ZWEI
+ * Orten: als Blockfolge in `desktop-rail.blade.php` (was das Auge sieht) und als
+ * `RAIL_GROUP_ORDER` in `js/railGroups.ts` (was Alt+↑/↓ läuft). Stimmen sie
+ * nicht überein, entsteht die zweite, konkurrierende Ordnung, vor der der Plan
+ * warnt — und zwar lautlos: beide Seiten funktionieren für sich. Dieser Test
+ * hält die Markup-Seite fest, `railGroups.test.ts` die Konstante, und
+ * `buzz-rail-forge.spec.ts` hält am lebenden Bild beide gegeneinander.
+ *
+ * Geprüft wird die `id` des Panels und nicht die Beschriftung: die ist übersetzt
+ * und wechselt mit der Sprache, die `id` ist der Vertrag zwischen Kopf und Panel.
+ */
+test('P2 Rail: der Workspace steht an zweiter Stelle, direkt unter den Räumen', function () {
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+
+    $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+        ->get(route('group.spaces'))
+        ->assertOk()
+        ->getContent();
+
+    $positions = [];
+    foreach (['rooms', 'workspace', 'meetups', 'proposals'] as $key) {
+        $at = mb_strpos($html, 'id="rail-group-'.$key.'"');
+        expect($at)->not->toBeFalse("die Rail-Sektion {$key} fehlt im Markup");
+        $positions[$key] = $at;
+    }
+
+    asort($positions);
+
+    expect(array_keys($positions))->toBe(
+        ['rooms', 'workspace', 'meetups', 'proposals'],
+        'die Blockfolge muss RAIL_GROUP_ORDER entsprechen (js/railGroups.ts)',
+    );
+});

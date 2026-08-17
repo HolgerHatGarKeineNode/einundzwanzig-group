@@ -51,11 +51,16 @@ for (const theme of ['light', 'dark'] as const) {
         await loginNsec(page, NSEC)
 
         await expect(rail(page)).toBeVisible({ timeout: 20_000 })
-        // Auf den Workspace-Label warten, nicht nur auf die Rail: die Gruppe rendert
-        // erst mit geladenen Workspace-Räumen, und ein Label-Träger, der noch lädt,
-        // misst nichts — ungemessen sieht aus wie grün (die Lehre aus P2 §10).
-        // Das „· " unterscheidet ihn vom Space-Kopf, der denselben Relay-Namen trägt.
-        await expect(rail(page).getByText('· Zooid Test Space')).toBeVisible({ timeout: 20_000 })
+        // Auf die Workspace-GRUPPE warten, nicht nur auf die Rail: sie rendert erst
+        // mit geladenen Workspace-Räumen, und eine Rail, die noch lädt, misst die
+        // halbe Spalte nicht — ungemessen sieht aus wie grün (die Lehre aus P2 §10).
+        //
+        // Hier stand bis 2026-08-17 `getByText('· Zooid Test Space')`: der
+        // Relay-Name hinter „WORKSPACE". Er ist mit dem Redesign des
+        // Sektionskopfes aus der Zeile verschwunden (er kappte bei 295 px Rail-
+        // Breite BEIDE Teile der Beschriftung) und steht jetzt im `title`. Der
+        // Anker misst deshalb einen anderen Träger derselben Klasse — siehe unten.
+        await expect(rail(page).locator('[aria-controls="rail-group-workspace"]')).toBeVisible({ timeout: 20_000 })
 
         const railMessung = await measure(page)
 
@@ -74,14 +79,24 @@ for (const theme of ['light', 'dark'] as const) {
         const measured = [...railMessung, ...aktivMessung]
         console.log(`KONTRAST[${theme}:rail] ` + JSON.stringify(measured, null, 1))
 
-        // Der Träger dieser Spec: das Workspace-Label — als TEXT verlangt, denn genau
-        // die Fehleinstufung als Grafik war der P2-Blinde Fleck derselben Farbe.
-        const label = measured.find((m) => m.kind === 'text' && m.label.includes('Zooid Test Space'))
+        // Der namentliche Träger dieser Spec: kleiner MARKEN-Text in der Rail, als
+        // TEXT verlangt — genau die Fehleinstufung als Grafik war der P2-Blinde
+        // Fleck derselben Farbe (`text-brand-800` / `dark:text-brand-400`).
+        //
+        // Das war bis 2026-08-17 das Workspace-Label und ist jetzt der `#`-Prompt
+        // des Suchfelds (`desktop-rail.blade.php`, `font-mono text-sm font-bold
+        // text-brand-800 dark:text-brand-400`). Dieselbe Farbe, dieselbe
+        // Größenklasse (14 px < 18,66 px ⇒ Schwelle 4,5:1), aber OHNE die drei
+        // Bedingungen, an denen der alte Träger hing (Relay gesetzt, Räume geladen,
+        // Gruppe gerendert): der Prompt steht in jeder Rail, immer. Der Anker ist
+        // damit unbedingter geworden, nicht schwächer — und er misst weiter GENAU
+        // die Klasse, für die er gebaut wurde.
+        const label = measured.find((m) => m.kind === 'text' && m.label.trim() === '#')
         expect(
             label,
-            'Workspace-Label (desktop-rail:111) nicht gemessen — Rail nicht im xl-Viewport, __nostrWorkspace nicht gesetzt, oder Workspace-Räume nicht geladen',
+            'Marken-Textträger „#" (desktop-rail, Suchfeld-Prompt) nicht gemessen — Rail nicht im xl-Viewport, oder die Farbklasse ist weg',
         ).toBeDefined()
-        expect(label?.min, 'Workspace-Label wird nicht gegen die TEXT-Schwelle geprüft').toBe(4.5)
+        expect(label?.min, 'Marken-Textträger wird nicht gegen die TEXT-Schwelle geprüft').toBe(4.5)
 
         // Der Aktiv-Balken der Raum-Zeile: Informationstragende Fläche (1.4.11) —
         // heute zinc-Text + brand-700-Balken; fällt der Balken aus der bg-brand-700-
