@@ -363,6 +363,88 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
     })
 
     /**
+     * P6 — **die Clone-URL per Klick kopieren, mit ihrem Fehlerfall.**
+     *
+     * Bis P6 markierte ein Klick die Zeile nur (`select-all`); kopieren musste man
+     * von Hand. Der Knopf ist der Nachzug — und er hat eine Bedingung, die man
+     * NICHT sieht, wenn man ihn nur einmal ausprobiert: `navigator.clipboard` gibt
+     * es ausschließlich in sicheren Kontexten. Über eine nackte HTTP-Adresse im LAN
+     * ist die Eigenschaft schlicht `undefined`, und ein Knopf, der dort nichts tut,
+     * wäre schlechter als kein Knopf.
+     *
+     * Deshalb prüft dieser Test alle DREI Lagen an derselben Fläche:
+     *   1. Kopieren geht → der Text liegt in der Ablage, die Fläche sagt es.
+     *   2. Kopieren wird abgelehnt (kein Fokus, keine Berechtigung) → die Fläche
+     *      sagt AUCH das, statt Erfolg zu behaupten.
+     *   3. Es gibt gar keine Zwischenablage → kein Knopf, aber die Zeile steht
+     *      weiter als `select-all` da. Der Rückweg bleibt, die tote Schaltfläche
+     *      entsteht nicht.
+     */
+    test('Clone-URL: Kopieren, Fehlerfall und der Browser ohne Zwischenablage', async ({ page, context }) => {
+        // Zwei vollständige Anmeldungen in einem Test (die zweite Seite braucht
+        // einen eigenen Kontext ohne Zwischenablage) — das passt nicht in
+        // Playwrights 30-s-Default, und der äußere Timeout schlägt dann zu, bevor
+        // die eigentliche Zusicherung je drankommt. Dieselbe Begründung wie beim
+        // Repo-Detail-Fall oben.
+        test.setTimeout(120_000)
+        await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+        await useWorkspace(page)
+        await page.goto('/forge')
+        await page.getByRole('tab', { name: 'Repositories' }).click()
+        await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
+        await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+
+        const zeile = page.locator('[data-forge-clone]')
+        const knopf = page.locator('[data-forge-clone-copy]')
+        await expect(zeile).toContainText('example.invalid')
+        const url = (await zeile.textContent())?.trim() ?? ''
+        expect(url).not.toBe('')
+
+        // ── 1. Der gute Fall ────────────────────────────────────────────────
+        await expect(knopf).toBeVisible()
+        await knopf.click()
+        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url)
+        await expect(page.getByText('Clone-URL kopiert.')).toBeVisible({ timeout: 10_000 })
+
+        // ── 2. Die Ablehnung ────────────────────────────────────────────────
+        // `writeText` lehnt auch in einem sicheren Kontext ab — ohne Fokus im
+        // Dokument, bei verweigerter Berechtigung. Hier wird genau das nachgestellt,
+        // weil es sonst nicht herstellbar ist: der Browser im Test HAT Fokus.
+        await page.evaluate(() => {
+            navigator.clipboard.writeText = () => Promise.reject(new Error('verweigert'))
+        })
+        await knopf.click()
+        await expect(page.getByText('Die Clone-URL ließ sich nicht kopieren.', { exact: false })).toBeVisible({
+            timeout: 10_000,
+        })
+        // Und der Rückweg steht: die Zeile ist weiterhin mit einem Klick markierbar.
+        await expect(zeile).toHaveClass(/select-all/)
+
+        // ── 3. Der Browser ohne Zwischenablage ──────────────────────────────
+        // Eigene Seite: die Eigenschaft muss VOR dem Rendern weg sein, sonst
+        // entscheidet die Fläche gegen einen Zustand, den es nicht mehr gibt.
+        // Kein zweiter Login: Sitzung und Signer liegen im Kontext, den sich beide
+        // Seiten teilen. Ein erneutes `/nostr-login` leitet einen Angemeldeten
+        // ohnehin weiter — der Helfer wartete dort auf einen Knopf, den es auf der
+        // Zielseite nicht gibt, und lief in den Timeout (hier passiert).
+        const ohne = await context.newPage()
+        await useBuzz(ohne)
+        await ohne.addInitScript((relay) => {
+            ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = relay
+            Object.defineProperty(navigator, 'clipboard', { configurable: true, get: () => undefined })
+        }, BUZZ_URL)
+        await ohne.goto('/forge')
+        await ohne.getByRole('tab', { name: 'Repositories' }).click()
+        await ohne.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
+        await expect(ohne.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+
+        await expect(ohne.locator('[data-forge-clone]')).toContainText('example.invalid')
+        await expect(ohne.locator('[data-forge-clone]')).toHaveClass(/select-all/)
+        await expect(ohne.locator('[data-forge-clone-copy]')).toHaveCount(0)
+        await ohne.close()
+    })
+
+    /**
      * Punkt 4 — und der einzige Test, der bewusst Bestand anlegt: ein frisches
      * Issue erscheint OHNE Reload, und ein danach gesetztes 1632 dreht seine
      * Zeile auf „geschlossen". Das prüft das `limit:0`-Abo aus `watchForge`,

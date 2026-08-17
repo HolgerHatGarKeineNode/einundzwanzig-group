@@ -34,12 +34,33 @@ import { randomUUID } from 'node:crypto'
  *   5. **Erzeugt ein Doppelklick zwei Issues?** Das prüft den Riegel, nicht die
  *      Sichtbarkeit — gezählt wird am Relay, nicht am Bildschirm.
  *
- * ── Bestandswachstum ────────────────────────────────────────────────────────
- * Das Repo (30617) ist ersetzbar und wird je Lauf überschrieben. Issues und
- * Kommentare legt dieser Lauf bewusst NEU an, je mit einer frischen Marke —
- * anders ist „ist gerade entstanden" nicht von „war schon da" zu unterscheiden.
- * Der Bloat-Wächter in `buzz-testserver.sh` zählt kind-39000-Kanäle und kind-9
- * im `welcome`-Kanal; beides berührt diese Datei nicht.
+ * ── Bestandswachstum: warum die Adresse je Lauf WECHSELT (P4) ───────────────
+ * Bis P4 lag das Repo auf der FESTEN Adresse `30617:<owner>:e2e-schreibwerk`.
+ * Das Repo selbst ist ersetzbar und wurde je Lauf überschrieben — die Issues
+ * (kind 1621) darunter sind es **nicht**. Sie sammelten sich unter derselben
+ * `a`-Koordinate an, und `events()` fragte ohne `-l`. Beim P8-Gate ist genau
+ * das aufgeschlagen: nach vielen Läufen ohne Stack-Reset lieferte der Relay
+ * sein Default-Fenster, das frisch angelegte Issue lag nicht darin, und
+ * `toHaveLength(1)` wurde zu `0` — ein Rot-Befund ohne Fehler im Produkt.
+ *
+ * **Zwei Wege standen im Plan; gewählt ist der zweite.** Ein `-l`-Limit wäre
+ * eine Zahl, die mit dem Bestand wieder eingeholt wird — sie verschiebt den
+ * Tag, an dem derselbe falsche Rot-Befund wiederkommt, und hängt zusätzlich am
+ * Default des Relays. Eine eigene `d`-Marke je Lauf macht die Frage gegenstands-
+ * los: jede Abfrage sieht dann NUR die Ereignisse dieses Laufs, unabhängig
+ * davon, wie oft der Stack schon benutzt wurde. Sie entzerrt zugleich die
+ * Ersetzungs-Semantik — zwei gleichzeitige Läufe (zwei Worker, zwei Slots)
+ * überschrieben sich vorher dasselbe 30617.
+ *
+ * Das `-l` steht trotzdem dabei, als Gürtel neben den Hosenträgern: es kostet
+ * nichts und nimmt dem Default-Fenster des Relays jede Rolle.
+ *
+ * **Und aufgeräumt wird auch.** `afterAll` löscht das Repo per kind 5 auf seine
+ * `a`-Koordinate — am Teststack gemessen wirkt das HART (das 30617 ist danach
+ * aus jeder REQ-Antwort verschwunden). Ohne das Aufräumen wüchse die
+ * Repo-Liste der Forge-Übersicht mit jedem Lauf um eine Zeile. Der
+ * Bloat-Wächter in `buzz-testserver.sh` zählt kind-39000-Kanäle und kind-9 im
+ * `welcome`-Kanal — Repos sieht er nicht.
  */
 
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
@@ -49,8 +70,23 @@ const WS = (): string => `ws://localhost:${BUZZ_PORT}`
  * Eigenes `d`-Tag, **ohne gemeinsames Präfix** mit den Repos der Lese-Spec
  * (`e2e-forge`, `e2e-leerrepo`): `filter({hasText})` matcht als
  * Teilzeichenkette, und zwei Läufe im selben Stack teilen sich den Bestand.
+ *
+ * Der Zufalls-Anhang ist der eigentliche P4-Fix (Begründung im Dateikopf): er
+ * gibt jedem Lauf eine eigene `a`-Koordinate, damit keine Abfrage je den
+ * Bestand eines früheren Laufs mitsieht.
  */
-const REPO_D = 'e2e-schreibwerk'
+const REPO_D = `e2e-schreibwerk-${randomUUID().slice(0, 8)}`
+
+/**
+ * Deckel für jede `nak req`-Abfrage dieser Datei.
+ *
+ * **Ohne `-l` entscheidet der Relay**, wie viele Ereignisse er ausliefert — und
+ * genau dieses unsichtbare Default-Fenster hat den falschen Rot-Befund beim
+ * P8-Gate erzeugt. Die Zahl ist bewusst groß: sie soll nie greifen (eine
+ * Lauf-Adresse trägt keine zehn Ereignisse), sondern nur den Default aus der
+ * Gleichung nehmen.
+ */
+const QUERY_LIMIT = '500'
 
 const nak = (args: string[]): string => {
     const res = spawnSync(NAK, args, { encoding: 'utf8', timeout: 30_000 })
@@ -60,7 +96,8 @@ const nak = (args: string[]): string => {
 
 const publish = (sec: string, args: string[]): string => nak(['event', '--auth', '--sec', sec, ...args, WS()])
 
-const query = (args: string[]): string => nak(['req', '--auth', '--sec', BUZZ_USER_NSEC, ...args, WS()])
+const query = (args: string[]): string =>
+    nak(['req', '--auth', '--sec', BUZZ_USER_NSEC, '-l', QUERY_LIMIT, ...args, WS()])
 
 /** Alle Ereignisse einer Anfrage als geparste Objekte (nak schreibt auch Fortschritt). */
 const events = (args: string[]): { id: string; kind: number; pubkey: string; content: string; tags: string[][] }[] => {
@@ -144,6 +181,23 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
                 '-c', 'Ziel fuer den PR-Kommentar.',
             ]),
         ).toContain('success')
+    })
+
+    /**
+     * Das Repo dieses Laufs wieder abräumen.
+     *
+     * kind 5 auf die `a`-Koordinate wirkt bei Buzz HART — das 30617 ist danach
+     * aus jeder REQ-Antwort verschwunden (am Teststack gemessen). Die Issues und
+     * Kommentare darunter bleiben liegen; sie sind über die Lauf-eigene Adresse
+     * aber für keinen späteren Lauf mehr sichtbar und stören deshalb nichts. Was
+     * ein Nutzer SIEHT — die Repo-Liste der Forge-Übersicht — bleibt so kurz wie
+     * vor dem Lauf.
+     *
+     * Ohne `expect`: ein fehlgeschlagenes Aufräumen darf einen grünen Lauf nicht
+     * nachträglich rot machen. Es ist Hygiene, keine Zusicherung.
+     */
+    test.afterAll(() => {
+        publish(BUZZ_OWNER_SEC_HEX, ['-k', '5', '-t', `a=${address}`])
     })
 
     /**
@@ -234,6 +288,27 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
 
         await expect(zeile).toHaveAttribute('data-status', 'closed', { timeout: 30_000 })
         await expect(zeile).toContainText('Geschlossen')
+
+        // **Gepollt, und das ist beim Zehnfach-Lauf gemessen worden (P4).**
+        // `data-status` kippt OPTIMISTISCH — die Zeile steht auf „Geschlossen",
+        // während das 1632 noch fliegt. Ein einmaliges `nak req` direkt danach traf
+        // in 2 von 10 aufeinanderfolgenden Läufen genau dieses Fenster und las null
+        // Ereignisse; der Fehlschlag sah aus wie ein kaputter Statuswechsel und war
+        // eine zu früh gestellte Frage.
+        //
+        // Die beiden Schritte davor haben je ein Signal, das ERST NACH dem `OK`
+        // kommt (das Formular schließt sich, das Kommentarfeld leert sich) — der
+        // Statuswechsel hat keines: er ändert nur ein Attribut, und das tut er
+        // sofort. Also wird der Relay gefragt, bis er antwortet.
+        await expect
+            .poll(
+                () =>
+                    events(['-k', '1632', '-t', `a=${address}`]).filter((event) =>
+                        event.tags.some((tag) => tag[0] === 'e' && tag[1] === issueId),
+                    ).length,
+                { timeout: 30_000, message: 'das 1632 ist nie am Relay angekommen' },
+            )
+            .toBe(1)
 
         const status = events(['-k', '1632', '-t', `a=${address}`]).filter((event) =>
             event.tags.some((tag) => tag[0] === 'e' && tag[1] === issueId),
@@ -418,6 +493,116 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
         await expect(page.locator('[data-forge-issue]').filter({ hasText: marke }).first()).toBeVisible({
             timeout: 30_000,
         })
+        await expect(page.locator('[data-forge-issue-form]')).toHaveCount(0)
+
+        const amRelay = events(['-k', '1621', '-t', `a=${address}`]).filter(
+            (event) => tagValue(event.tags, 'subject') === marke,
+        )
+        expect(amRelay).toHaveLength(1)
+    })
+
+    /**
+     * P6 — **die Tastatur-Auslösung, erste Hälfte des Belegs.**
+     *
+     * Beim P8-Gate blieb offen, ob der Riegel auch für die Tastatur gilt: getestet
+     * war nur die Maus. Der Bericht sagte „der Riegel sitzt am gemeinsamen Pfad,
+     * nicht am Knopf" — plausibel, aber nicht gemessen. Dieser Test misst die eine
+     * Hälfte davon: **die Tastatur erreicht denselben Pfad.** Kein Klick, keine
+     * Maus, nur Fokus und Eingabetaste — und das Issue entsteht.
+     *
+     * Das ist keine Selbstverständlichkeit, die man sich sparen könnte: Wäre der
+     * Absender ein `div` mit `x-on:click` (im Haus mehrfach vorhanden), täte die
+     * Eingabetaste hier gar nichts, und die Fläche wäre ohne Maus unbedienbar. Der
+     * Test hält also zwei Dinge zugleich fest — die Bedienbarkeit und die
+     * Vorbedingung für die zweite Hälfte weiter unten.
+     */
+    test('die Tastatur löst denselben Weg aus wie der Klick', async ({ page }) => {
+        const marke = `P6 Tastatur ${randomUUID().slice(0, 8)}`
+
+        await useWorkspace(page)
+        await openRepo(page)
+
+        await page.getByRole('button', { name: 'Neues Issue' }).click()
+        await page.locator('[data-forge-issue-form]').getByLabel('Titel').fill(marke)
+
+        // Fokus auf den Absender, dann Eingabetaste — der Weg eines Menschen ohne
+        // Maus. `press` statt `click`: ein `click()` ginge auch auf einem Element,
+        // das per Tastatur gar nicht erreichbar wäre.
+        await page.locator('[data-forge-issue-submit]').focus()
+        await expect(page.locator('[data-forge-issue-submit]')).toBeFocused()
+        await page.keyboard.press('Enter')
+
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: marke }).first()).toBeVisible({
+            timeout: 30_000,
+        })
+        await expect(page.locator('[data-forge-issue-form]')).toHaveCount(0)
+
+        const amRelay = events(['-k', '1621', '-t', `a=${address}`]).filter(
+            (event) => tagValue(event.tags, 'subject') === marke,
+        )
+        expect(amRelay).toHaveLength(1)
+    })
+
+    /**
+     * P6 — **zweite Hälfte: der Riegel sitzt am PFAD, nicht am Knopf.**
+     *
+     * Hier wird der Knopf gar nicht erst angefasst. Aufgerufen wird `submitIssue()`
+     * direkt an der Alpine-Komponente, zweimal in DERSELBEN Mikrotask. Damit ist
+     * jede Sperre, die am DOM hängt, aus der Messung genommen: das `::disabled`
+     * kann nicht greifen, weil kein Ereignis über einen Knopf läuft, und Alpines
+     * Reaktivität kommt zwischen den beiden Aufrufen ohnehin nicht zum Zug.
+     *
+     * Die Uhr wird zwischen den Aufrufen vorgestellt — sonst wären beide Ereignisse
+     * byte-identisch, hätten dieselbe Id, und „nur eines am Relay" wäre die Aussage
+     * des Protokolls statt die des Riegels. Diese Falle hat den Klick-Test dieser
+     * Datei zweimal grün gemacht, ohne dass er etwas geprüft hätte.
+     *
+     * **Zusammen mit dem Test darüber ist das der Beleg**, um den das Gate gebeten
+     * hat: die Tastatur erreicht den Pfad (oben), und im Pfad liegt der Riegel
+     * (hier). Keiner der beiden Tests sagt das allein.
+     */
+    test('der Doppelklick-Riegel sitzt im Pfad — ein Knopf ist dafür nicht nötig', async ({ page }) => {
+        const marke = `P6 Pfadriegel ${randomUUID().slice(0, 8)}`
+
+        await useWorkspace(page)
+        await openRepo(page)
+
+        await page.getByRole('button', { name: 'Neues Issue' }).click()
+        await page.locator('[data-forge-issue-form]').getByLabel('Titel').fill(marke)
+
+        const aufrufe = await page.evaluate(() => {
+            const form = document.querySelector('[data-forge-issue-form]')
+            const alpine = (window as unknown as { Alpine?: { $data: (el: Element) => Record<string, unknown> } }).Alpine
+            if (!form || !alpine) {
+                return 0
+            }
+            const state = alpine.$data(form) as { submitIssue?: () => Promise<void> }
+            if (typeof state.submitIssue !== 'function') {
+                return 0
+            }
+            const echt = Date.now
+            void state.submitIssue()
+            // Fünf Sekunden weiter: sonst trüge das zweite Ereignis denselben
+            // Zeitstempel und damit dieselbe Id.
+            Date.now = () => echt() + 5_000
+            try {
+                void state.submitIssue()
+            } finally {
+                Date.now = echt
+            }
+
+            return 2
+        })
+        // Die Vorbedingung selbst prüfen — ohne sie wäre der Test grün, ohne je
+        // aufgerufen zu haben.
+        expect(aufrufe, 'die Insel war über Alpine nicht erreichbar').toBe(2)
+
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: marke }).first()).toBeVisible({
+            timeout: 30_000,
+        })
+        // Erst wenn das Formular zu ist, ist der Flug beendet — vorher stünde die
+        // Zeile bloß optimistisch da, und der `nak req` unten läse ein Fenster, in
+        // dem der Relay noch nichts hat.
         await expect(page.locator('[data-forge-issue-form]')).toHaveCount(0)
 
         const amRelay = events(['-k', '1621', '-t', `a=${address}`]).filter(
