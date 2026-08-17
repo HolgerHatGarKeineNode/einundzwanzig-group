@@ -519,4 +519,111 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
 
         await expect(zeile).toHaveAttribute('data-status', 'closed', { timeout: 30_000 })
     })
+
+    /**
+     * N6 — **ein gelöschtes Issue verschwindet OHNE Reload.**
+     *
+     * Bis N6 trug `contentFilters` kein `kind 5`, das Live-Abo also auch nicht:
+     * Wer eine Forge-Fläche offen ließ, sah ein am Relay längst gelöschtes Issue
+     * beliebig lange weiter. Der Kaltstart war gedeckt
+     * (`tombstoneFiltersForCached`) — genau deshalb fiel es nicht auf, denn ein
+     * Reload räumte auf. Dieser Test macht den Reload unmöglich.
+     *
+     * Der Grabstein trägt **nur** `["e", <id>]` und kein `a`: Buzz verlangt beim
+     * Ingest genau EIN Ziel (`handlers/ingest.rs`, „deletion events must
+     * reference exactly one target via e or a tag"). Ein `#a`-gescopetes Abo
+     * könnte ihn deshalb prinzipiell nicht sehen — das ist die Begründung für den
+     * unscoped `{kinds:[5],limit:0}`-Filter in `liveTombstoneFilter`.
+     *
+     * Eigenes Issue je Lauf, aus demselben Grund wie oben: an einem
+     * wiederverwendeten wäre „ist weg" nicht von „war nie da" zu unterscheiden.
+     */
+    test('ein gelöschtes Issue verschwindet ohne Reload', async ({ page }) => {
+        const marke = `E2E Grab ${randomUUID().slice(0, 8)}`
+
+        await useWorkspace(page)
+        await page.goto('/forge')
+        await page.getByRole('tab', { name: 'Repositories' }).click()
+        await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
+        await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-issue]').first()).toBeVisible()
+
+        expect(
+            publish(BUZZ_OWNER_SEC_HEX, [
+                '-k', '1621', '-t', `a=${address}`, '-t', `p=${owner}`, '-t', `subject=${marke}`,
+                '-c', 'Wird gleich gelöscht.',
+            ]),
+        ).toContain('success')
+
+        const zeile = page.locator('[data-forge-issue]').filter({ hasText: marke }).first()
+        await expect(zeile).toBeVisible({ timeout: 30_000 })
+        const liveId = (await zeile.getAttribute('data-id')) ?? ''
+        expect(liveId).toHaveLength(64)
+
+        // **Der Grabstein braucht einen STRIKT späteren Zeitstempel.** welshmans
+        // `repository` zählt eine Löschung nur bei `created_at > ziel.created_at`
+        // (`net/…/repository.js:_isDeleted`) — ein Grabstein aus DERSELBEN Sekunde
+        // ist lokal wirkungslos, obwohl Buzz das Ziel längst hart gelöscht hat.
+        // Am 2026-08-18 direkt gegen `Repository.get()` gemessen: gleiche Sekunde
+        // → `query` findet das Issue weiter (1), eine Sekunde später → 0. Ohne
+        // `--created-at` fiel dieser Test genau darauf herein. Dieselbe Lehre wie
+        // beim Branch-Zustand oben: fester Zeitstempel statt eines Rennens.
+        //
+        // Kein `page.reload()` zwischen hier und der Zusicherung — das ist die
+        // ganze Aussage des Tests.
+        const grabstein = Math.floor(Date.now() / 1000) + 1
+        expect(
+            publish(BUZZ_OWNER_SEC_HEX, [
+                '-k', '5', '-t', `e=${liveId}`, '-t', 'k=1621', '--created-at', String(grabstein),
+            ]),
+        ).toContain('success')
+
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: marke })).toHaveCount(0, {
+            timeout: 30_000,
+        })
+    })
+
+    /**
+     * N6 — **wie viele Filter passen in eine REQ-Nachricht? Genau einer.**
+     *
+     * Bis N6 stand in `forge.ts` die Rechnung „7 Filter, Grenze `max_filters:10`,
+     * drei Filter Luft" — sie hätte jeden weiteren Filter zu einer Budgetfrage
+     * gemacht. Die Prämisse war falsch: welshmans `requestOne` schickt je Filter
+     * eine EIGENE REQ mit eigener sub_id, auch aus `load` heraus. `max_filters`
+     * kann von diesem Client also gar nicht erreicht werden; die reale Grenze ist
+     * `max_subscriptions: 1024`.
+     *
+     * Das steht hier als Test und nicht nur als Kommentar, weil genau diese
+     * Prämisse einmal aus dem Lesen des Quellcodes abgeleitet wurde und falsch
+     * war. Ein Kommentar altert still; dieser Test wird rot, wenn welshman
+     * anfängt zu bündeln — und DANN ist die Budgetrechnung fällig.
+     */
+    test('welshman legt nie mehr als einen Filter in eine REQ-Nachricht', async ({ page }) => {
+        await useWorkspace(page)
+        await page.addInitScript(() => {
+            const w = window as unknown as { __reqFilterCounts: number[] }
+            w.__reqFilterCounts = []
+            const send = WebSocket.prototype.send
+            WebSocket.prototype.send = function (data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+                if (typeof data === 'string' && data.startsWith('["REQ"')) {
+                    try {
+                        w.__reqFilterCounts.push((JSON.parse(data) as unknown[]).length - 2)
+                    } catch {
+                        // Keine gültige REQ-Nachricht — dann zählt sie auch nicht.
+                    }
+                }
+
+                return send.call(this, data)
+            }
+        })
+        await page.goto('/forge')
+        await page.getByRole('tab', { name: 'Repositories' }).click()
+        await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
+        await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-issue]').first()).toBeVisible()
+
+        const counts = await page.evaluate(() => (window as unknown as { __reqFilterCounts: number[] }).__reqFilterCounts)
+        expect(counts.length).toBeGreaterThan(0)
+        expect(Math.max(...counts)).toBe(1)
+    })
 })
