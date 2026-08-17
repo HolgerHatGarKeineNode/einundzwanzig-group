@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures'
 import type { TrustedEvent } from '@welshman/util'
-import { shouldPersistEvent, messagesToPrune, tombstonedIds } from '../../packages/einundzwanzig-group/js/storage'
+import { shouldPersistEvent, eventsToPrune, tombstonedIds } from '../../packages/einundzwanzig-group/js/storage'
 
 /**
  * M3 P0 — Cache-Whitelist (`shouldPersistEvent`, §4.1/4.2). Reiner welshman-app-
@@ -28,7 +28,7 @@ test.describe('shouldPersistEvent', () => {
         // überlebt kein Thread-Ungelesen-Marker den Kaltstart, weil die Ableitung
         // dieselbe (dann leere) `repository` liest. Bedingung dafür war eine Kappung —
         // Persistenz ohne Deckel wäre der unbegrenzt wachsende Store, vor dem §4.2
-        // gewarnt hat; sie steht in `messagesToPrune` (`COMMENT_CAP_TOTAL`) und ist in
+        // gewarnt hat; sie steht in `eventsToPrune` (`COMMENT_CAP_TOTAL`) und ist in
         // `js/storagePersistKinds.test.ts` node-getestet.
         for (const kind of [9, 1111, 5, 9005, 0, 3, 10000, 10002, 30078, 39000, 39001, 39002, 13534, 1068, 9041]) {
             expect(shouldPersistEvent(ev(kind)), `kind ${kind} sollte gecacht werden`).toBe(true)
@@ -45,11 +45,11 @@ test.describe('shouldPersistEvent', () => {
     })
 })
 
-test.describe('messagesToPrune (§4.3 Per-Raum-Cap + Alters-Backstop)', () => {
+test.describe('eventsToPrune (§4.3 Per-Raum-Cap + Alters-Backstop)', () => {
     test('kappt pro Raum auf die neuesten N, verwirft den Überschuss', () => {
         // Raum A: 5 Nachrichten (a1=neueste NOW-10 … a5=älteste NOW-50), cap 3 → a4+a5 fallen.
         const events = [1, 2, 3, 4, 5].map((t) => msg(`a${t}`, 'roomA', NOW - t * 10))
-        const drop = messagesToPrune(events, NOW, 3)
+        const drop = eventsToPrune(events, NOW, { msgPerRoom: 3 })
         expect(drop.sort()).toEqual(['a4', 'a5'])
     })
 
@@ -59,7 +59,7 @@ test.describe('messagesToPrune (§4.3 Per-Raum-Cap + Alters-Backstop)', () => {
             ...[1, 2, 3].map((t) => msg(`b${t}`, 'roomB', NOW - t)),
         ]
         // cap 2 → je Raum fällt genau die älteste (a3, b3).
-        expect(messagesToPrune(events, NOW, 2).sort()).toEqual(['a3', 'b3'])
+        expect(eventsToPrune(events, NOW, { msgPerRoom: 2 }).sort()).toEqual(['a3', 'b3'])
     })
 
     test('Alters-Backstop verwirft alles älter als maxAge, unabhängig vom Cap', () => {
@@ -67,7 +67,7 @@ test.describe('messagesToPrune (§4.3 Per-Raum-Cap + Alters-Backstop)', () => {
             msg('fresh', 'roomA', NOW - 10 * DAY),
             msg('old', 'roomA', NOW - 31 * DAY), // > 30 Tage
         ]
-        expect(messagesToPrune(events, NOW, 300, 30 * DAY)).toEqual(['old'])
+        expect(eventsToPrune(events, NOW, { msgPerRoom: 300, msgMaxAgeSec: 30 * DAY })).toEqual(['old'])
     })
 
     test('lässt Control-Plane und kind-9 ohne #h unangetastet', () => {
@@ -80,7 +80,7 @@ test.describe('messagesToPrune (§4.3 Per-Raum-Cap + Alters-Backstop)', () => {
             { id: 'noh1', pubkey: 'a', kind: 9, created_at: NOW, tags: [], content: '', sig: '' } as TrustedEvent,
             { id: 'noh2', pubkey: 'a', kind: 9, created_at: NOW - 1, tags: [], content: '', sig: '' } as TrustedEvent,
         ]
-        expect(messagesToPrune(events, NOW, 1)).toEqual([])
+        expect(eventsToPrune(events, NOW, { msgPerRoom: 1 })).toEqual([])
     })
 })
 
