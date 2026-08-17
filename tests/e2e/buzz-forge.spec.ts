@@ -157,11 +157,35 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
             ]),
         ).toContain('success')
 
-        // Der Branch-Zustand. Der Relay schreibt beim Ankündigen selbst ein
-        // 30618, das aber nur `HEAD` und keinen Ref trägt (am Testrelay
-        // nachgesehen) — für eine sichtbare Branch-Zeile braucht es einen mit
-        // Commit. Signiert vom EIGENTÜMER; `foldRepoState` lässt Eigentümer und
-        // Relay-`self` zu, wie es auch Buzz Desktop tut.
+        // Der Branch-Zustand. Der Relay schreibt beim Ankündigen SELBST ein
+        // 30618 — als Seiteneffekt, NOCH VOR dem `OK` auf das 30617 (belegt:
+        // `handle_side_effects(...).await` läuft in `ingest_event_inner` vor
+        // dem Rückgabewert, `buzz/crates/buzz-relay/src/handlers/ingest.rs:2977`)
+        // — aber nur `HEAD` und keinen Ref (am Testrelay nachgesehen), auf einen
+        // ANDEREN Autor (den Relay-`self`, nicht den Eigentümer). Zwei
+        // verschiedene Pubkeys sind zwei verschiedene 30618-Koordinaten, also
+        // KEIN Überschreiben — beide liegen gleichzeitig vor, und
+        // `foldRepoState` (forgeModels.ts:357) wählt den mit dem höheren
+        // `created_at`.
+        //
+        // **Das ist das Rennen hinter P11 (`buzz-forge.spec.ts:332` reliably rot
+        // auf frisch aufgesetztem Stack).** `created_at` ist sekundengranular
+        // (NIP-01). Landet unser eigener Publish in DERSELBEN Sekunde wie der
+        // automatische, entscheidet `foldRepoState`s Tiebreak (`a.id.localeCompare`,
+        // faktisch eine Münze über den Event-Hash) — auf einem frisch reservierten
+        // Repo-Namen tritt der Seiteneffekt IMMER auf und die Sekunden fallen bei
+        // lokaler Latenz meistens zusammen. Auf wiederverwendetem Stack fehlt das
+        // Rennen: der Seiteneffekt feuert NUR bei der frischen Namensreservierung
+        // (`side_effects.rs`, `if reserved_by_this_attempt`), ein Re-Announce löst
+        // ihn nicht erneut aus — deshalb dort zuverlässig grün.
+        //
+        // Der Fix ist derselbe wie beim Status-Wettlauf neun Zeilen weiter unten:
+        // ein FESTER, garantiert späterer Zeitstempel statt eines Rennens, das man
+        // nur länger laufen lässt. Der Relay-Seiteneffekt ist per obigem Beleg
+        // spätestens dann abgeschlossen, wenn `publish()` für das 30617 hier
+        // zurückkehrt — `now` danach gemessen ist also nie früher als der
+        // automatische Zeitstempel, `now + 1` ist immer strikt später.
+        const afterAnnounce = Math.floor(Date.now() / 1000) + 1
         expect(
             publish(BUZZ_OWNER_SEC_HEX, [
                 '-k', '30618',
@@ -169,6 +193,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
                 '--tag', `refs/heads/master=${COMMIT}`,
                 '--tag', 'HEAD=ref: refs/heads/master',
                 '-t', `p=${owner}`,
+                '--created-at', String(afterAnnounce),
             ]),
         ).toContain('success')
 
