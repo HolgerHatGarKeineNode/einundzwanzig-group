@@ -177,7 +177,7 @@ test('alle sieben Kataloge tragen dieselbe Schlüsselmenge — keiner darf einen
         $absent = array_values(array_diff($unionKeys, array_keys($entries)));
         if ($absent !== []) {
             $asymmetric[] = '  lang/'.$locale.'.json fehlen '.count($absent).': '.
-                implode(', ', array_map(fn (string $k): string => json_encode($k, JSON_UNESCAPED_UNICODE), array_slice($absent, 0, 5))).
+                implode(', ', array_map(fn (string $k): string => json_encode($k, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), array_slice($absent, 0, 5))).
                 (count($absent) > 5 ? ' (+'.(count($absent) - 5).' weitere)' : '');
         }
     }

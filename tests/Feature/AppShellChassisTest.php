@@ -322,6 +322,10 @@ test('P2 Rail: der Workspace steht an zweiter Stelle, direkt unter den Räumen',
         ->assertOk()
         ->getContent();
 
+    if ($html === false) {
+        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
+    }
+
     $positions = [];
     foreach (['rooms', 'workspace', 'meetups', 'proposals'] as $key) {
         $at = mb_strpos($html, 'id="rail-group-'.$key.'"');

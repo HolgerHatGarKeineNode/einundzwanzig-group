@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 use Einundzwanzig\Group\Http\Middleware\SetLocale;
+use Illuminate\Testing\TestResponse;
 
 /**
  * i18n des geteilten group-Packages: die deutschen __()-Quell-Keys werden über
@@ -284,7 +285,11 @@ test('Bitcoin/Nostr-Jargon + Marke bleiben unübersetzt (Sats, npub, EINUNDZWANZ
  * in KEINER Messung auf — auch nicht in der über fehlende Schlüssel.
  */
 
-/** Alle Blades aus Host UND Paket, Blade-Kommentare entfernt (die sind kein Code). */
+/**
+ * Alle Blades aus Host UND Paket, Blade-Kommentare entfernt (die sind kein Code).
+ *
+ * @return array<string, string> absoluter Dateipfad => Quelltext ohne Blade-Kommentare
+ */
 function bladeQuellen(): array
 {
     $roots = [dirname(__DIR__, 2).'/resources/views', dirname(__DIR__, 2).'/packages/einundzwanzig-group/resources/views'];
@@ -359,14 +364,29 @@ test('ein Umschalten auf Spanisch ändert die Startseite sichtbar', function () 
      */
     $ohneKatalog = fn (string $html) => (string) preg_replace('/<script>window\.__nostrI18n = .*?<\/script>/s', '', $html);
 
-    $deutsch = $ohneKatalog($this->get('/')->assertOk()->getContent());
+    /*
+     * `getContent()` ist `string|false` — `false`, wenn die Antwort nie einen Body
+     * gesetzt bekam. Ungeprüft weitergereicht prüfte die nachgelagerte Erwartung
+     * `false` gegen einen Satz und meldete „enthält den Satz nicht", statt zu sagen,
+     * dass gar keine Seite ankam. Ein nicht lesbares Prüfstück ist ein Testfehler.
+     */
+    $seite = function (TestResponse $res): string {
+        $html = $res->getContent();
+
+        if ($html === false) {
+            throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
+        }
+
+        return $html;
+    };
+
+    $deutsch = $ohneKatalog($seite($this->get('/')->assertOk()));
 
     expect($deutsch)->toContain('Die Bitcoin-Community auf Nostr')
         ->and($deutsch)->toContain('Zu deinem Space');
 
     $spanisch = $ohneKatalog(
-        $this->withUnencryptedCookie(SetLocale::COOKIE, 'es')
-            ->get('/')->assertOk()->getContent()
+        $seite($this->withUnencryptedCookie(SetLocale::COOKIE, 'es')->get('/')->assertOk())
     );
 
     expect($spanisch)->toContain('La comunidad Bitcoin en Nostr')
