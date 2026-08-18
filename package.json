@@ -5,6 +5,7 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
+        "test:unit": "node --test --experimental-strip-types \"packages/*/js/**/*.test.ts\" \"tests/**/*.nodetest.ts\"",
         "test:e2e": "playwright test",
         "test:e2e:buzz": "E2E_RELAY=buzz playwright test",
         "test:e2e:headed": "playwright test --headed",

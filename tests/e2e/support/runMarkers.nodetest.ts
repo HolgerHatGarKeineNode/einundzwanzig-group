@@ -1,12 +1,22 @@
 /**
  * Zusicherung zu N9: **ein Lauf raeumt nur die Marker seiner eigenen Slots ab.**
  *
- * Ausfuehren:
+ * Ausfuehren: **`npm run test:unit`** (Wurzel-`package.json`) — dieselbe Kette, die
+ * auch die Paket-Units (`packages/<paket>/js/…test.ts`) faehrt. Einzeln:
  *   node --test --experimental-strip-types tests/e2e/support/runMarkers.nodetest.ts
  *
  * Der Dateiname endet bewusst NICHT auf `.test.ts`/`.spec.ts`: Playwrights Default-
  * `testMatch` (`**\/*.@(spec|test).?(c|m)[jt]s?(x)`) wuerde die Datei sonst als Spec
  * einsammeln, und `node:test` laeuft dort nicht.
+ *
+ * **Und genau dieser Ausschluss hat sie beim ersten Anlauf aus JEDER Kette gehalten**
+ * (Gate-REJECT, 2026-08-18): Die Zahl „JS-Unit 951" stammte aus dem Glob
+ * `packages/einundzwanzig-group/js/*.test.ts`, ein `test:unit`-Script gab es nicht,
+ * CI gibt es nicht — der einzige Hinweis auf ihre Ausfuehrung stand in genau diesem
+ * Kommentar. Eine Zusicherung, die nur bei zufaelligem Lesen laeuft, verrottet stumm
+ * beim naechsten Umbau von `global-setup.ts` — also bei dem Ereignis, gegen das sie
+ * gebaut ist. Deshalb faengt `test:unit` beide Endungen an beiden Orten ein; die
+ * Reichweite ist gemessen (eine Probe-Datei in `tests/e2e/` hob die Zahl auf 956).
  *
  * Der zweite Block ist der eigentliche Waechter: er faehrt die Loeschung wirklich
  * gegen ein Wegwerf-Verzeichnis und prueft, dass der Marker eines FREMDEN Slots
