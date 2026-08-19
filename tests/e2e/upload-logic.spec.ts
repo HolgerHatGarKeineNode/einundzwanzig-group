@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures'
-import { buildAttachment, relayHttpOrigin, BLOSSOM_SERVER } from '../../packages/einundzwanzig-group/js/uploads'
+import { buildAttachment, relayHttpOrigin, thumbBox, BLOSSOM_SERVER } from '../../packages/einundzwanzig-group/js/uploads'
 
 /**
  * C6a Blossom-Anhang: `buildAttachment` baut URL + NIP-92-`imeta`-Tag aus dem
@@ -88,4 +88,31 @@ test('normalisiert eingeschleuste Newlines aus der Server-URL', () => {
 
 test('weist Nicht-http(s)-URLs ab', () => {
     expect(() => buildAttachment('javascript:alert(1)', 'image/png', 'x', 1)).toThrow()
+})
+
+// ── Vorschaubild des Composers (`thumbBox`) ────────────────────────────────────────
+//
+// Die Kachel zeigt die EIGENEN Bytes, weil ein Upload auf einem Buzz-Space
+// auth-pflichtig ist und `$img()` fuer ihn '' liefert (Wache in `js/mediaGuard.ts`).
+// Geprueft ist hier die Geometrie; dass die Flaeche `previewUrl` bevorzugt, steht in
+// `tests/e2e/composer-attachment-preview.spec.ts` (dort entsteht die Zusage).
+
+test('thumbBox: die laengste Kante landet auf max, das Verhaeltnis bleibt', () => {
+    expect(thumbBox(2048, 1024, 128)).toEqual({ width: 128, height: 64 })
+    expect(thumbBox(1024, 2048, 128)).toEqual({ width: 64, height: 128 })
+})
+
+test('thumbBox: vergroessert NIE — ein kleines Bild bleibt, wie es ist', () => {
+    // Sonst waere die `data:`-URL groesser als das Original, das sie vertreten soll.
+    expect(thumbBox(64, 48, 128)).toEqual({ width: 64, height: 48 })
+})
+
+test('thumbBox: extremes Seitenverhaeltnis behaelt mindestens ein Pixel', () => {
+    // 4000x3 → die kurze Kante rundet auf 0; ein Canvas mit Breite/Hoehe 0 wirft.
+    expect(thumbBox(4000, 3, 128)).toEqual({ width: 128, height: 1 })
+})
+
+test('thumbBox: unbrauchbare Masse ergeben ein Quadrat statt NaN', () => {
+    expect(thumbBox(0, 0, 128)).toEqual({ width: 128, height: 128 })
+    expect(thumbBox(Number.NaN, 100, 128)).toEqual({ width: 128, height: 128 })
 })
