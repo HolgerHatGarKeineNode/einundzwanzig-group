@@ -184,7 +184,7 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 
 # Nostr & welshman
 
-Dieses Projekt ist die Migration des Nostr-Clients **Flotilla** nach Laravel Livewire + Flux UI. Nostr bleibt Source of Truth; das Nostr-SDK bleibt **welshman** (`@welshman/*`, dasselbe SDK wie Flotilla), client-seitig im Browser. Signing (NIP-07/NIP-46) bleibt IMMER im Browser — der private Key darf nie zum Server. Details & Meilensteine: siehe `PLAN.md` im Projekt-Root.
+Dieses Projekt ist die Migration des Nostr-Clients **Flotilla** nach Laravel Livewire + Flux UI. Nostr bleibt Source of Truth; das Nostr-SDK bleibt **welshman** (`@welshman/*`, dasselbe SDK wie Flotilla), client-seitig im Browser. Signing (NIP-07/NIP-46) bleibt IMMER im Browser — der private Key darf nie zum Server. Die Migration ist abgeschlossen; die Planungsdokumente von damals (`PLAN.md`, `PLAN2.md`, `ZAPS.md`) sind nach Abschluss **gelöscht worden** und existieren nicht mehr. Verweise darauf in Code-Kommentaren (z. B. „ZAPS.md Z1") sind historische Abschnittsmarken, keine nachschlagbaren Quellen — such nicht danach. Der aktuelle Stand steht im Code und in dieser Datei.
 
 ## Grundprinzip: Flotillas welshman-Layer wiederverwenden
 
