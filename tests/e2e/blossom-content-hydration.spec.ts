@@ -35,6 +35,8 @@ const WURZEL = join(fileURLToPath(new URL('.', import.meta.url)), '../..')
 const GESCHUETZT = 'https://buzz.test.invalid/media/anhang.jpg'
 const GESCHUETZT_ABGELEHNT = 'https://buzz.test.invalid/media/verboten.jpg'
 const GESCHUETZT_EMOJI = 'https://buzz.test.invalid/media/emoji.png'
+/** Ein Emoji, das der Relay diesem Nutzer NICHT gibt — der Rueckfall-Fall. */
+const GESCHUETZT_EMOJI_ABGELEHNT = 'https://buzz.test.invalid/media/verboten-emoji.png'
 const FREMD = 'https://image.nostr.build/frei.jpg'
 const FREMD_MARKIERT = 'https://evil.test.invalid/untergeschoben.jpg'
 
@@ -59,7 +61,23 @@ const buendeln = (): string => {
     return readFileSync(ziel, 'utf8')
 }
 
-const SEITE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+/**
+ * Den ECHTEN Zustands-Block aus `theme.css` herausschneiden. Ohne ihn pruefte die
+ * Sichtbarkeits-Zusage unten gar nichts — ein Bild ohne Stylesheet ist immer sichtbar.
+ * Geschnitten wird an Kommentaren der Datei; findet der Schnitt nichts, schlaegt der
+ * Test fehl, statt still weniger zu pruefen.
+ */
+const zustandsCss = (): string => {
+    const css = readFileSync(join(WURZEL, 'packages/einundzwanzig-group/resources/css/theme.css'), 'utf8')
+    const von = css.indexOf('/* Inline-Bilder im Chat-Inhalt')
+    const bis = css.indexOf('/* BLOSSOM-ZUSTAND — Ende */')
+    expect(von, 'Anfang des Bild-/Emoji-Blocks nicht gefunden — Schnittmarke veraltet?').toBeGreaterThan(-1)
+    expect(bis, 'Ende-Marke des Blossom-Zustandsblocks nicht gefunden').toBeGreaterThan(von)
+
+    return css.slice(von, bis)
+}
+
+const seite = (css: string): string => `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body style="font: 16px sans-serif">
 <div id="verlauf"></div>
 <script type="module">
   import { chatImageHtml, emojiImgHtml, startBlossomHydration } from '/bundle.js'
@@ -90,6 +108,7 @@ const SEITE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     zeile('chat_abgelehnt', chatImageHtml(document, ${JSON.stringify(GESCHUETZT_ABGELEHNT)}, proxify(${JSON.stringify(GESCHUETZT_ABGELEHNT)}, 'msg'), proxify(${JSON.stringify(GESCHUETZT_ABGELEHNT)}, 'full'))),
     zeile('chat_fremd', chatImageHtml(document, ${JSON.stringify(FREMD)}, proxify(${JSON.stringify(FREMD)}, 'msg'), proxify(${JSON.stringify(FREMD)}, 'full'))),
     zeile('emoji_geschuetzt', emojiImgHtml(document, ${JSON.stringify(GESCHUETZT_EMOJI)}, proxify(${JSON.stringify(GESCHUETZT_EMOJI)}, 'avatar'), 'winken')),
+    zeile('emoji_abgelehnt', emojiImgHtml(document, ${JSON.stringify(GESCHUETZT_EMOJI_ABGELEHNT)}, proxify(${JSON.stringify(GESCHUETZT_EMOJI_ABGELEHNT)}, 'avatar'), 'winken')),
     // Untergeschoben: ein Marker auf einen FREMDEN Host. Nichts daran darf geladen werden.
     zeile('marker_fremd', '<img data-blossom-src="${FREMD_MARKIERT}">'),
   ].join('')
@@ -107,29 +126,46 @@ const SEITE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
 </script>
 </body></html>`
 
-type Bild = { fall: string | undefined; src: string | null; full: string | null; zustand: string | null }
+type Bild = {
+    fall: string | undefined
+    src: string | null
+    full: string | null
+    zustand: string | null
+    alt: string | null
+    /** Nimmt das Element noch Platz ein? (`display:none` ⇒ Breite 0.) */
+    breite: number
+    anzeige: string | null
+    /** Anzeige des umschliessenden `.chat-image-box`, falls vorhanden. */
+    boxAnzeige: string | null
+}
 
 const lesen = () =>
     [...document.querySelectorAll('[data-fall]')].map((el) => {
         const img = el.querySelector('img')
+        const box = el.querySelector('.chat-image-box')
 
         return {
             fall: (el as HTMLElement).dataset.fall,
             src: img?.getAttribute('src') ?? null,
             full: img?.getAttribute('data-full') ?? null,
             zustand: img?.getAttribute('data-blossom-state') ?? null,
+            alt: img?.getAttribute('alt') ?? null,
+            breite: img ? Math.round(img.getBoundingClientRect().width) : -1,
+            anzeige: img ? getComputedStyle(img).display : null,
+            boxAnzeige: box ? getComputedStyle(box).display : null,
         }
     })
 
 test.describe('Auth-pflichtige Inhaltsbilder: kein src ohne Blob, kein Wiederholen, keine Anfrage', () => {
     test('Chat-Anhang, Emoji und ein untergeschobener Marker — im echten DOM', async ({ page }) => {
         const bundle = buendeln()
+        const css = zustandsCss()
         const angefragt: string[] = []
 
         await page.route('**/*', async (route) => {
             const url = route.request().url()
             if (url === 'http://blossom-inhalt.test/') {
-                return route.fulfill({ contentType: 'text/html', body: SEITE })
+                return route.fulfill({ contentType: 'text/html', body: seite(css) })
             }
             if (url.endsWith('/bundle.js')) {
                 return route.fulfill({ contentType: 'text/javascript', body: bundle })
@@ -145,7 +181,7 @@ test.describe('Auth-pflichtige Inhaltsbilder: kein src ohne Blob, kein Wiederhol
         })
 
         await page.goto('http://blossom-inhalt.test/')
-        await page.waitForFunction(() => document.querySelectorAll('img[data-blossom-state]').length >= 4)
+        await page.waitForFunction(() => document.querySelectorAll('img[data-blossom-state]').length >= 5)
         await page.waitForTimeout(200)
 
         const bilder: Bild[] = await page.evaluate(lesen)
@@ -165,6 +201,22 @@ test.describe('Auth-pflichtige Inhaltsbilder: kein src ohne Blob, kein Wiederhol
         expect(bild('chat_abgelehnt').src, 'abgelehnt: KEIN src — sonst eine Anfrage fuer nichts').toBeNull()
         expect(bild('chat_abgelehnt').zustand).toBe('none')
 
+        // ── Zwei Flaechen, zwei Rueckfaelle ─────────────────────────────────────────
+        //
+        // Ein BILD verschwindet samt seinem reservierten Container — ein leerer grauer
+        // 4:3-Kasten sähe dauerhaft so aus, als lade da noch etwas.
+        expect(bild('chat_abgelehnt').anzeige, 'abgelehntes Bild: unsichtbar').toBe('none')
+        expect(bild('chat_abgelehnt').boxAnzeige, 'und der reservierte Container mit ihm').toBe('none')
+
+        // Ein EMOJI verschwindet NICHT: es sitzt mitten in einem Satz, dort fehlte sonst
+        // ein Zeichen ohne jeden Hinweis. Es faellt auf seinen Shortcode zurueck — den
+        // rendert der Browser aus dem `alt` eines `<img>` ohne `src`.
+        expect(bild('emoji_abgelehnt').src, 'auch das Emoji bekommt KEIN src').toBeNull()
+        expect(bild('emoji_abgelehnt').zustand).toBe('none')
+        expect(bild('emoji_abgelehnt').anzeige, 'abgelehntes Emoji bleibt im Fluss').not.toBe('none')
+        expect(bild('emoji_abgelehnt').breite, 'und nimmt Platz ein — der Shortcode ist zu lesen').toBeGreaterThan(0)
+        expect(bild('emoji_abgelehnt').alt, 'genau die Information, die dort hingehoert').toBe(':winken:')
+
         // ── Ein Marker auf einen fremden Host fuehrt zu nichts ───────────────────────
         expect(bild('marker_fremd').src, 'untergeschobener Marker: nie ein src').toBeNull()
         expect(bild('marker_fremd').zustand).toBe('none')
@@ -181,11 +233,12 @@ test.describe('Auth-pflichtige Inhaltsbilder: kein src ohne Blob, kein Wiederhol
 
     test('eine spaet eingehende Nachricht wird vom Beobachter erfasst — und kein Bild zweimal geholt', async ({ page }) => {
         const bundle = buendeln()
+        const css = zustandsCss()
 
         await page.route('**/*', async (route) => {
             const url = route.request().url()
             if (url === 'http://blossom-inhalt.test/') {
-                return route.fulfill({ contentType: 'text/html', body: SEITE })
+                return route.fulfill({ contentType: 'text/html', body: seite(css) })
             }
             if (url.endsWith('/bundle.js')) {
                 return route.fulfill({ contentType: 'text/javascript', body: bundle })
@@ -195,7 +248,7 @@ test.describe('Auth-pflichtige Inhaltsbilder: kein src ohne Blob, kein Wiederhol
         })
 
         await page.goto('http://blossom-inhalt.test/')
-        await page.waitForFunction(() => document.querySelectorAll('img[data-blossom-state]').length >= 4)
+        await page.waitForFunction(() => document.querySelectorAll('img[data-blossom-state]').length >= 5)
 
         const vorher = await page.evaluate(() => (window as unknown as { __geladen: string[] }).__geladen.length)
 
