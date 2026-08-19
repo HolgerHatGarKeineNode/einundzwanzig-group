@@ -2,14 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use GuzzleHttp\Psr7\Uri;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Drivers\Gd\Driver;
 use Intervention\Image\Encoders\WebpEncoder;
 use Intervention\Image\ImageManager;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\UriInterface;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Process\ExecutableFinder;
 
@@ -50,6 +55,38 @@ class ImageProxyController extends Controller
         $src = (string) $request->query('src', '');
         if ($src === '') {
             abort(400);
+        }
+
+        // ── DER MEDIEN-RIEGEL — bewusst VOR ETag, Cache-Lookup und SSRF-Prüfung ──
+        //
+        // Er steht hier oben und nicht beim Fetch, weil ein Cache-Hit sonst an ihm
+        // vorbeiliefe: eine geschützte URL, die vor der Einführung dieses Riegels
+        // (oder über einen künftigen Umweg) einmal auf Platte gelandet ist, würde
+        // weiter ausgeliefert. Der Riegel kostet nichts, was den heißen Pfad
+        // interessieren müsste — ein Host-Vergleich, kein DNS (anders als
+        // `isSafeUrl`, das genau deshalb weiter unten steht).
+        //
+        // WARUM ES DIESEN RIEGEL GIBT — bitte vor dem „pragmatischen" Öffnen lesen:
+        //
+        // Der Workspace-Relay liefert seine Medien NUR gegen ein signiertes
+        // Blossom-Event aus (kind 24242, BUD-11; blank gemessen 401, signiert 200).
+        // Diese Signatur ist an die MITGLIEDSCHAFT des Nutzers gebunden — sie IST
+        // die Zugriffskontrolle des Relays. Ein serverseitiger Proxy hat keinen
+        // Nutzerschlüssel; „reparieren" ließe sich das nur, indem der SERVER das
+        // Blossom-Event signiert. Genau dann ist dieser Endpunkt — der bewusst ohne
+        // Session, Cookie und CSRF läuft (`routes/img.php`) — ein öffentliches
+        // Orakel für relay-private Medien: wer eine Blob-URL kennt, bekommt sie,
+        // ohne Mitglied zu sein, und die mitgliedschaftsgebundene ACL des Relays ist
+        // aufgehoben. Der Fehler wäre unsichtbar, weil dabei nichts kaputtgeht —
+        // es fingen nur plötzlich Bilder an zu funktionieren.
+        //
+        // Die Client-Wache (`js/mediaGuard.ts`) schützt nur den Client. An ihr vorbei
+        // kommen: gecachtes altes Markup, ein Cache-Warmer, ein Share-Sheet,
+        // SSR/`og:image` — und schlicht jeder, der `/img/...?src=` von Hand aufruft.
+        // Deshalb steht die Regel zweimal da, client- UND serverseitig; die
+        // serverseitige ist die tragende.
+        if ($this->isRelayHostedMedia($src)) {
+            abort(403);
         }
 
         $etag = '"'.sha1($preset.'|'.$src).'"';
@@ -149,21 +186,7 @@ class ImageProxyController extends Controller
                     'Accept' => 'image/*',
                     'User-Agent' => 'Mozilla/5.0 (compatible; EinundzwanzigImgProxy/1.0; +https://group.einundzwanzig.space)',
                 ])
-                ->withOptions([
-                    'curl' => [CURLOPT_MAXFILESIZE => self::MAX_BYTES],
-                    'allow_redirects' => [
-                        'max' => 3,
-                        'strict' => true,
-                        'referer' => false,
-                        'protocols' => ['https'],
-                        // Jeder Redirect-Zielhost muss wieder öffentlich sein.
-                        'on_redirect' => function ($request, $response, $uri): void {
-                            if (! $this->isSafeHost($uri->getHost())) {
-                                throw new \RuntimeException('unsafe redirect target');
-                            }
-                        },
-                    ],
-                ])
+                ->withOptions($this->fetchOptions())
                 ->get($url);
 
             if (! $response->successful()) {
@@ -192,6 +215,44 @@ class ImageProxyController extends Controller
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Guzzle-Optionen des ausgehenden Fetches.
+     *
+     * Eigene Methode, weil `on_redirect` die zweite Hälfte des Medien-Riegels trägt
+     * und sonst nicht prüfbar wäre: `Http::fake()` schiebt seinen Stub-Handler GANZ
+     * nach außen und kurzschließt damit vor Guzzles Redirect-Middleware — im Test
+     * wird also nie einer Weiterleitung gefolgt. So lässt sich wenigstens exakt die
+     * Closure aufrufen, die Guzzle im Ernstfall aufruft (statt sie nachzubauen).
+     *
+     * @return array<string, mixed>
+     */
+    private function fetchOptions(): array
+    {
+        return [
+            'curl' => [CURLOPT_MAXFILESIZE => self::MAX_BYTES],
+            'allow_redirects' => [
+                'max' => 3,
+                'strict' => true,
+                'referer' => false,
+                'protocols' => ['https'],
+                'on_redirect' => function (RequestInterface $request, ResponseInterface $response, UriInterface $uri): void {
+                    // Der geschützte Medien-Host zuerst — Host-Vergleich, kein DNS.
+                    // Ohne diese Prüfung spazierte ein ERLAUBTER Host, der dorthin
+                    // umleitet, an der Host-Prüfung in `__invoke` vorbei: die sieht
+                    // nur die URL, die der Aufrufer hineingereicht hat, nie das Ziel
+                    // der Umleitung.
+                    if ($this->isRelayHostedMedia((string) $uri)) {
+                        throw new \RuntimeException('relay-hosted media redirect target');
+                    }
+                    // Und jeder Redirect-Zielhost muss wieder öffentlich sein.
+                    if (! $this->isSafeHost($uri->getHost())) {
+                        throw new \RuntimeException('unsafe redirect target');
+                    }
+                },
+            ],
+        ];
     }
 
     /**
@@ -241,6 +302,87 @@ class ImageProxyController extends Controller
         }
 
         return (new ExecutableFinder)->find('gifsicle');
+    }
+
+    /**
+     * Liegt dieses Medium auf einem Relay, dessen Medien auth-pflichtig sind?
+     * (Die Begründung, warum der Server sie nie holen darf, steht in `__invoke`.)
+     *
+     * ── Warum die Menge der geschützten Hosts NICHT hier im Code steht ──
+     *
+     * Eine hartkodierte Liste („buzz.einundzwanzig.space") wäre eine Denylist mit
+     * genau der Fehlerklasse, die dieses Projekt schon einmal getroffen hat: ein
+     * zweiter Workspace/Tenant käme still UNGESCHÜTZT dazu, weil niemand die zweite
+     * Stelle mitpflegt. Deshalb ist die Menge abgeleitet: geschützt ist, was in
+     * `group.workspace_url` steht — dieselbe Konfiguration, die `partials/head.blade.php`
+     * als `window.__nostrWorkspace` an die Client-Wache (`js/mediaGuard.ts`) gibt.
+     * EINE Quelle für beide Wachen; sie können nicht auseinanderlaufen. Ein weiterer
+     * Tenant wird geschützt, indem der Schlüssel eine Liste wird (`Arr::wrap`) —
+     * ohne zweite Code-Änderung.
+     *
+     * Eine echte Allowlist auf der ANDEREN Achse (nur bestimmte Quell-Hosts dürfen
+     * geholt werden) ist hier bewusst nicht möglich: der Proxy existiert, um beliebige
+     * Nostr-Medien zu holen (nostr.build, imgur, jeder Blossom-Server). Eine
+     * Host-Allowlist dort wäre gleichbedeutend mit „Funktion aus".
+     */
+    private function isRelayHostedMedia(string $url): bool
+    {
+        $host = self::hostOf($url);
+        if ($host === '') {
+            return false;
+        }
+
+        foreach (Arr::wrap(config('group.workspace_url')) as $relay) {
+            if (is_string($relay) && $relay !== '' && self::hostOf($relay) === $host) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Der vergleichbare Host einer URL — leer, wenn sich keiner bestimmen lässt.
+     *
+     * **Geparst wird mit demselben Parser, der später auch holt** (`GuzzleHttp\Psr7\Uri`,
+     * über den `Http`-Client). Das ist der Kern der Sache: ein handgeschriebener
+     * Normalisierer oder ein `parse_url` daneben wäre eine ZWEITE Meinung darüber,
+     * welcher Host gemeint ist — und jede Abweichung zwischen Wache und Holer ist ein
+     * Bypass. Gemessen: `parse_url(' https://host/x')` findet gar keinen Host, Guzzle
+     * findet `host` und würde ihn kontaktieren. Wer hier `parse_url` nimmt, baut die
+     * Lücke ein.
+     *
+     * Guzzle liefert den Host bereits ohne `userinfo@`, ohne Port und ASCII-kleingeschrieben;
+     * hier kommen die zwei Dinge dazu, die es nicht tut: der abschließende Punkt der
+     * absoluten DNS-Form (`host.` == `host`) und die Unicode-Form eines IDN
+     * (`bÜzz.example` → `xn--bzz-hoa.example`), damit beide Schreibweisen desselben
+     * Namens denselben Vergleichswert ergeben. Ohne `ext-intl` bleibt nur das
+     * Kleinschreiben — dann ist der IDN-Fall unentschieden, nicht falsch positiv.
+     *
+     * Verglichen wird der HOST, nicht der Origin (so wie clientseitig in
+     * `isSpaceHostedMedia`). Das ist hier absichtlich strenger: ein anderer Port oder
+     * `http://` auf demselben Host ist derselbe Relay und darf kein Schlupfloch sein.
+     */
+    private static function hostOf(string $url): string
+    {
+        try {
+            $host = (new Uri($url))->getHost();
+        } catch (\Throwable) {
+            // Unparsebar → kein Host. Gefahrlos: derselbe Parser holt später, ein
+            // String, den er nicht versteht, erreicht den geschützten Relay nie.
+            return '';
+        }
+
+        $host = rtrim($host, '.');
+        if ($host === '') {
+            return '';
+        }
+
+        $ascii = function_exists('idn_to_ascii')
+            ? idn_to_ascii($host, IDNA_NONTRANSITIONAL_TO_ASCII, INTL_IDNA_VARIANT_UTS46)
+            : false;
+
+        return mb_strtolower(is_string($ascii) ? $ascii : $host, 'UTF-8');
     }
 
     private function isSafeUrl(string $url): bool
