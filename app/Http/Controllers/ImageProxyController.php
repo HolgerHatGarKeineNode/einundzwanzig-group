@@ -7,6 +7,7 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Intervention\Image\Drivers\Gd\Driver;
@@ -333,7 +334,30 @@ class ImageProxyController extends Controller
         }
 
         foreach (Arr::wrap(config('group.workspace_url')) as $relay) {
-            if (is_string($relay) && $relay !== '' && self::hostOf($relay) === $host) {
+            if (! is_string($relay) || trim($relay) === '') {
+                // Nicht konfiguriert — legitim inert (einzelne Instanz ohne Workspace).
+                continue;
+            }
+
+            $relayHost = self::hostOf($relay);
+
+            // F1: „nicht konfiguriert" und „falsch konfiguriert" sind NICHT dasselbe.
+            // Der Client normalisiert großzügiger als wir: welshmans `normalizeRelayUrl`
+            // setzt bei fehlendem Schema `wss://` davor, `new Uri('host.tld')` liest
+            // denselben String als PFAD und liefert einen leeren Host. Eine schemalose
+            // Konfiguration lässt damit den Client vollständig korrekt laufen — Workspace-
+            // Tab da, Client-Wache aktiv, kein Test rot — und legt AUSGERECHNET die
+            // serverseitige, tragende Hälfte still. Ein Kontrollmechanismus, der lautlos
+            // verschwindet, ist keiner: deshalb laut werden, statt durchzufallen.
+            if ($relayHost === '') {
+                Log::warning('group.workspace_url: kein Host ableitbar — der serverseitige Medien-Riegel ist für diesen Eintrag WIRKUNGSLOS. Schema angeben (wss://host.tld).', [
+                    'eintrag' => $relay,
+                ]);
+
+                continue;
+            }
+
+            if ($relayHost === $host) {
                 return true;
             }
         }
@@ -372,6 +396,18 @@ class ImageProxyController extends Controller
             // String, den er nicht versteht, erreicht den geschützten Relay nie.
             return '';
         }
+
+        // F2: Guzzles `Uri` BEWAHRT Prozent-Escapes im Host, curl dekodiert sie vor
+        // der Namensauflösung — `https://%62uzz.example/` wird als `buzz.example`
+        // kontaktiert, verglichen würde aber `%62uzz.example`. Genau die Divergenz
+        // zwischen Wache und Holer, die dieser Riegel ausschließen soll. Dekodieren
+        // macht die Wache strenger, nie lockerer.
+        //
+        // Heute fängt `isSafeHost` diesen Fall mit ab (PHPs Resolver dekodiert NICHT,
+        // findet also nichts) — aber das ist ein Nachbar, der für SSRF gebaut ist und
+        // dessen Platz im Ablauf ausdrücklich verschiebbar ist. Der Riegel darf sich
+        // nicht darauf stützen.
+        $host = rawurldecode($host);
 
         $host = rtrim($host, '.');
         if ($host === '') {

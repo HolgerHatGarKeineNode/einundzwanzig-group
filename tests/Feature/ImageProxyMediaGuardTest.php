@@ -5,6 +5,7 @@ use GuzzleHttp\Psr7\Request as PsrRequest;
 use GuzzleHttp\Psr7\Response as PsrResponse;
 use GuzzleHttp\Psr7\Uri;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -192,3 +193,83 @@ it('refuses a redirect that lands on the workspace relay', function () {
     expect(fn () => $onRedirect($request, $response, new Uri('https://BUZZ.Test.:443/media/a.jpg')))
         ->toThrow(RuntimeException::class, 'relay-hosted media redirect target');
 });
+
+/*
+ * ── Audit 2026-08-19: die zwei Befunde, die den Riegel still hätten aussetzen können ──
+ */
+
+it('blocks a percent-encoded host — Uri keeps the escapes, curl resolves them (F2)', function (string $src) {
+    Http::fake();
+
+    // Ohne `rawurldecode` in `hostOf` verglich der Riegel `%62uzz.test` und ließ passieren,
+    // während curl `buzz.test` kontaktiert hätte. Gestoppt wurde das bisher NUR von
+    // `isSafeHost` (PHPs Resolver dekodiert nicht, findet also nichts) — ein Nachbar, der
+    // für SSRF gebaut ist und dessen Platz im Ablauf ausdrücklich verschiebbar ist.
+    $this->get('/img/avatar?src='.urlencode($src))->assertForbidden();
+
+    Http::assertNothingSent();
+})->with([
+    'erstes Zeichen kodiert' => 'https://%62uzz.test/media/a.jpg',
+    'Punkte kodiert' => 'https://buzz%2Etest/media/a.jpg',
+    'gemischt und gross geschrieben' => 'https://%42UZZ.Test/media/a.jpg',
+]);
+
+it('still lets an ordinary percent-encoded foreign host through', function () {
+    // Gegenkontrolle: die Dekodierung macht die Wache strenger, nicht blind.
+    // Kein `Http::fake()` — der Riegel darf hier gerade NICHT greifen, der Request
+    // scheitert danach an `isSafeUrl` (kein auflösbarer Host im Testlauf).
+    $this->get('/img/avatar?src='.urlencode('https://%65xample.com/a.jpg'))
+        ->assertStatus(400);
+});
+
+it('logs a warning when a configured entry yields no host — silent inertia is the bug (F1)', function (string $eintrag) {
+    Http::fake();
+    config()->set('group.workspace_url', $eintrag);
+
+    // `Log::listen` statt eines Facade-Spys: gemessen wird die ECHTE Log-Pipeline mit
+    // ihrer echten Nachricht, nicht ein Mock-Aufruf — und es bleibt statisch prüfbar
+    // (`shouldHaveReceived` existiert auf der Facade nicht, phpstan meldet es zu Recht).
+    $gemeldet = [];
+    Log::listen(function ($eintrag) use (&$gemeldet) {
+        $gemeldet[] = [$eintrag->level, $eintrag->message];
+    });
+
+    // Der Client normalisiert grosszuegiger (welshman setzt `wss://` selbst davor) und
+    // laeuft mit so einer Konfiguration vollstaendig korrekt weiter. Genau deshalb muss
+    // die serverseitige Haelfte laut werden, statt als „nichts zu schuetzen" durchzufallen.
+    $this->get('/img/avatar?src='.urlencode('https://buzz.test/media/a.jpg'));
+
+    $warnungen = array_filter(
+        $gemeldet,
+        fn (array $z) => $z[0] === 'warning' && str_contains($z[1], 'group.workspace_url'),
+    );
+
+    expect($warnungen)->toHaveCount(1, 'ein nicht ableitbarer Eintrag muss laut werden, nicht still durchfallen');
+})->with([
+    'ohne Schema' => 'buzz.test',
+    'ohne Schema, mit Schraegstrich' => 'buzz.test/',
+    'Anfuehrungszeichen mitkopiert' => '"wss://buzz.test"',
+]);
+
+it('stays silent for a legitimately absent workspace — not configured is not misconfigured', function (mixed $eintrag) {
+    config()->set('group.workspace_url', $eintrag);
+
+    $gemeldet = [];
+    Log::listen(function ($eintrag) use (&$gemeldet) {
+        $gemeldet[] = [$eintrag->level, $eintrag->message];
+    });
+
+    $this->get('/img/avatar?src='.urlencode('https://buzz.test/media/a.jpg'));
+
+    $warnungen = array_filter(
+        $gemeldet,
+        fn (array $z) => $z[0] === 'warning' && str_contains($z[1], 'group.workspace_url'),
+    );
+
+    expect($warnungen)->toBe([], 'nicht konfiguriert ist kein Fehler — hier darf nichts gemeldet werden');
+})->with([
+    'null' => null,
+    'leer' => '',
+    'nur Leerzeichen' => '   ',
+    'leere Liste' => [[]],
+]);
