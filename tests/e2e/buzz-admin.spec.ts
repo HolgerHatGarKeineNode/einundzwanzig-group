@@ -1,8 +1,17 @@
 import { test, expect, type Page } from './support/fixtures'
-import { useBuzz, BUZZ_OWNER_NSEC, BUZZ_OWNER_SEC_HEX, BUZZ_USER_PUB, BUZZ_ROOM_WELCOME, BUZZ_PORT } from './support/buzz'
+import {
+    useBuzz,
+    BUZZ_OWNER_NSEC,
+    BUZZ_OWNER_SEC_HEX,
+    BUZZ_USER_PUB,
+    BUZZ_ROOM_WELCOME,
+    BUZZ_ROOM_GENERAL,
+    BUZZ_PORT,
+} from './support/buzz'
 import { loginNsec } from './support/login'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { execFileSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 
 /** Pfad zum `nak`-Binary (wie in den Seed-Skripten). */
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
@@ -125,6 +134,85 @@ function roomsAtRelay(): { d: string; name: string }[] {
         execFileSync('sleep', ['0.5'])
     }
     throw new Error('39000-Abfrage lieferte sechsmal nichts — die Seed-Räume sind immer da, also ist die Abfrage kaputt.')
+}
+
+/**
+ * Roher REQ am Relay (als Owner authentifiziert), EINMAL — ohne den Retry von
+ * `roomsAtRelay()`.
+ *
+ * Der Retry dort ist richtig, weil dessen Ergebnis nie leer sein DARF. Hier ist
+ * „leer" dagegen ein zu erwartender Messwert (siehe die Grabstein-Probe unten), und
+ * sechs Wiederholungen einer Abfrage, deren erwartetes Ergebnis leer ist, kosten nur
+ * Zeit. Der Preis dieser Form steht am Aufrufer: ein leeres Ergebnis belegt für sich
+ * genommen NICHTS — es braucht daneben eine Kontrolle, dass dieselbe Aufrufform im
+ * selben Moment überhaupt Zeilen liefert.
+ */
+function relayQuery(filter: string[]): unknown[] {
+    const out = execFileSync(NAK, ['req', ...filter, '--auth', '--sec', BUZZ_OWNER_SEC_HEX, WS()], {
+        encoding: 'utf8',
+        timeout: 20_000,
+    })
+    return out
+        .split('\n')
+        .filter(Boolean)
+        .flatMap((line) => {
+            try {
+                return [JSON.parse(line) as unknown]
+            } catch {
+                return []
+            }
+        })
+}
+
+/** Pubkey (hex) zu einem Secret — für den Namen der pubkey-eigenen Cache-DB. */
+function pubOf(sec: string): string {
+    return execFileSync(NAK, ['key', 'public', sec], { encoding: 'utf8', timeout: 10_000 }).trim()
+}
+
+/**
+ * Die `d`-Werte (Kanal-UUIDs) ALLER im IndexedDB liegenden 39000 — der Blick auf die
+ * Schicht, in der der Geisterraum tatsächlich sitzt.
+ *
+ * Ohne diesen Blick misst ein Test nur den flüchtigen In-Memory-Stand: `ROOM_META`
+ * steht in `storage.ts PERSIST_KINDS`, die Kachel überlebt also jeden Reload aus dem
+ * Cache heraus. Die DOM-Probe allein könnte deshalb grün sein, während die Ursache
+ * unberührt in der Datenbank liegt.
+ *
+ * WIRFT, wenn DB oder Store fehlen — ein Leseweg, der im Defektfall „nichts gefunden"
+ * meldet, machte jede `not.toContain`-Zusicherung trivial grün.
+ */
+function cachedRoomIds(page: Page, dbName: string): Promise<string[]> {
+    return page.evaluate(async (name) => {
+        const dbs = await indexedDB.databases()
+        if (!dbs.some((d) => d.name === name)) {
+            throw new Error(`Cache-DB ${name} existiert nicht — der Login hat sie nicht angelegt`)
+        }
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const req = indexedDB.open(name)
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+        })
+        try {
+            if (!db.objectStoreNames.contains('events')) {
+                throw new Error(`Cache-DB ${name} hat keinen events-Store`)
+            }
+            return await new Promise<string[]>((resolve, reject) => {
+                const req = db.transaction('events', 'readonly').objectStore('events').getAll()
+                req.onsuccess = () =>
+                    resolve(
+                        (req.result as { kind: number; tags?: string[][] }[])
+                            .filter((e) => e.kind === 39000)
+                            .flatMap((e) => {
+                                const d = (e.tags ?? []).find((t) => t[0] === 'd')?.[1]
+                                return d ? [d] : []
+                            }),
+                    )
+                req.onerror = () => reject(req.error)
+            })
+        } finally {
+            db.close()
+        }
+    }, dbName)
 }
 
 /**
@@ -434,5 +522,367 @@ test.describe('Buzz-Space-Verwaltung (E2E, nur E2E_RELAY=buzz)', () => {
         const inRoom = relayContents()
         expect(inRoom, 'gelöschtes Event darf nicht mehr am Relay liegen').not.toContain(marker)
         expect(inRoom, 'Gegenprobe muss am Relay liegen (sonst prüft der Test nichts)').toContain(keeper)
+    })
+
+
+    // ── Raum-Abgleich (`groups.ts reconcileSpaceRooms` + `roomReconcile.ts`) ─────
+    //
+    // Diese drei Fälle hängen ausdrücklich an der VERDRAHTUNG, nicht an der
+    // Entscheidungsfunktion: `roomReconcile.test.ts` belegt, dass eine reine Funktion
+    // die richtige Id-Liste zurückgibt — dass diese Liste einen Aufrufer hat, im
+    // `repository` ankommt und die IndexedDB nachzieht, belegt erst ein Lauf durch die
+    // Fläche. Gegengemessen am zweistufigen Stand (2026-08-19, je ein Lauf): mit
+    // auskommentiertem `void reconcileSpaceRooms(url)` bleiben `npm run test:unit`
+    // (1067/1067) und `npm run typecheck` (rc 0) grün, während BEIDE positiven Fälle
+    // hier fallen — (a) nach 150 s Nachhaken, der Reload-Pfad mit „Expected 0,
+    // Received 1". Der fail-closed-Fall bleibt dabei grün: eine ausgehängte Verdrahtung
+    // löscht nichts, und „nichts gelöscht" ist genau seine Zusage. **Ein Fall, der die
+    // Verdrahtung deckt, kann deshalb nur ein POSITIVER sein**; die Fail-closed-Zusage
+    // braucht ihre eigene Mutation — und zwar eine zusammengesetzte, siehe dort.
+    //
+    // **Warum gegen Buzz und nirgends sonst:** nur hier versenkt der Relay den
+    // GRABSTEIN mit. zooid lässt das 9008 stehen (`groups.go:108-129` löscht alles mit
+    // diesem `h` außer dem 9008 selbst; `CanRead` gibt für einen Grabstein ohne
+    // Metadaten ausdrücklich `true`) — dort greift der alte Ausblend-Weg, und der neue
+    // Code liefe ins Leere. Dieselben Fälle gegen zooid wären grün, ohne über den
+    // Abgleich irgendetwas auszusagen.
+
+    /**
+     * Die KACHEL eines Raums in der Raumliste — nicht irgendein Vorkommen seines Namens.
+     *
+     * `getByText('E2E-Welcome', { exact: true })` sah lange eindeutig aus und ist es
+     * nicht: die Thread-Vorschau derselben Seite beschriftet ihre Karten mit
+     * `roomName(t.roomH)`, und sobald ein Nachbar-Spec auf demselben Worker-Stack einen
+     * Thread im Welcome-Raum angelegt hat, trifft derselbe Locator zwei Elemente —
+     * Playwright bricht dann mit „strict mode violation" ab. Gemessen im Vollauf vom
+     * 2026-08-19; in fünf Einzelläufen davor war der Locator eindeutig, weil die
+     * Thread-Karte fehlte. Die Rolle trennt sauber: die Kachel ist ein Button, dessen
+     * zugänglicher Name den Raumnamen enthält, die Thread-Karte trägt ein eigenes
+     * `aria-label` (Autor + Betreff) und damit den Raumnamen NICHT.
+     */
+    const roomTile = (page: Page, name: string) => page.getByRole('button', { name })
+
+    /**
+     * Hängt die Space-Insel neu ein, OHNE die Seite neu zu laden.
+     *
+     * Der Unterschied war ursprünglich lasttragend: der Abgleich zog seinen
+     * Bestands-Schnappschuss synchron beim Einhängen, und nach einem `page.reload()`
+     * war der IndexedDB-Cache noch nicht in das repository gespiegelt — nur über
+     * `Livewire.navigate` (Modul bleibt am Leben, Cache längst hydriert) sah er
+     * überhaupt etwas. **Das ist seit `awaitCacheHydration` behoben** (siehe den
+     * Reload-Pfad-Test weiter unten), und damit ist dieser Helfer keine Krücke mehr,
+     * sondern deckt einen eigenen Nutzerweg ab: das Wechseln in einen Raum und zurück,
+     * ohne Seitenaufbau. Genau dieser Weg löst einen erneuten Abgleich aus, ohne den
+     * Modulzustand (Sperre, In-Flight-Marke) zurückzusetzen — ein Reload täte das und
+     * prüfte deshalb etwas anderes.
+     */
+    async function remountSpaces(page: Page): Promise<void> {
+        await page.evaluate(
+            (roomH) =>
+                (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate(`/rooms/${roomH}`),
+            BUZZ_ROOM_WELCOME,
+        )
+        await page.waitForURL('**/rooms/**')
+        await page.evaluate(() => (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/spaces'))
+        await page.waitForURL('**/spaces')
+        // Erst wenn die Liste wieder steht, ist eine Zählung darauf etwas wert — sonst
+        // wäre „Kachel weg" schon während des Seitenwechsels erfüllt.
+        await expect(roomTile(page, 'E2E-Welcome')).toBeVisible({ timeout: 30_000 })
+    }
+
+    /**
+     * (a) Ein am Relay gelöschter Kanal verschwindet aus der Liste UND aus dem Cache —
+     * und bleibt nach einem Kaltstart weg.
+     *
+     * Ohne Aufräumen in der IndexedDB wäre die Kachel nach dem nächsten Boot wieder da:
+     * `ROOM_META` steht in `storage.ts PERSIST_KINDS`. Genau deshalb prüft dieser Test
+     * beide Schichten — und der letzte Reload läuft mit BLOCKIERTEM Relay
+     * (`routeWebSocket`), damit nichts nachgeladen und nichts ein zweites Mal aufgeräumt
+     * werden kann: was dann noch steht, steht aus dem Cache; was fehlt, fehlt dort auch.
+     *
+     * Der Weg über `remountSpaces` deckt den In-App-Wechsel ab; den Reload-Pfad prüft
+     * der Test darunter. Die Schleife hängt bewusst an einer BEDINGUNG statt an einer
+     * Uhr, denn ob die 60-s-Sperre (`groups.ts ROOM_RECONCILE_COOLDOWN_MS`) im Weg
+     * steht, hängt vom Profilzustand ab.
+     *
+     * **Hier stand bis 2026-08-19, die Schleife müsse diese Sperre aussitzen, weil der
+     * Login-Lauf sie setze. Das gilt seit `shouldArmReconcileLock` nicht mehr, und die
+     * Messung zeigt es:** der Fall lief vorher 1.1 min, jetzt 10.7 s. Daraus folgt
+     * zwingend, dass der Login-Lauf die Sperre NICHT gesetzt hat — sonst wäre der
+     * nächste Abgleich 60 s lang `skipped` gewesen und die Kachel hätte nicht nach
+     * wenigen Sekunden verschwinden können. Der Grund steht in
+     * `shouldArmReconcileLock`: die Sperre verlangt `knownCount > 0`, und beim
+     * Einhängen auf einem kalten Profil ist das repository noch leer. Die 150-s-Grenze
+     * der Schleife bleibt als Obergrenze für den warmen Fall stehen; sie kostet nichts,
+     * solange der Test grün ist.
+     */
+    test('Abgleich: ein am Relay gelöschter Raum verschwindet aus Liste und Cache', async ({ page }) => {
+        // Anlegen, Login, Cache-Roundtrip, Sperrfrist, Kaltstart — weit jenseits der 30 s.
+        test.setTimeout(300_000)
+
+        const h = randomUUID()
+        const name = `E2E-Geist-${Math.random().toString(36).slice(2, 8)}`
+        let deleted = false
+        const deleteAtRelay = (): void => {
+            execFileSync(NAK, ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9008', '-t', `h=${h}`, WS()], {
+                encoding: 'utf8',
+                timeout: 20_000,
+            })
+            deleted = true
+        }
+
+        try {
+            // (0) Wegwerf-Kanal per `nak`. `name` ist bei Buzz Pflicht und `h` wird nur
+            // als UUID übernommen — beides ist im Anlege-Test oben begründet.
+            execFileSync(
+                NAK,
+                ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9007', '-t', `h=${h}`, '-t', `name=${name}`, '-t', 'about=E2E-Abgleich', WS()],
+                { encoding: 'utf8', timeout: 20_000 },
+            )
+            expect(roomsAtRelay().map((r) => r.d), 'der Wegwerf-Raum muss als 39000 am Relay liegen').toContain(h)
+
+            await loginNsec(page, BUZZ_OWNER_NSEC)
+
+            // (1) Die Kachel ist da — der Ausgangszustand, ohne den der Rest nichts misst.
+            await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 25_000 })
+
+            // (2) …und das 39000 liegt in der IndexedDB. VORBEDINGUNG des Kaltstart-Belegs:
+            // wäre der Raum nie gecacht worden, wäre „nach dem Boot weg" trivial erfüllt.
+            const cacheDb = `einundzwanzig-cache-${pubOf(BUZZ_OWNER_SEC_HEX)}`
+            await expect
+                .poll(() => cachedRoomIds(page, cacheDb), {
+                    timeout: 30_000,
+                    message: 'das 39000 des Wegwerf-Raums muss erst im Cache liegen (syncEvents batcht 3 s)',
+                })
+                .toContain(h)
+
+            // (3) Löschen am Relay — und die Buzz-Eigenheit, die den alten Weg aushebelt,
+            // gleich mitgemessen: danach ist WEDER die 39000 abrufbar NOCH ein Grabstein.
+            deleteAtRelay()
+            const nachher = roomsAtRelay().map((r) => r.d)
+            expect(nachher, 'die 39000 des gelöschten Raums darf der Relay nicht mehr liefern').not.toContain(h)
+            // Die Kontrolle zur Zeile darunter, gleiche Aufrufform, gleicher Moment, nur
+            // anderes Kind: ohne sie wäre „keine Grabsteine" auch bei kaputter Abfrage grün.
+            expect(relayQuery(['-k', '39000']).length, 'Kontrolle: dieselbe Abfrageform liefert gerade Zeilen').toBeGreaterThan(0)
+            expect(
+                relayQuery(['-k', '9008']),
+                'Buzz versenkt den Grabstein mit — gäbe es ihn noch, griffe der alte Ausblend-Weg und dieser Test prüfte nichts',
+            ).toEqual([])
+
+            // (4) Der Abgleich beim nächsten Einhängen räumt die Kachel weg. Die Schleife
+            // sitzt die 60-s-Sperre aus; sie wartet auf eine BEDINGUNG, nicht auf eine Uhr.
+            await expect
+                .poll(
+                    async () => {
+                        await remountSpaces(page)
+                        return page.getByText(name, { exact: true }).count()
+                    },
+                    {
+                        timeout: 150_000,
+                        intervals: [2_000],
+                        message: 'der Abgleich muss den am Relay gelöschten Raum aus der Liste nehmen',
+                    },
+                )
+                .toBe(0)
+
+            // (5) Die Schicht, in der der Defekt saß: das 39000 ist auch aus der
+            // IndexedDB verschwunden — und NUR dieses.
+            await expect
+                .poll(() => cachedRoomIds(page, cacheDb), {
+                    timeout: 30_000,
+                    message: 'repository.removeEvent muss über den update-Event auch die IndexedDB räumen',
+                })
+                .not.toContain(h)
+            expect(await cachedRoomIds(page, cacheDb), 'nur der gelöschte Raum darf gehen').toContain(BUZZ_ROOM_WELCOME)
+
+            // (6) Kaltstart mit blockiertem Relay: kein Nachladen, kein zweites Aufräumen.
+            // Die Liste rendert rein aus dem Cache — der Geisterraum ist auch dort nicht
+            // mehr, die Nachbarn schon.
+            await page.routeWebSocket(new RegExp(`localhost:${BUZZ_PORT}`), () => {})
+            await page.reload()
+            await expect(roomTile(page, 'E2E-Welcome')).toBeVisible({ timeout: 30_000 })
+            await expect(page.getByText(name, { exact: true })).toHaveCount(0)
+        } finally {
+            if (!deleted) {
+                // Der Test ist vor dem Löschen gescheitert — sonst wüchse der Kanalbestand
+                // des geteilten Stacks bei jedem Fehlschlag.
+                try {
+                    deleteAtRelay()
+                } catch {
+                    // Still: ein scheiternder Aufräumer darf den Befund nicht überschreiben
+                    // (siehe support/rooms.ts). Der Bloat-Guard ist die zweite Linie.
+                }
+            }
+        }
+    })
+
+    /**
+     * **BEHOBEN — dieser Test war bis 2026-08-19 als `test.fail()` verankert.**
+     *
+     * Die Zusage: nach einem RELOAD ist der am Relay gelöschte Raum weg. Sie war auf
+     * dem Reload-Pfad nicht erfüllt, und zwar nicht sporadisch, sondern immer:
+     *
+     * `runRoomReconcile` nahm seinen Bestands-Schnappschuss (`knownBefore =
+     * repository.query([{kinds:[ROOM_META]}])`) synchron beim Einhängen der Insel.
+     * `storage.ts initStorage/storageReady` spiegelt den IndexedDB-Cache aber
+     * ASYNCHRON in das repository, und `bridge.ts` wartet für die Raumliste nicht darauf.
+     * Nach einem Reload existierte der Geisterraum ausschließlich im Cache — er war damit
+     * im Schnappschuss nicht enthalten und konnte nicht in die Löschliste geraten. Der
+     * (mit leeren Händen) erfolgreiche Lauf setzte danach die 60-s-Sperre, die den
+     * nächsten Versuch abwürgte. Jeder weitere Reload begann dasselbe Rennen von vorn.
+     *
+     * Gemessen am buzz-test-Stack (2026-08-19): nach Reload Kachel=1, Cache=vorhanden —
+     * über 30 s und 33 Abfragen unverändert; nach Ablauf der Sperre und einem Einhängen
+     * OHNE Reload (`Livewire.navigate`) Kachel=0, Cache=leer.
+     *
+     * **Der Fix** (`groups.ts runRoomReconcile`, `roomReconcile.ts`): der Lauf wartet
+     * jetzt auf `storageReady`, bevor er den Schnappschuss zieht — das Rennen, gegen
+     * das die frühe Momentaufnahme schützt, betrifft nur NEU eintreffende Ereignisse
+     * und beginnt ohnehin erst mit dem REQ. Und die Sperre hängt nicht mehr am Verdikt
+     * allein (`shouldArmReconcileLock`): ein Lauf ohne hydrierten Cache oder ohne
+     * beurteilten Bestand ist kein Erfolg, den man sich merken dürfte.
+     *
+     * Der `test.fail()`-Marker hat getan, wofür er da war: er schlug am Tag der
+     * Behebung um („Expected to fail, but passed", Lauf vom 2026-08-19) und ist mit
+     * dem Fix entfernt worden. Der Test bleibt als Regressionsschutz stehen — er ist
+     * der einzige, der den Reload-Pfad fährt (der Test darüber nimmt bewusst
+     * `remountSpaces`).
+     */
+    test('Reload-Pfad: der Abgleich räumt den Geisterraum auch nach einem Reload', async ({ page }) => {
+        test.setTimeout(240_000)
+
+        const h = randomUUID()
+        const name = `E2E-Geist-Reload-${Math.random().toString(36).slice(2, 8)}`
+        let deleted = false
+        const deleteAtRelay = (): void => {
+            execFileSync(NAK, ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9008', '-t', `h=${h}`, WS()], {
+                encoding: 'utf8',
+                timeout: 20_000,
+            })
+            deleted = true
+        }
+
+        try {
+            execFileSync(
+                NAK,
+                ['event', '--auth', '--sec', BUZZ_OWNER_SEC_HEX, '-k', '9007', '-t', `h=${h}`, '-t', `name=${name}`, WS()],
+                { encoding: 'utf8', timeout: 20_000 },
+            )
+            await loginNsec(page, BUZZ_OWNER_NSEC)
+            await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 25_000 })
+
+            const cacheDb = `einundzwanzig-cache-${pubOf(BUZZ_OWNER_SEC_HEX)}`
+            await expect
+                .poll(() => cachedRoomIds(page, cacheDb), { timeout: 30_000, message: 'Raum muss erst im Cache liegen' })
+                .toContain(h)
+
+            deleteAtRelay()
+            expect(roomsAtRelay().map((r) => r.d)).not.toContain(h)
+
+            await page.reload()
+            // Erst die Liste abwarten, sonst wäre `toHaveCount(0)` schon vor dem ersten
+            // Paint erfüllt und der Fehlschlag käme aus der falschen Richtung.
+            await expect(roomTile(page, 'E2E-Welcome')).toBeVisible({ timeout: 30_000 })
+
+            // Die Zeile, an der es bis zum Fix brach. Der Abgleich wartet jetzt auf den
+            // hydrierten Cache, sieht den nur dort liegenden Geisterraum und bestätigt ihn
+            // per Einzelprobe, bevor er ihn entfernt.
+            await expect(page.getByText(name, { exact: true })).toHaveCount(0, { timeout: 30_000 })
+        } finally {
+            if (!deleted) {
+                try {
+                    deleteAtRelay()
+                } catch {
+                    /* still — siehe oben */
+                }
+            }
+        }
+    })
+
+    /**
+     * (b) Fail-closed — ein Relay, der nie antwortet, räumt die Raumliste NICHT aus.
+     *
+     * Die Abwesenheit eines Raums beweist seine Löschung nur bei VOLLSTÄNDIGER Antwort.
+     * Hier ist sie es nicht: der Socket kommt zustande, ein EOSE kommt nie.
+     * `classifyRoomAnswer` muss dann bei `no-eose`/`disconnected` landen und die
+     * Löschliste leer bleiben.
+     *
+     * ── Was dieser Test kalibriert — und was er NICHT kann ─────────────────────
+     *
+     * **Die Zusage hängt an einer KETTE aus zwei Riegeln, und der Test prüft sie nur
+     * als Ganzes.** Das ist keine Schwäche des Tests, sondern die Bauform des
+     * Prüfgegenstands: beide Stufen lesen dieselbe Funktion (`classifyRoomAnswer`),
+     * und jeder Riegel allein hält den anderen bereits fest. Selbst gemessen am
+     * buzz-test-Stack (2026-08-19, je ein Lauf, Wartewert 50 s):
+     *
+     * | Mutation in `roomReconcile.ts`                                   | dieser Test |
+     * |------------------------------------------------------------------|-------------|
+     * | M2 `classifyRoomAnswer` ≡ `'complete'`                            | **grün** (55.8 s) |
+     * | M3 `confirmsRoomGone` → `classifyRoomAnswer(probe) !== 'complete'`| **grün** (55.7 s) |
+     * | M4 = Stufe-1-Riegel (`selectReconcileCandidates:207-209`) raus **und** M3 zugleich | **ROT** |
+     *
+     * Warum die Einzelpunkte nicht beißen: M2 schaltet über `confirmsRoomGone`
+     * (`:238-239`, `=== 'nothing-visible'`) die Löschbedingung gleich mit ab — das
+     * mutierte Verdikt ist nie `'nothing-visible'`, also bestätigt keine Einzelprobe.
+     * M3 allein läuft ins Leere, weil `selectReconcileCandidates` bei schweigendem
+     * Relay schon vorher `[]` liefert und gar keine Probe stattfindet. **Erst beide
+     * Riegel zugleich erreichen die Zusicherung.**
+     *
+     * Die rote Ausgabe unter M4 ist die der ganzen Raumliste: `getByRole('button',
+     * { name: 'E2E-Welcome' }) … element(s) not found`. (a) und der Reload-Pfad
+     * bleiben unter M4 grün — die drei Fälle decken also verschiedene Stellen ab.
+     *
+     * **Was hier bis 2026-08-19 falsch stand:** „mit `classifyRoomAnswer` auf festes
+     * `'complete'` verkürzt fällt dieser Test" — das war gegen die damalige, einstufige
+     * Fassung mit Kappungs-Heuristik richtig und wurde vom zweistufigen Umbau
+     * überholt. Eine Kalibrierzeile ist eine Messaussage über EINEN Codestand; wer sie
+     * stehen lässt, hält den nächsten Leser vom Nachmessen ab.
+     *
+     * **Warum ein fester Wartewert und kein `waitFor`:** die Zusicherung lautet „es
+     * passiert nichts". Dafür gibt es kein Element, auf das man warten könnte; die
+     * einzige sinnvolle Schranke sind die Fristen des Produkts selbst. Dieselbe Bauform
+     * wie der Batch-Flush in `storage-cache.spec.ts`.
+     */
+    test('Abgleich ist fail-closed: ein schweigender Relay entfernt keinen Raum', async ({ page }) => {
+        test.setTimeout(180_000)
+
+        await loginNsec(page, BUZZ_OWNER_NSEC)
+        await expect(roomTile(page, 'E2E-Welcome')).toBeVisible({ timeout: 25_000 })
+
+        // Der Cache muss warm sein, sonst hätte der Abgleich beim Kaltstart nichts zu
+        // löschen und der Test wäre aus dem falschen Grund grün.
+        const cacheDb = `einundzwanzig-cache-${pubOf(BUZZ_OWNER_SEC_HEX)}`
+        // BEIDE Räume in EINEM Poll: `syncEvents` batcht alle 3 s, die zweite 39000 kann
+        // eine Runde später fallen. Eine Nachprüfung hinter dem Poll wäre genau dieses
+        // Rennen — im Vollauf vom 2026-08-19 auch prompt eingetreten (nur `welcome` da).
+        await expect
+            .poll(() => cachedRoomIds(page, cacheDb), { timeout: 30_000, message: 'beide Seed-Räume müssen erst im Cache liegen' })
+            .toEqual(expect.arrayContaining([BUZZ_ROOM_WELCOME, BUZZ_ROOM_GENERAL]))
+
+        // Ab jetzt schwarzes Loch: die Verbindung entsteht, eine Antwort kommt nie.
+        await page.routeWebSocket(new RegExp(`localhost:${BUZZ_PORT}`), () => {})
+        await page.reload()
+        await expect(roomTile(page, 'E2E-Welcome')).toBeVisible({ timeout: 30_000 })
+
+        // Den Abgleich DIESES Boots vollständig auslaufen lassen. Die Frist ist aus den
+        // Zeitbudgets des Produkts abgeleitet, nicht geschätzt: Stufe 1 (breite Abfrage)
+        // 20 s + Stufe 2 (Einzelproben, parallel) 20 s — beide `groups.ts
+        // ROOM_RECONCILE_TIMEOUT_MS` — plus 3 s Cache-Batch (`storage.ts syncEvents`)
+        // = 43 s; 50 s lassen Luft. Unter M4 fällt der Test bei diesem Wert (gemessen),
+        // die Schranke ist also nicht bloß hergeleitet, sondern belegt.
+        //
+        // Hier standen bis 2026-08-19 **84 s + Remount + 25 s**, begründet mit der
+        // 60-s-Sperre, die ein leerhändiger Lauf nach einem Reload setzte. Diese Lage
+        // gibt es nicht mehr: `runRoomReconcile` wartet auf `awaitCacheHydration`, der
+        // erste Lauf nach dem Reload hat damit selbst den vollen Bestand — er IST der
+        // gefährliche, und ein zweiter Anlauf ist überflüssig. 109 s gespart, ohne
+        // Aussage zu verlieren.
+        await page.waitForTimeout(50_000)
+
+        await expect(roomTile(page, 'E2E-Welcome')).toBeVisible()
+        await expect(roomTile(page, 'E2E-General')).toBeVisible()
+        const cached = await cachedRoomIds(page, cacheDb)
+        expect(cached, 'ohne vollständige Antwort darf kein 39000 aus dem Cache fliegen').toContain(BUZZ_ROOM_WELCOME)
+        expect(cached).toContain(BUZZ_ROOM_GENERAL)
     })
 })
