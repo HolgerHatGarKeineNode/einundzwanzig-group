@@ -318,7 +318,7 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // echte, bewusste Landmarke, keine Regression — die Zahl steigt entsprechend.
     // 'room' unverändert. 'spaces' 9 → 11: derselbe Commit (0b0f94a) fügte der
     // mobilen Workspace-Raumliste zwei Statuszeilen hinzu (Nadel-/Glocke-Icon je
-    // angehefteter/stummgeschalteter Zeile, `⚡spaces.blade.php` ~Z. 1029/1035),
+    // angehefteter/stummgeschalteter Zeile, `⚡spaces.blade.php` ~Z. 1053/1058),
     // beide `aria-hidden="true"` — korrekt versteckt, weil ihr Inhalt seit der
     // I18n-Korrektur (2026-08-17) im `aria-label` der Zeile steht statt in einem
     // sr-only-Geschwistertext. Multiset-Diff (`array_count_values`, pre-P7 gegen

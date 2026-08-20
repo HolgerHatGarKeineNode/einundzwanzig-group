@@ -340,3 +340,68 @@ test('P2 Rail: der Workspace steht an zweiter Stelle, direkt unter den Räumen',
         'die Blockfolge muss RAIL_GROUP_ORDER entsprechen (js/railGroups.ts)',
     );
 });
+
+/**
+ * Der Aktiv-Zustand der Artikel-Zeile in der Rail-Fußzeile.
+ *
+ * **Warum das serverseitig prüfbar ist und nicht in Playwright gehört.** Der Zustand
+ * kommt aus `request()->routeIs()` (`desktop-rail.blade.php`) und steht damit schon im
+ * ausgelieferten HTML. Der `xl`-Viewport entscheidet nur darüber, ob Alpine das
+ * `<template x-if="$store.viewport?.desktop">` INSTANZIIERT — nicht darüber, was Blade
+ * hineinrendert. Die billigere Schicht trägt die Aussage also vollständig; dass die
+ * Zeile im Browser auch sichtbar ist, hält `longform-reader.spec.ts` fest.
+ *
+ * **Warum die Zeile isoliert wird.** `/articles` ist auf derselben Seite mehrfach
+ * verlinkt (Befehlspalette, Einstiegszeile im Entdecken-Block). Ein `str_contains`
+ * auf das ganze Dokument würde also irgendeinen dieser Links messen — oder gar keinen,
+ * und trotzdem grün werden. Der Anker ist deshalb die Kombination aus Ziel und der
+ * Zeilen-Geometrie `min-h-9`, die nur die Rail-Zeile trägt.
+ */
+function railArtikelAnker(string $html): string
+{
+    preg_match_all('/<a\b[^>]*>/i', $html, $treffer);
+
+    $zeilen = array_values(array_filter(
+        $treffer[0],
+        static fn (string $tag): bool => str_contains($tag, '/articles"') && str_contains($tag, 'min-h-9'),
+    ));
+
+    // Fail-closed: findet der Anker die Zeile nicht, ist das „kann ich nicht messen"
+    // und nicht „bestanden". Ein Prüfwerkzeug, das bei fehlender Eingabe grün meldet,
+    // misst irgendwann nichts mehr und sagt es nicht.
+    expect($zeilen)->toHaveCount(1, 'die Rail-Fußzeilen-Zeile zu /articles ist nicht (oder mehrfach) im Markup — der Test misst sonst den falschen Link');
+
+    return $zeilen[0];
+}
+
+test('Rail-Fußzeile: die Artikel-Zeile markiert sich nur auf den Artikel-Routen als aktueller Ort', function () {
+    $session = ['nostr_pubkey' => str_repeat('a', 64)];
+
+    $aufArtikeln = railArtikelAnker((string) $this->withSession($session)
+        ->get(route('group.articles'))->assertOk()->getContent());
+
+    // Programmatisch UND sichtbar: Farbe allein darf den Zustand nicht tragen
+    // (WCAG 1.4.1), `aria-current` allein wäre für sehende Nutzer unsichtbar.
+    expect($aufArtikeln)->toContain('aria-current="page"');
+    expect($aufArtikeln)->toContain('font-semibold');
+    expect($aufArtikeln)->not->toContain('text-muted');
+
+    // Gegenprobe auf der Startseite: dieselbe Zeile, dieselbe Rail, anderer Ort.
+    // Ohne diese Hälfte bliebe der Test grün, wenn `aria-current` unbedingt stünde.
+    $aufSpaces = railArtikelAnker((string) $this->withSession($session)
+        ->get(route('group.spaces'))->assertOk()->getContent());
+
+    expect($aufSpaces)->not->toContain('aria-current');
+    expect($aufSpaces)->toContain('text-muted');
+    expect($aufSpaces)->not->toContain('font-semibold');
+});
+
+test('Rail-Fußzeile: auch die Artikel-Vollansicht zählt als "hier" — ein gelesener Artikel liegt unter Artikel', function () {
+    // `naddr` muss nicht auflösbar sein: die Route rendert die Shell in jedem Fall,
+    // und geprüft wird die Rail, nicht der Artikel. Genau darum steht diese Aussage
+    // hier und nicht im Reader-Test.
+    $anker = railArtikelAnker((string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+        ->get(route('group.article', ['naddr' => 'naddr1beispiel']))->assertOk()->getContent());
+
+    expect($anker)->toContain('aria-current="page"');
+});
