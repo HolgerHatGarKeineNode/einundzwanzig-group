@@ -7,9 +7,15 @@
 /storage/*.key
 /storage/pail
 /vendor
+# Jede .env-Variante, nicht nur die drei bekannten Namen. Die Aufzaehlung war eine
+# Falle: am 2026-08-20 entstand beim Setzen von NOSTR_BOARD_URL eine Sicherung
+# `.env.vor-board-url`, und die deckte KEINE der drei Zeilen ab — `git check-ignore`
+# sagte „nicht ignoriert", `git status` listete sie als untracked. Ein `git add .`
+# haette APP_KEY, beide NSECs und vier weitere Zugangsdaten dauerhaft in die History
+# geschrieben. Ein Muster kann man nicht vergessen, einen Dateinamen schon.
 .env
-.env.backup
-.env.production
+.env.*
+!.env.example
 .phpactor.json
 .phpunit.result.cache
 Homestead.json
