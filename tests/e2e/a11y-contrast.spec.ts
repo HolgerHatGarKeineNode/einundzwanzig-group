@@ -1,7 +1,7 @@
 // Seit P9.2 über `board-fixtures` statt direkt über `fixtures`: das dortige
 // worker-scoped `boardServer`-Fixture fährt einen ZWEITEN `php artisan serve`
 // mit `NOSTR_BOARD_URL` auf demselben worker-eigenen zooid (P7-Muster). Nur so
-// rendert der Server `@if ($hasBoard)` die Artikel-Zeile (`⚡spaces:757`) —
+// rendert der Server `@if ($hasBoard)` die Artikel-Zeile (`⚡spaces:706`) —
 // einer der bis P9 ungerendert gebliebenen Grafik-Träger. Der Space-Relay ist
 // derselbe wie vorher, Login/Ungelesen/Raumphasen laufen unverändert.
 import { test, expect, type Page } from './support/board-fixtures'
@@ -112,7 +112,7 @@ const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
  *   als Beschriftung eindeutig greifbar ist (kein anderer Träger malt ein „X").
  * - `h=propsupport` (t=project-support) + Join des TEST-USERS: ein EIGENER
  *   Antragsraum reicht für `proposalCount() > 0` — die Entdecken-Zeile
- *   (`⚡spaces:700`) rendert auch ohne Admin, denn `_proposalPool()` nimmt
+ *   (`⚡spaces:759`) rendert auch ohne Admin, denn `_proposalPool()` nimmt
  *   `mine` immer auf; nur FREMDE Anträge brauchen isAdmin.
  */
 function seedKontrastTraeger(): void {
@@ -172,7 +172,7 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     // (standardCount() > 0) nicht da, und die Messung ginge am Ursprungsbefund vorbei.
     await expect(page.getByText('Willkommen', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     // P9.2: Der eigene Antragsraum (seedKontrastTraeger) macht die Projektunterstützungs-
-    // Zeile sichtbar — ihr Icon-Chip (⚡spaces:700) ist einer der bis P9 ungerenderten
+    // Zeile sichtbar — ihr Icon-Chip (⚡spaces:759) ist einer der bis P9 ungerenderten
     // Grafik-Träger. Gewartet wird auf die ZEILE, nicht auf den Chip: die Zeile ist der
     // Zustand, der Chip sein Symptom — und ein Join, der noch nicht durch ist, würde
     // hier laut rot statt unten mit einer Zahl, die nichts aussagt.
@@ -713,8 +713,8 @@ for (const theme of ['light', 'dark'] as const) {
         // nicht auf den Zeilentext: die Klasse ist der Vertrag, der Text ist Seed-Daten.
         //
         // Seit P9.2 sind ALLE sechs gerendert. Die bis dahin ungerenderten drei:
-        // `⚡spaces:700` (Antragsräume) — der eigene Antragsraum aus seedKontrastTraeger
-        // genügt, denn _proposalPool() nimmt `mine` ohne Admin auf; `:757` (Artikel-
+        // `⚡spaces:759` (Antragsräume) — der eigene Antragsraum aus seedKontrastTraeger
+        // genügt, denn _proposalPool() nimmt `mine` ohne Admin auf; `:706` (Artikel-
         // Zeile) — serverseitig `@if ($hasBoard)`, hergestellt über den board-serve
         // aus support/board-fixtures.ts; `:784` (Raum anlegen, isAdmin) — eigener
         // Test unten, der Login als zooid-Admin. Die Zeilen-UMFELDE sind hier je
