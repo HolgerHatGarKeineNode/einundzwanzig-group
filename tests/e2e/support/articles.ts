@@ -58,6 +58,16 @@ export function publishArticle(
         publishedAt?: number
         topics?: string[]
         createdAt?: number
+        /**
+         * Felder eines `imeta`-Tags (NIP-92), je Eintrag `"<schlüssel> <wert>"` —
+         * z. B. `['url https://…/folge.mp3', 'm audio/mpeg']`.
+         *
+         * `nak` trennt die Werte EINES Tags am Semikolon (`-t 'imeta=a;b'`, siehe
+         * `nak event --help`), deshalb wird hier zusammengefügt statt mehrfach `-t`
+         * übergeben — mehrere `-t imeta=…` ergäben mehrere Tags statt eines mit
+         * mehreren Werten.
+         */
+        imeta?: string[]
     },
 ): string {
     const args = ['event', '--auth', '--sec', sec, '-k', '30023', '-d', opts.identifier]
@@ -75,6 +85,9 @@ export function publishArticle(
     }
     for (const topic of opts.topics ?? []) {
         args.push('-t', `t=${topic}`)
+    }
+    if (opts.imeta !== undefined) {
+        args.push('-t', `imeta=${opts.imeta.join(';')}`)
     }
     if (opts.createdAt !== undefined) {
         args.push('--ts', String(opts.createdAt))
