@@ -49,9 +49,15 @@ import { startFakeBuzzRelay } from './support/buzz-relay'
  */
 test(
     'Buzz-Reconnect: RECONNECT_MIN_GAP_MS deckelt Socket-Abrisse, hebt sie nach Ablauf aber wieder auf',
-    async ({ page }) => {
+    async ({ page, relayWaechter }) => {
         const nsec = nsecEncode(generateSecretKey())
         const relay = await startFakeBuzzRelay()
+        // Der Fake-Buzz-Relay dieses Tests läuft auf einem freien Ephemeral-Port und ist
+        // genau der Gegenstand der Messung (`stubDeadSpace(page, relay.url)` unten schiebt
+        // ihn der Seite als aktiven Space unter). Für den Relay-Wächter ist er ein Fremder
+        // — also meldet der Test seine eigene Infrastruktur an. Kein Aufweichen der
+        // Erlaubnisliste: die Freigabe gilt für DIESEN Test und für DIESE eine Adresse.
+        relayWaechter.erlaube(relay.url)
 
         try {
             await stubVereinDocument(page)

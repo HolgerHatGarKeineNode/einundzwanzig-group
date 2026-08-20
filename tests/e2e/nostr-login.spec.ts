@@ -51,10 +51,17 @@ test.describe('Nostr-Login (E2E)', () => {
         await expect(page.locator('body')).toContainText(npub)
     })
 
-    test('NIP-46-Bunker-Login meldet über den lokalen Relay im Gate an', async ({ page }) => {
+    test('NIP-46-Bunker-Login meldet über den lokalen Relay im Gate an', async ({ page, relayWaechter }) => {
         const { sk, npub } = testKeys()
         const relay = await startRelay()
         const bunker = await startBunker(relay.url, sk)
+        // Dieser Test bringt SEINEN EIGENEN Relay mit (`support/relay.ts`, freier Port aus
+        // der Ephemeral-Reihe) — die Seite spricht ihn also zu Recht an, und der
+        // Relay-Wächter kann das nicht wissen. Die Freigabe steht deshalb hier, mit der
+        // Adresse, die der Test selbst erzeugt hat: die Erlaubnisliste des Wächters bleibt
+        // unangetastet (sie führt weiterhin nur die beiden Worker-Relays), und ein
+        // VERSEHENTLICHER fremder Socket in genau diesem Test fiele nach wie vor auf.
+        relayWaechter.erlaube(relay.url)
 
         try {
             await page.goto('/nostr-login')
