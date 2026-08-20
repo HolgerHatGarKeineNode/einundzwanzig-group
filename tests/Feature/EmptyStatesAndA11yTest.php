@@ -339,8 +339,24 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     //                             Composers steht.
     // Alle fünf sind bewusste Landmarken, keine Regression — die Zahl steigt
     // entsprechend. 'directory' und 'spaces' unverändert.
+    // P3 des Longform-Plans (2026-08-21, Artikel-Vollansicht): NACHGEMESSEN, Ergebnis
+    // 'room' 40 → 38. Es ist KEIN Träger verschwunden, sondern zwei sind UMGEZOGEN: die
+    // Lightbox ist aus `⚡room.blade.php` in `components/lightbox-overlay.blade.php`
+    // gewandert, weil die Artikel-Vollansicht dieselbe Fläche braucht (eine zweite Kopie
+    // wäre die Art Duplikat, die genau einmal repariert wird). Multiset-Diff der
+    // sortierten Träger-Listen vor/nach dem Verschieben ist EINSEITIG: es fielen genau
+    // `role="dialog"` und `aria-modal="true"` weg, und genau diese beiden stehen jetzt in
+    // der neuen Datei (dort nachgezählt: 2). Der Rumpf ist zeichengleich verschoben, nur
+    // um eine Ebene ausgerückt.
+    //
+    // **Die neue Datei steht bewusst NICHT in dieser Liste.** Sie hat keine eigene Route
+    // und wird von zwei Views eingebunden; ihre Träger wären in beiden Zeilen doppelt zu
+    // führen. Der Riegel für sie liegt stattdessen bei ihren Zusagen selbst
+    // (`packages/einundzwanzig-group/js/articleReaderMarkup.test.ts` prüft, dass beide
+    // Aufrufer sie einbinden und keiner mehr eine eigene Kopie trägt) — und
+    // `tests/Feature/SafeAreaGateTest.php` zeigt seit demselben Tag auf sie.
     $expected = [
-        'room' => 40,
+        'room' => 38,
         'directory' => 3,
         'spaces' => 11,
     ];

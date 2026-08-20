@@ -39,8 +39,13 @@ $views = dirname(__DIR__, 2).'/packages/einundzwanzig-group/resources/views';
 $kanten = [
     ['components/app-shell.blade.php', 'pt-[max(env(safe-area-inset-top),1.5rem)]', 'Bühne: Inhalt startet unter der Statusleiste'],
     ['⚡room.blade.php', 'pt-[max(env(safe-area-inset-top),1rem)]', 'Raum-Container: Kopf unter der Statusleiste'],
-    ['⚡room.blade.php', 'top-[max(env(safe-area-inset-top),1rem)]', 'Lightbox-✕: der einzige Ausgang, nicht unter der Uhr'],
-    ['⚡room.blade.php', 'right-[max(env(safe-area-inset-right),1rem)]', 'Lightbox-✕: im Querformat liegt die Aussparung seitlich'],
+    // Die Lightbox ist am 2026-08-21 (P3) aus `⚡room.blade.php` in eine eigene Komponente
+    // gewandert, weil die Artikel-Vollansicht dieselbe Fläche braucht. **Nur der Pfad hat
+    // sich geändert, nicht der Wortlaut** — die beiden Utilities sind zeichengleich
+    // mitgewandert. Dass sie es sind, prüft zusätzlich
+    // `packages/einundzwanzig-group/js/articleReaderMarkup.test.ts` von der anderen Seite.
+    ['components/lightbox-overlay.blade.php', 'top-[max(env(safe-area-inset-top),1rem)]', 'Lightbox-✕: der einzige Ausgang, nicht unter der Uhr'],
+    ['components/lightbox-overlay.blade.php', 'right-[max(env(safe-area-inset-right),1rem)]', 'Lightbox-✕: im Querformat liegt die Aussparung seitlich'],
 ];
 
 test('jede Systemleisten-Kante rechnet die Aussparung ein', function () use ($views, $kanten) {
