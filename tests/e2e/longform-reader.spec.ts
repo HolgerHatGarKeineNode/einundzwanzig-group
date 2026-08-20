@@ -85,6 +85,189 @@ test('Liste: ein normaler Artikel UND ein Artikel mit d=draft-<ts> erscheinen BE
     await expect(page.getByRole('heading', { name: draftTitle, exact: true })).toBeVisible({ timeout: 20_000 })
 })
 
+// ── DER KERNBEWEIS DER P2 (Artikelliste) ───────────────────────────────────────────
+//
+// „Ein Wort, das NUR im Titel steht, findet den Artikel — und der Bestand wird dabei
+// NICHT neu geladen."
+//
+// Die ERSTE Hälfte steht zusätzlich als reiner Test in `js/articleList.test.ts`
+// (`KERNBEWEIS: ein Wort, das NUR im Titel steht, findet den Artikel`). Die ZWEITE ist
+// eine Aussage über das NETZ und deshalb hier: ein reines Modul kann per Konstruktion
+// nicht zeigen, dass ein Tastendruck keinen REQ auslöst — es kennt gar keinen Relay.
+// Genau deshalb liegt diese eine Datei im Host-`tests/`.
+//
+// Gezählt wird am abgesendeten Rahmen (`framesent`), nicht an einem Zustand im Produkt:
+// `window.__reqWatch()` liefert ÜBERFÄLLIGE REQs, nicht die vollständige Liste — es als
+// Beweis zu benutzen hieße, das Produkt für den Test umzubauen. Gefiltert wird auf
+// Rahmen, die BEIDES tragen: `["REQ"` und `30023`. Der Board-Relay ist dieselbe Instanz
+// wie der Space-Relay dieses Workers, es fliegen also ständig fremde REQs (Profile,
+// Räume, Lesestand) über dieselbe Leitung; ohne den Kind-Filter zählte der Beweis das
+// Rauschen der App mit und wäre wertlos.
+
+/** Zählt abgesendete REQ-Rahmen, die nach kind 30023 fragen. Vor der Navigation setzen. */
+function zaehleArtikelReqs(page: Page): () => number {
+    let treffer = 0
+    page.on('websocket', (ws) => {
+        ws.on('framesent', (frame) => {
+            const nutzlast = typeof frame.payload === 'string' ? frame.payload : frame.payload.toString()
+            if (nutzlast.startsWith('["REQ"') && nutzlast.includes('30023')) {
+                treffer += 1
+            }
+        })
+    })
+
+    return () => treffer
+}
+
+/**
+ * Wartet, bis der Zähler zur Ruhe gekommen ist.
+ *
+ * Ohne diesen Schritt hinge der Beweis an einem Rennen: die Liste steht schon, während
+ * ein nachlaufender `load` noch unterwegs sein kann — der Zuwachs käme dann aus dem
+ * Seitenaufbau und würde dem Tastendruck angelastet. Gewartet wird auf eine BEDINGUNG
+ * (zwei gleiche Messungen in Folge), nicht auf eine feste Zeitspanne.
+ */
+async function wartetAufRuhe(page: Page, zaehler: () => number): Promise<number> {
+    let letzter = -1
+    for (let versuch = 0; versuch < 20; versuch++) {
+        const jetzt = zaehler()
+        if (jetzt === letzter) {
+            return jetzt
+        }
+        letzter = jetzt
+        await page.waitForTimeout(500)
+    }
+
+    return zaehler()
+}
+
+test('KERNBEWEIS P2: ein Wort NUR im Titel findet den Artikel — und es geht KEIN neuer REQ raus', async ({
+    page,
+    baseURL,
+}) => {
+    test.setTimeout(90_000)
+
+    const ws = boardWs(baseURL as string)
+    // Ein Kunstwort: es darf in KEINEM anderen Artikel des Relays vorkommen, auch nicht
+    // in einem, den ein früherer Lauf liegen gelassen hat.
+    const stichwort = `Zwiebelfisch${rnd()}`
+    const trefferTitel = `${stichwort} im Bleisatz`
+    const restTitel = `LFOhneStichwort-${rnd()}`
+
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier: `lf-suche-treffer-${rnd()}`,
+        title: trefferTitel,
+        // Weder Kurzfassung noch Fließtext tragen das Wort — der Treffer kann
+        // ausschließlich aus dem TITEL kommen. Das ist die Vorbedingung des Beweises.
+        summary: 'Eine Betrachtung über Satzfehler im Druck.',
+        content: 'Der Text handelt von Blei und Antimon und sonst von gar nichts.',
+        publishedAt: 1_700_000_010,
+    })
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier: `lf-suche-rest-${rnd()}`,
+        title: restTitel,
+        content: 'Ein ganz anderer Artikel ohne das Kunstwort.',
+        publishedAt: 1_700_000_011,
+    })
+
+    const artikelReqs = zaehleArtikelReqs(page)
+    await loginToBoard(page)
+    await page.goto('/articles')
+
+    const treffer = page.getByRole('heading', { name: trefferTitel, exact: true })
+    const rest = page.getByRole('heading', { name: restTitel, exact: true })
+    await expect(treffer).toBeVisible({ timeout: 20_000 })
+    await expect(rest).toBeVisible({ timeout: 20_000 })
+
+    // Erst wenn der Seitenaufbau seine Anfragen abgeschlossen hat, ist der Zähler ein
+    // Nullpunkt und kein bewegtes Ziel.
+    const vorher = await wartetAufRuhe(page, artikelReqs)
+    expect(vorher, 'der Bestand wurde ueberhaupt geladen').toBeGreaterThanOrEqual(1)
+
+    const suchfeld = page.getByPlaceholder('Artikel suchen…')
+    await expect(suchfeld).toBeVisible()
+    await suchfeld.fill(stichwort)
+
+    // Erste Haelfte: das Wort steht nur im Titel und findet trotzdem.
+    await expect(treffer).toBeVisible({ timeout: 10_000 })
+    // Und es FILTERT wirklich — sonst waere „gefunden" nur „stand ohnehin da".
+    await expect(rest).toBeHidden({ timeout: 10_000 })
+    // ZWEIMAL mit Absicht, und deshalb `toHaveCount(2)` statt `toBeVisible()`: die graue
+    // Zahl neben den Bedienelementen UND die `sr-only`-Ansage in der Live-Region
+    // (WCAG 4.1.3 — beim Tippen wandert der Fokus nicht, eine Sprachausgabe erfaehrt sonst
+    // nichts von der Aenderung). Beide tragen denselben Text; ein `getByText` findet also
+    // zwei Knoten, und diese Zusicherung haelt genau das fest, statt es wegzufiltern.
+    await expect(page.getByText('1 Artikel', { exact: true })).toHaveCount(2)
+
+    // Zweite Haelfte: die Suche ist clientseitig. Kein einziger neuer REQ nach kind 30023.
+    // Nochmals abgewartet, damit ein verzoegerter Request nicht durchrutscht.
+    const nachher = await wartetAufRuhe(page, artikelReqs)
+    expect(nachher, `Suche hat ${nachher - vorher} zusaetzliche Artikel-REQs ausgeloest`).toBe(vorher)
+
+    console.log(`[p2-kernbeweis] Artikel-REQs vor der Suche=${vorher}, danach=${nachher}`)
+})
+
+// ── Podcast-Episoden sind eine eigene Klasse — mit Player, ohne Dauer ───────────────
+
+test('Liste: eine Audio-Episode bekommt Plakette und Player aus dem imeta, ein Bild-imeta bekommt KEINEN', async ({
+    page,
+    baseURL,
+}) => {
+    test.setTimeout(90_000)
+
+    const ws = boardWs(baseURL as string)
+    const folgeTitel = `LFFolge-${rnd()}`
+    const bildTitel = `LFGalerie-${rnd()}`
+    const audioUrl = `https://podcast.test/folge-${rnd()}.mp3`
+
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier: `lf-folge-${rnd()}`,
+        title: folgeTitel,
+        content: 'Die Schaunotizen zur Folge.',
+        publishedAt: 1_700_000_020,
+        imeta: [`url ${audioUrl}`, 'm audio/mpeg'],
+    })
+    // Die Gegenprobe: GENAU EIN Artikel des echten Bestands traegt ein `imeta` mit
+    // `m image/webp`. Ein Audio-Player darunter waere der sichtbare Fehler.
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier: `lf-galerie-${rnd()}`,
+        title: bildTitel,
+        content: 'Ein Artikel mit einem Bild-imeta.',
+        publishedAt: 1_700_000_021,
+        imeta: ['url https://bild.test/x.webp', 'm image/webp'],
+    })
+
+    await loginToBoard(page)
+    await page.goto('/articles')
+
+    const folge = page.locator('article').filter({ has: page.getByRole('heading', { name: folgeTitel, exact: true }) })
+    const galerie = page.locator('article').filter({ has: page.getByRole('heading', { name: bildTitel, exact: true }) })
+    await expect(folge).toBeVisible({ timeout: 20_000 })
+    await expect(galerie).toBeVisible({ timeout: 20_000 })
+
+    // Die Klasse: Plakette und Einstieg zum Hoeren.
+    await expect(folge.getByText('Podcast', { exact: true })).toBeVisible()
+    const knopf = folge.getByRole('button', { name: `Folge anhören: ${folgeTitel}` })
+    await expect(knopf).toBeVisible()
+
+    // Im RUHEZUSTAND existiert kein `<audio>` — die Liste kann also nichts vom fremden
+    // Podcast-Host holen, und die Leiste des nativen Players kann kein „0:00" behaupten
+    // (genau das tut sie ohne bekannte Laenge, am Bildschirm nachgesehen).
+    await expect(folge.locator('audio')).toHaveCount(0)
+    await expect(folge).not.toContainText('0:00')
+
+    // Erst der Klick setzt den Player — und seine Quelle stammt aus dem imeta-`url`.
+    await knopf.click()
+    const player = folge.locator('audio')
+    await expect(player).toHaveCount(1)
+    await expect(player).toHaveAttribute('src', audioUrl)
+
+    // Die Gegenprobe: das Bild-imeta erzeugt weder Plakette noch Einstieg.
+    await expect(galerie.locator('audio')).toHaveCount(0)
+    await expect(galerie.getByRole('button', { name: /Folge anhören/ })).toHaveCount(0)
+    await expect(galerie.getByText('Podcast', { exact: true })).toHaveCount(0)
+})
+
 // ── Reader lädt und rendert; naddr-Kaltstart ist hier strukturell dasselbe ─────────
 //
 // Jeder Test bekommt einen FRISCHEN Browser-Kontext (Playwright-Fixture) — das
