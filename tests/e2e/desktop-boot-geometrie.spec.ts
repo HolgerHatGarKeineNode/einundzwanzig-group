@@ -19,12 +19,38 @@
  * | dasselbe ungedrosselt | 310 ms (3–4 Frames) | 0 ms |
  * | `#buehne` | 320 px @ x=0 | 1120 px @ x=320 |
  * | Ortskarte / Beschriftung | 80 px / „C…" | 346,7 px / voll |
- * | CLS | **0,3865** | **0,0124–0,0161** |
+ * | CLS | **0,3865** | **0,0124–0,0168** (10 Läufe) |
  * | 1279 px (unter `xl`, Kontrolle) | 0 Frames / CLS 0 | unverändert |
+ *
+ * Die CLS-Spanne deckt die VOLLE eigene Messreihe: zehn Läufe bei 1440 px (fünf mit
+ * verzögertem JS, fünf ungedrosselt), Minimum 0,0124, Maximum 0,0168. Hier stand
+ * zwischenzeitlich „0,0124–0,0161" — der letzte Wert der eigenen Reihe lag außerhalb,
+ * und ein Lauf, der die Spanne reißt, wäre dann der nächsten Änderung angelastet worden
+ * statt der Streuung.
  *
  * Der Rest-CLS von 0,016 liegt vollständig INNERHALB der Rail (ihre Raumliste trifft vom
  * Relay ein) — die Layout-Shift-Einträge benennen `DIV.min-h-0 flex-1 overflow-y-auto`,
  * `A.pressable mt-1 … min-h-9` und `SECTION.pt-2`. Die Bühne kommt darin nicht mehr vor.
+ *
+ * **Und was CLS hier NICHT sieht:** den Austausch selbst. Platzhalter und Rail sind
+ * verschiedene Knoten — der eine verschwindet, der andere erscheint —, und die
+ * Layout-Shift-API zählt nur Elemente, die zwischen zwei Frames UMZIEHEN. Ein
+ * Größenunterschied zwischen beiden bliebe im CLS also unsichtbar und wäre trotzdem zu
+ * sehen. Deshalb misst der Blockvergleich unten die Höhen direkt und verlässt sich für
+ * diese Zusage nicht auf die Kennzahl.
+ *
+ * ── Die Blockhöhen der Rail sind KONFIGURATIONSABHÄNGIG ─────────────────────────────
+ * Kopf · Suchfeld · Liste · Fußzeile bei 1440×900:
+ *
+ * | Lage | Kopf | Suchfeld | Liste | Fußzeile |
+ * |---|---|---|---|---|
+ * | mit `workspace_url`, Space ungeladen | 60 | 36 | 532 | 264 |
+ * | ohne `workspace_url`, Space ungeladen | 60 | 36 | 570 | **226** |
+ * | mit `workspace_url`, Space MIT Beschreibung | **64,8** | 36 | 527,2 | 264 |
+ *
+ * Alle drei werden hier gemessen. Die zweite Lage braucht einen EIGENEN `serve` ohne
+ * `NOSTR_WORKSPACE_URL` (Fixture unten): ob die Forge-Zeile existiert, entscheidet der
+ * Server beim Rendern, eine DOM-Simulation prüfte das nicht.
  *
  * ── Warum diese Datei `desktop-*` heißen MUSS ───────────────────────────────────────
  * Das Projekt `chromium` ist auf 1279 px gepinnt und ignoriert `desktop-*`; nur das
@@ -48,10 +74,70 @@
  * Liste) sät zusätzlich sechs Artikel — ohne Bestand bliebe `isEmpty()` wahr, der
  * Filterkopf erschiene nie und der Vergleich hätte keinen zweiten Wert.
  */
-import { test, expect, type Page } from './support/board-fixtures'
+import { test as boardTest, expect, type Page } from './support/board-fixtures'
 import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
 import { cleanupArticles, publishArticle } from './support/articles'
+import { testServerEnv } from './support/serverEnv'
+import { spawn, type ChildProcess } from 'node:child_process'
+
+const SLOT_OFFSET = Number(process.env.E2E_SLOT_OFFSET ?? '0')
+
+/**
+ * Ein ZWEITER `serve` — mit leerem `NOSTR_WORKSPACE_URL`.
+ *
+ * **Warum das eine eigene Serverinstanz braucht und keine Simulation.** Ob die
+ * Forge-Zeile der Rail-Fußzeile existiert, entscheidet `@if (config('group.workspace_url'))`
+ * SERVER-seitig, beim Rendern. `config/group.php` liest `env('NOSTR_WORKSPACE_URL')` ohne
+ * Default — in einer Installation ohne Workspace fehlt die Zeile also, und die Fußzeile
+ * ist 38 px kürzer. Ein `page.evaluate`, das die Zeile im laufenden DOM entfernt, misst
+ * das nicht, sondern stellt es nach; der Prüfgegenstand ist gerade, dass BEIDE Dateien
+ * dieselbe Bedingung tragen.
+ *
+ * Eigener Port-Bereich (8537+slot), kollidiert mit keinem bestehenden (serve 8137+,
+ * board 8437+, zooid 3335+, buzz 3001+). Worker-scoped und LAZY: nur der eine Test, der
+ * ihn anfordert, zahlt dafür.
+ */
+const testOhneWorkspace = boardTest.extend<object, { serverOhneWorkspace: string }>({
+    serverOhneWorkspace: [
+        async ({ workerBackend }, use, workerInfo) => {
+            void workerBackend
+            const slot = workerInfo.parallelIndex + SLOT_OFFSET
+            const port = 8537 + slot
+            const serve: ChildProcess = spawn('php', ['artisan', 'serve', '--port', String(port)], {
+                // `mitBoard: true` wie in `board-fixtures.ts`, damit `/articles` eine
+                // echte lokale Quelle sieht — und danach der EINE Schlüssel, um den es
+                // geht, ausdrücklich geleert.
+                env: { ...process.env, ...testServerEnv({ slot, mitBoard: true }), NOSTR_WORKSPACE_URL: '' },
+                stdio: 'ignore',
+            })
+            const frist = Date.now() + 60_000
+            for (;;) {
+                try {
+                    const res = await fetch(`http://127.0.0.1:${port}`)
+                    if (res.status < 500) {
+                        break
+                    }
+                } catch {
+                    // Port bindet noch nicht.
+                }
+                if (Date.now() > frist) {
+                    throw new Error(`serve ohne Workspace auf Port ${port} kam nicht hoch`)
+                }
+                await new Promise((r) => setTimeout(r, 250))
+            }
+
+            await use(`http://127.0.0.1:${port}`)
+            serve.kill()
+        },
+        { scope: 'worker', timeout: 120_000 },
+    ],
+    baseURL: async ({ serverOhneWorkspace }, use) => {
+        await use(serverOhneWorkspace)
+    },
+})
+
+const test = boardTest
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
@@ -128,8 +214,10 @@ async function messen(page: Page): Promise<Mass> {
     })
 }
 
+type Kasten = { y: number; h: number; w: number }
+
 /** Die vier Blöcke einer Spalte-1-Fläche (Kopf · Suchfeld · Liste · Fußzeile). */
-async function bloecke(page: Page, wahl: string): Promise<{ y: number; h: number; w: number }[]> {
+async function bloecke(page: Page, wahl: string): Promise<Kasten[]> {
     return page.evaluate((w) => {
         const el = document.querySelector(w) as HTMLElement | null
         if (!el) {
@@ -148,9 +236,23 @@ async function bloecke(page: Page, wahl: string): Promise<{ y: number; h: number
     }, wahl)
 }
 
-/** Anmelden und `/articles` mit verzögertem JS-Bündel öffnen. */
-async function vorDemBoot(page: Page, verzugMs = 2500): Promise<void> {
+/**
+ * Anmelden und `/articles` mit verzögertem JS-Bündel öffnen.
+ *
+ * `ohneSpaceMetadaten` legt den Space-Relay auf einen Port, auf dem nichts lauscht. Das
+ * ist keine Willkür, sondern der Zustand, um den es hier geht: solange die Metadaten
+ * nicht da sind, ist `space?.description` falsy und die zweite Kopfzeile der Rail
+ * existiert nicht. Genau dieser Zustand gilt im Austauschmoment auf jedem kalten Cache —
+ * und er ist die einzige Höhe, die der Server vorhersagen kann.
+ */
+async function vorDemBoot(page: Page, { verzugMs = 2500, ohneSpaceMetadaten = false } = {}): Promise<void> {
     await useZooid(page)
+    if (ohneSpaceMetadaten) {
+        // NACH `useZooid`, damit diese Zuweisung gewinnt.
+        await page.addInitScript(() => {
+            ;(window as unknown as { __nostrSpace: string }).__nostrSpace = 'ws://localhost:39999'
+        })
+    }
     await loginNsec(page, NSEC)
     await page.route('**/*.js', async (route) => {
         await new Promise((r) => setTimeout(r, verzugMs))
@@ -231,24 +333,88 @@ test('NEGATIVKONTROLLE: dieselbe Sonde sieht den Fehler, wenn man das alte Marku
     expect(kaputt.gekuerzt).toBe(true)
 })
 
-test('Platzhalter und echte Rail sind Block für Block dimensionsgleich', async ({ page }) => {
-    // Die Bühne stünde auch dann richtig, wenn der Platzhalter innen ganz anders
-    // aussähe — die Spur ist ja fest. Diese Zusage ist eine andere: beim Austausch soll
-    // sich auch INNERHALB der Spalte nichts verschieben, sondern nur Balken zu Schrift
-    // werden. Kopf 64,8 · Suchfeld 36 · Liste 527,2 · Fußzeile 264 (1440×900).
-    await page.setViewportSize({ width: BREITE, height: 900 })
-    await vorDemBoot(page)
+/**
+ * Ein Lauf: Platzhalter messen, auf die Rail warten, Rail messen. Die Rail wird SOFORT
+ * nach ihrem Erscheinen gemessen — der Austauschmoment ist der Prüfgegenstand, nicht der
+ * Ruhezustand zehn Sekunden später.
+ */
+async function vergleich(page: Page): Promise<{ platzhalter: Kasten[]; rail: Kasten[] }> {
     await page.waitForSelector('[data-rail-skelett]')
     const platzhalter = await bloecke(page, '[data-rail-skelett]')
-
     await page.waitForSelector('[data-rail]')
-    await page.waitForTimeout(2000)
     const rail = await bloecke(page, '[data-rail]')
+
+    return { platzhalter, rail }
+}
+
+test('Platzhalter und echte Rail sind Block für Block dimensionsgleich — MIT Workspace', async ({ page }) => {
+    // Die Bühne stünde auch dann richtig, wenn der Platzhalter innen ganz anders aussähe
+    // — die Spur ist ja fest. Diese Zusage ist eine andere: beim Austausch soll sich auch
+    // INNERHALB der Spalte nichts verschieben, sondern nur Balken zu Schrift werden.
+    await page.setViewportSize({ width: BREITE, height: 900 })
+    await vorDemBoot(page, { ohneSpaceMetadaten: true })
+    const { platzhalter, rail } = await vergleich(page)
 
     expect(rail).toEqual(platzhalter)
     // Und die Zahlen selbst, damit ein gemeinsamer Umbau beider Seiten auffällt statt
-    // stillschweigend „gleich" zu bleiben.
-    expect(platzhalter.map((b) => b.h)).toEqual([64.8, 36, 527.2, 264])
+    // stillschweigend „gleich" zu bleiben. Kopf 60 · Suchfeld 36 · Liste 532 · Fußzeile
+    // 264 (zwei Flächenzeilen, drei Nav-Zeilen, Profilzeile).
+    expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 532, 264])
+})
+
+testOhneWorkspace(
+    'Platzhalter und echte Rail sind Block für Block dimensionsgleich — OHNE Workspace',
+    async ({ page }) => {
+        // Der Mangel, den diese Zusage festnagelt: der Platzhalter schrieb die
+        // Forge-Zeile der Fußzeile unbedingt hin, `desktop-rail.blade.php` gated sie mit
+        // `@if (config('group.workspace_url'))`. In einer Installation ohne Workspace war
+        // die Fußzeile real 226 statt 264 — **38 px Sprung beim Boot**, also derselbe
+        // Fehler wie auf der Bühne, nur eine Ebene tiefer.
+        //
+        // Eine Zusage, die nur in EINER Konfiguration gemessen ist, gilt auch nur dort.
+        await page.setViewportSize({ width: BREITE, height: 900 })
+        await vorDemBoot(page, { ohneSpaceMetadaten: true })
+        const { platzhalter, rail } = await vergleich(page)
+
+        expect(rail).toEqual(platzhalter)
+        // 226 = 264 − 36 (`min-h-9`) − 2 (`mt-0.5`): genau die fehlende Forge-Zeile.
+        // Die Liste bekommt die 38 px, weil sie die einzige Fläche mit `flex-1` ist.
+        expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 570, 226])
+    },
+)
+
+test('die Space-Beschreibung ist die eine Höhe, die der Server nicht kennt — der Kopf wächst, die Liste federt', async ({
+    page,
+}) => {
+    // `x-show="space?.description"` hängt an einem Relay-Datum. Kein server-gerenderter
+    // Platzhalter kann das vorhersagen, und deshalb reserviert er die sichere
+    // UNTERGRENZE statt zu raten. Was bleibt, ist eine Bewegung — und die Richtung ist
+    // die Zusage: der Kopf darf wachsen, wenn die Beschreibung eintrifft, aber nie
+    // schrumpfen. Ein Schrumpfen zöge den Inhalt darunter nach oben.
+    await page.setViewportSize({ width: BREITE, height: 900 })
+    await vorDemBoot(page)
+    const { platzhalter, rail } = await vergleich(page)
+
+    // Kopf: +4,8 px. Der Wert steht als Literal da, damit stilles Wachsen auffällt.
+    // `toBeCloseTo`, weil 64,8 − 60 in IEEE-754 als 4,799999999999997 herauskommt —
+    // zwei Nachkommastellen sind hier eine Zehntel-Subpixel-Grenze, keine Aufweichung.
+    expect(rail[0].h - platzhalter[0].h).toBeCloseTo(4.8, 2)
+    expect(rail[0].h).toBe(64.8)
+    // Die Bewegung bleibt IM Kopf und in der Liste, die sie schluckt. Suchfeld und
+    // Fußzeile stehen still — die Fußzeile hängt am unteren Rand einer `h-dvh`-Spalte,
+    // ihre y-Position ist von der Kopfhöhe unabhängig.
+    expect(rail[1].h).toBe(platzhalter[1].h)
+    expect(rail[3].h).toBe(platzhalter[3].h)
+    expect(rail[3].y).toBe(platzhalter[3].y)
+    // ERHALTUNG: was der Kopf gewinnt, gibt die Liste ab — und nichts leckt woandershin.
+    // (Hier stand zuerst „kein Block wird kleiner". Das war falsch und wurde von der
+    // Messung widerlegt: die Liste MUSS abgeben, sie ist die einzige Fläche mit
+    // `flex-1`. Eine Zusage, die weiter reicht als die Sache, ist keine.)
+    expect(platzhalter[2].h - rail[2].h).toBeCloseTo(rail[0].h - platzhalter[0].h, 2)
+    // Die drei starren Blöcke behalten ihre Höhe — nur die Liste federt.
+    for (const i of [0, 1, 3]) {
+        expect(rail[i].h).toBeGreaterThanOrEqual(platzhalter[i].h - 0.05)
+    }
 })
 
 test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht', async ({ page, baseURL }) => {

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\TestCase;
@@ -151,12 +152,30 @@ test('der Platzhalter steht auf jeder Fläche mit Chassis — nicht nur auf /art
     }
 });
 
-test('ohne Chassis (chrome=false) gibt es keinen Platzhalter', function () {
-    // `rail=false` schaltet das Desktop-Chassis pro Seite ab. Ein Platzhalter für eine
-    // Spur, die es nicht gibt, wäre eine 320-px-Fläche mitten im Onboarding.
-    $html = $this->get(route('group.nostr-login'))->assertOk()->getContent();
+test('ohne Chassis (rail=false) gibt es keinen Platzhalter — mit Positivkontrolle', function () {
+    // ── Warum dieser Test die Komponente RENDERT statt eine Route zu holen ──────────
+    //
+    // Hier stand zuerst ein Aufruf von `group.nostr-login`. Diese Seite rendert gar kein
+    // `app-frame` (`⚡nostr-login.blade.php`), und KEIN Konsument setzt heute
+    // `chrome=false`. Der Test konnte deshalb aus seinem eigenen Grund nicht rot werden:
+    // entfernt man `@if ($desktop)` aus `app-frame.blade.php` komplett, blieb er grün.
+    // Ein Test mit einem Namen, den er nicht einlöst, ist schlechter als kein Test — der
+    // nächste Leser hält die Fläche für gedeckt.
+    //
+    // Jetzt ist der Gegenstand die Komponente selbst, mit beiden Schaltstellungen im
+    // selben Test. Die zweite Zeile ist die POSITIVKONTROLLE: findet das Messgerät den
+    // Platzhalter nicht einmal dort, wo er hingehört, sagt die erste Zeile nichts.
+    config(['nativephp-internal.running' => false]);
 
-    expect($html)->not->toContain('data-rail-skelett');
+    $ohneRail = Blade::render('<x-group::app-frame :rail="false">Inhalt</x-group::app-frame>');
+    $mitRail = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+
+    expect($mitRail)->toContain('data-rail-skelett');
+    expect($ohneRail)->not->toContain('data-rail-skelett');
+    // Und die Spur der Bühne fällt mit weg — sonst hinge im Onboarding eine
+    // Grid-Platzierung ohne Grid.
+    expect($mitRail)->toContain('xl:col-start-2');
+    expect($ohneRail)->not->toContain('xl:col-start-2');
 });
 
 test('auf dem Gerät (NativePHP) gibt es keinen Platzhalter', function () {
