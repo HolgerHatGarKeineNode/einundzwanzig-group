@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test'
+import { chromiumHermetikArgs } from './tests/e2e/support/hermetik'
 
 // Wegwerf-nsec (NOSTR_TEST_NSEC) + APP-Konfig aus der .env in process.env laden.
 process.loadEnvFile('.env')
@@ -54,14 +55,33 @@ const isBuzz = process.env.E2E_RELAY === 'buzz'
  * Fehler, kein Hinweis, nur Stille. Der Buzz-Pin war dabei komplett kaputt und wäre
  * unentdeckt geblieben. Wer hier eine Spec ergänzt, ergänzt sie in DIESER Liste.
  */
-const BUZZ_SPECS = /(?:^|\/)(?:buzz-.*|pin-room)\.spec\.ts$/
+/*
+ * `relay-guard.spec.ts` und `relay-praevention.spec.ts` stehen ebenfalls namentlich
+ * daneben, aus dem umgekehrten Grund wie `pin-room`: sie prüfen nicht eine Fläche,
+ * sondern die HERMETIK des Laufs selbst. Die ist im Buzz-Arm genauso scharf — der
+ * Relay-Wächter urteilt dort über jeden Test —, ihre eigene Verdrahtungsprüfung lief
+ * dort aber nicht mit. Ein Riegel, der nur in einem von zwei Armen nachgewiesen ist,
+ * sagt über den anderen nichts.
+ */
+const BUZZ_SPECS = /(?:^|\/)(?:buzz-.*|pin-room|relay-guard|relay-praevention)\.spec\.ts$/
 
-/** Host-Chromium, kein von Playwright heruntergeladenes Binary — gilt für JEDES Projekt. */
+/**
+ * Host-Chromium, kein von Playwright heruntergeladenes Binary — gilt für JEDES Projekt.
+ *
+ * Die Start-Argumente kommen aus `support/hermetik.ts` und tragen seit dem P7-Gate die
+ * **erste Präventionsschicht**: `--host-resolver-rules` lässt Chromium keinen fremden
+ * Hostnamen mehr auflösen. Das ist die einzige Schicht, die auch für die drei Specs
+ * greift, die ihr `test` nicht aus `support/fixtures.ts` beziehen (und deshalb weder
+ * Wächter noch den WebSocket-Wrapper sehen) — siehe `support/specImporte.nodetest.ts`.
+ *
+ * Wer ein drittes Projekt anlegt: `...hostChromium` gehört zwingend hinein, sonst fährt
+ * es ohne Prävention. `hermetik.nodetest.ts` zählt das nach.
+ */
 const hostChromium = {
     browserName: 'chromium' as const,
     launchOptions: {
         executablePath: '/bin/chromium',
-        args: ['--no-sandbox'],
+        args: chromiumHermetikArgs(),
     },
 }
 

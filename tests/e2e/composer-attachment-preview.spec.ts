@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { testServerEnv } from './support/serverEnv'
 
 /**
  * **Der Nutzer sieht sein eigenes, gerade hochgeladenes Bild.**
@@ -41,7 +42,18 @@ const rendereVorschau = (): string => {
     const verzeichnis = mkdtempSync(join(tmpdir(), 'composer-preview-'))
     const ziel = join(verzeichnis, 'markup.html')
     const php = `file_put_contents(${JSON.stringify(ziel)}, view('group::partials.chat-composer', ['context' => 'room'])->render());`
-    execFileSync('php', ['artisan', 'tinker', '--execute', php], { cwd: WURZEL, timeout: 120_000 })
+    execFileSync('php', ['artisan', 'tinker', '--execute', php], {
+        cwd: WURZEL,
+        timeout: 120_000,
+        // Die Server-ENV ausdrücklich neutralisieren (`support/serverEnv.ts`).
+        // **Dieser Prozess sah bis zum P7-Gate die rohe `.env`** — er ist einer von
+        // zwei `tinker`-Spawns ohne env-Option und zugleich eine der drei Specs
+        // außerhalb des Relay-Wächters: zwei Blindstellen, die einander decken.
+        // Heute rendert er nur Partials und fasst die Relay-Config nicht an; das ist
+        // eine Momentaufnahme, keine Eigenschaft. `slot: 0`, weil dieser Spec kein
+        // Worker-Backend hat — die Werte zeigen damit auf lokale Ports, nicht ins Netz.
+        env: { ...process.env, ...testServerEnv({ slot: 0 }) },
+    })
     const markup = readFileSync(ziel, 'utf8')
 
     // Nur der Vorschau-Block: der Rest des Composers braucht die ganze Alpine-Insel

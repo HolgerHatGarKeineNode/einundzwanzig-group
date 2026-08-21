@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import type { FullConfig } from '@playwright/test'
 import { ownedRunMarkerPaths } from './runMarkers'
 import { SOURCES_HASH_CMD, SOURCES_STAMP, sourcesHash } from './sourcesStamp'
+import { pruefeTestschluessel } from './keys.ts'
 
 /**
  * Läuft EINMAL vor allen Workern. Baut die geteilten Artefakte, die sonst mehrere
@@ -56,6 +57,26 @@ function needsBuild(): { build: boolean; reason: string } {
 const relayMode = (): 'zooid' | 'buzz' => (process.env.E2E_RELAY === 'buzz' ? 'buzz' : 'zooid')
 
 export default function globalSetup(config: FullConfig): void {
+    /**
+     * **Zuerst der Schlüssel — vor jedem Marker, jedem Relay und jedem Browser.**
+     *
+     * Alle übrigen Riegel der Suite hängen am Weg (ENV-Wert, Resolver-Regel, Wrapper je
+     * Kontext); dieser hängt an der **Identität**, mit der signiert wird. **Seine
+     * Vergleichsmenge hängt aber weiter an der Umgebung** — er fängt einen
+     * Produktionsschlüssel, der auch hier als `*_NSEC` liegt, und nicht einen anderswo
+     * gehaltenen. Die volle Deckungsgrenze mit beiden gemessenen Fällen steht bei
+     * `PRODUKTIONS_SCHREIBER` in `support/schluesselSperre.ts`; hier stand zuerst
+     * „greift auch dann noch, wenn die anderen drei umgangen wurden", und das war zu weit.
+     * Er steht als erste
+     * Anweisung dieser Funktion, weil ein Abbruch NACH dem Aufsetzen eines Relays schon
+     * Zustand hinterlassen hätte — und weil ein Riegel, der irgendwo in der Mitte steht,
+     * bei der nächsten Umstellung unbemerkt hinter etwas rutscht.
+     *
+     * Wirft er, endet der ganze Lauf mit dieser Meldung. Begründung und Herkunft der
+     * Sperrliste: `support/schluesselSperre.ts`.
+     */
+    pruefeTestschluessel()
+
     // Lauf-Marker loeschen. Sie schuetzen INNERHALB eines Laufs davor, dass ein neu
     // gestarteter Worker den Relay neu aufsetzt und damit den gerade laufenden Test
     // mitreisst (Begruendung in zooid-testserver.sh/buzz-testserver.sh, RUNMARK).

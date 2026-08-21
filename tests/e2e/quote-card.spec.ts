@@ -265,7 +265,7 @@ test('Zitatkarte: unauflösbares Ereignis kollabiert nicht und zeigt die gekürz
 
     await card.click()
     // Fall C: unaufgelöst → normale Navigation über den href (kein toter Knopf) — der
-    // Thread öffnet trotzdem (per id, `bridge.ts:3714-3722`), auch ohne aufgelöstes Zitat.
+    // Thread öffnet trotzdem (per id, `bridge.ts` → `openThread`, lädt Wurzel + Baum per id/`#E` selbst), auch ohne aufgelöstes Zitat.
     await expect(page).toHaveURL(new RegExp(`/rooms/${h}/thread/`))
     await expect(page.getByRole('dialog', { name: 'Thread' })).toBeVisible({ timeout: 15_000 })
 })

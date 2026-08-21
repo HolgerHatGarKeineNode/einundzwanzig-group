@@ -31,13 +31,33 @@
  * | `ws://127.0.0.1:<serve>/` (HTTP, 400)  |  3 CLOSED  | ja         |
  * | `wss://nostr.einundzwanzig.space/`     |  1 OPEN    | ja         |
  *
- * Der blinde Fleck ist also genau der Fall, in dem **kein Byte** einen fremden Rechner
- * erreicht hat — und der Fall, um den es geht (ein erreichbarer fremder Relay), liegt
- * vollständig im Sichtfeld. Das ist keine Beschönigung, sondern die Grenze, die ein
- * Leser kennen muss, bevor er dem Wächter mehr zutraut, als er zusagt.
+ * Der blinde Fleck ist also der Fall, in dem die TCP-Verbindung nicht zustande kommt —
+ * und der Fall, um den es geht (ein erreichbarer fremder Relay), liegt vollständig im
+ * Sichtfeld.
+ *
+ * **Hier stand „kein Byte erreicht einen fremden Rechner". Das war zu weit gefasst:** für
+ * einen fremden Hostnamen, der nicht auflöst, verlässt die DNS-Anfrage sehr wohl die
+ * Maschine, und für `wss://` mit ungültigem Zertifikat steht der SNI-Name schon beim
+ * Fremden. Gemessen wurde nur ein LOKALER Port ohne Zuhörer. Die Korrektur ändert nichts
+ * am Wächter, aber sie ist der Unterschied zwischen einer Grenze, die man kennt, und
+ * einer, die man zu kennen glaubt. Die Lücke selbst schließt seit dem P7-Gate die
+ * Prävention (`support/hermetik.ts`, Gegenbeweis in `relay-praevention.spec.ts`).
  */
 import { test, expect } from './support/fixtures'
 import { ZOOID_URL, ZOOID_WS } from './support/zooid'
+import { BUZZ_URL, BUZZ_WS } from './support/buzz'
+
+/**
+ * Der eigene Relay dieses Laufs — je nach Arm der zooid oder der Buzz-Stack.
+ *
+ * Diese Datei läuft seit dem P7-Gate in BEIDEN Armen (`BUZZ_SPECS` in
+ * `playwright.config.ts`): der Wächter ist im Buzz-Arm genauso scharf, seine
+ * Verdrahtungsprüfung lief dort aber nicht mit. Der Fall unten braucht dafür einen Relay,
+ * der auch WIRKLICH lauscht — im Buzz-Arm startet `workerBackend` **keinen** zooid, ein
+ * `ws://localhost:3335/` liefe dort in einen toten Port, würde von Chromium gar nicht erst
+ * gemeldet und die Gegenprobe wäre aus dem falschen Grund rot.
+ */
+const eigenerRelay = process.env.E2E_RELAY === 'buzz' ? { url: BUZZ_URL, ws: BUZZ_WS } : { url: ZOOID_URL, ws: ZOOID_WS }
 
 /**
  * Ein erreichbarer Socket AUSSERHALB der Erlaubnisliste, ohne Fremd-Rechner: der eigene
@@ -107,11 +127,15 @@ test('Der eigene Relay steht auf der Erlaubnisliste — kein Fehlalarm', async (
     // Die Gegenprobe. Ohne sie wäre nicht auszuschließen, dass der Wächter schlicht ALLES
     // beanstandet und die beiden Fälle oben nur wegen ihrer Freigabe grün sind.
     await page.goto('/')
-    await oeffne(page, ZOOID_URL)
+    await oeffne(page, eigenerRelay.url)
 
-    expect(relayWaechter.gesehen()).toContain(ZOOID_URL)
+    expect(relayWaechter.gesehen()).toContain(eigenerRelay.url)
     // Kein `erlaube()` in diesem Test: bliebe der eigene Relay hier hängen, machte der
     // Wächter diesen Test im Abbau rot — und das wäre die Regression, die jeden anderen
     // Test der Suite mitrisse.
-    expect(ZOOID_WS).toMatch(/^ws:\/\/localhost:33\d\d$/)
+    //
+    // Die Port-Reihe ausgeschrieben, je Arm: zooid 33xx, Buzz 30xx. Ohne diese Zeile
+    // prüfte der Fall die Konstante gegen sich selbst und bliebe grün, wenn `ZOOID_WS`
+    // eines Tages auf einen fremden Host zeigte.
+    expect(eigenerRelay.ws).toMatch(process.env.E2E_RELAY === 'buzz' ? /^ws:\/\/localhost:30\d\d$/ : /^ws:\/\/localhost:33\d\d$/)
 })

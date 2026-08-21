@@ -34,13 +34,41 @@
  * **Inhalt statt mtime**, aus dem Grund, der in `sourcesStamp.ts` steht: `cp -p` dreht
  * mtimes zurück, und genau daran ist in diesem Haus schon eine Mutationsmessung
  * vorbeigelaufen.
+ *
+ * ── Warum dieses Modul den Build SELBST startet ──────────────────────────────────
+ *
+ * Weil sonst der Abtastzeitpunkt falsch liegt. Vorher war `build` die Kette
+ * `vite build && node … schreibeStamp.ts`; der Hash entstand also **nach** dem Build.
+ * `global-setup.ts` macht es genau umgekehrt und begründet das ausdrücklich: ändert sich
+ * eine Quelle WÄHREND des Builds, passt ein danach gezogener Stamp nicht mehr zum
+ * gebauten Stand — er behauptete Frische, die das Artefakt nicht hat, und der nächste
+ * Lauf überspränge den Rebuild. Ein doppelter Build ist billig, ein falsch grüner
+ * Bundle-Riegel nicht.
+ *
+ * Zwei Abtastzeitpunkte für einen Stamp, der „eine Wahrheit für alle" zusagt, sind
+ * ohnehin einer zu viel. Angeglichen wurde auf die **sichere** Richtung: erst hashen,
+ * dann bauen, und nur bei erfolgreichem Build schreiben. Schlägt `vite build` fehl,
+ * wirft `execFileSync` und es bleibt kein trügerischer Stamp stehen — dieselbe
+ * Ausfallrichtung wie in `global-setup.ts`.
  */
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { SOURCES_STAMP, sourcesHash } from './sourcesStamp.ts'
+
+const wurzel = fileURLToPath(new URL('../../../', import.meta.url))
+
+// ZUERST der Hash — vor dem Build, aus dem Grund im Modulkopf.
+const vorBuild = sourcesHash()
+
+// `node_modules/.bin/vite` direkt statt über npm: der Umweg über einen zweiten
+// npm-Prozess bringt hier nichts und würde in einem Repo mit `ignore-scripts=true` nur
+// die Frage aufwerfen, welche Hooks dabei laufen.
+execFileSync(join(wurzel, 'node_modules/.bin/vite'), ['build'], { cwd: wurzel, stdio: 'inherit' })
 
 const verzeichnis = dirname(SOURCES_STAMP)
 if (!existsSync(verzeichnis)) {
     mkdirSync(verzeichnis, { recursive: true })
 }
-writeFileSync(SOURCES_STAMP, `${sourcesHash()}\n`)
+writeFileSync(SOURCES_STAMP, `${vorBuild}\n`)

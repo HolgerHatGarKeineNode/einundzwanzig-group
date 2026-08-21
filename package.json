@@ -3,13 +3,13 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "vite build && node --experimental-strip-types tests/e2e/support/schreibeStamp.ts",
+        "build": "node --experimental-strip-types tests/e2e/support/schreibeStamp.ts",
         "dev": "vite",
         "test:unit": "node --test --experimental-strip-types \"packages/*/js/**/*.test.ts\" \"tests/**/*.nodetest.ts\"",
-        "test:e2e": "playwright test",
-        "test:e2e:buzz": "E2E_RELAY=buzz playwright test",
-        "test:e2e:headed": "playwright test --headed",
-        "test:e2e:buzz:headed": "E2E_RELAY=buzz playwright test --headed",
+        "test:e2e": "php artisan config:clear && playwright test",
+        "test:e2e:buzz": "php artisan config:clear && E2E_RELAY=buzz playwright test",
+        "test:e2e:headed": "php artisan config:clear && playwright test --headed",
+        "test:e2e:buzz:headed": "php artisan config:clear && E2E_RELAY=buzz playwright test --headed",
         "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/e2e/tsconfig.json --noEmit && tsc -p packages/einundzwanzig-group/js/tsconfig.json --noEmit"
     },
     "dependencies": {

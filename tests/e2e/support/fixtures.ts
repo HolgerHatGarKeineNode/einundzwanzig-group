@@ -1,6 +1,8 @@
 import { test as base, expect, type BrowserContext, type Page, type Locator } from '@playwright/test'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { erlaubteHerkuenfte, herkunft, verstoesse, verstossMeldung, type Herkunft } from './relayGuard'
+import { LOOPBACK_HOSTS, MELDE_BINDUNG, SPERR_MARKE, istLoopbackHerkunft, sperrVermerk, wrapperQuelle } from './hermetik'
+import { testServerEnv } from './serverEnv'
 
 /**
  * Pro-Worker-Backend-Isolation für echte Parallelität (§Test-Speed): jeder Playwright-
@@ -68,7 +70,7 @@ const waitForHttp = async (url: string, timeoutMs = 60_000): Promise<void> => {
  * Umweg wird gebraucht, weil die Beobachtung an einem WORKER-Objekt hängt (`browser`),
  * das Urteil aber zu einem TEST gehört.
  */
-type Aufzeichnung = { gesehen: string[]; zusaetzlich: Herkunft[] }
+type Aufzeichnung = { gesehen: string[]; zusaetzlich: Herkunft[]; quittiert: string[] }
 
 let aufzeichnung: Aufzeichnung | null = null
 
@@ -78,6 +80,9 @@ export type RelayWaechter = {
      * Eine zusätzliche Herkunft für DIESEN Test freigeben — z. B. den absichtlich toten
      * Socket (`support/verein.ts` `stubDeadSpace`) oder einen zweiten lokalen Port
      * (`longform-reader.spec.ts` `SILENT_BOARD_PORT`). Nimmt volle URLs.
+     *
+     * **Nur Loopback.** Eine fremde Herkunft wirft — der Wächter lässt sich von seinem
+     * Prüfling nicht entschärfen. Begründung an der werfenden Stelle.
      */
     erlaube: (...urls: string[]) => void
     /**
@@ -91,28 +96,95 @@ export type RelayWaechter = {
      * das hier brauchen.
      */
     gesehen: () => readonly string[]
+    /**
+     * **Eine von der Prävention GESPERRTE Verbindung quittieren** — ausschließlich für
+     * den Gegenbeweis in `relay-praevention.spec.ts`.
+     *
+     * Der Gegenbeweis muss absichtlich eine fremde Herkunft ansprechen, um zu zeigen,
+     * dass sie nicht durchkommt. Ohne diese Quittung machte ihn der Wächter im Abbau
+     * rot — der einzige Test, der die Prävention belegt, wäre damit nicht dauerhaft grün
+     * zu halten, und genau solche Belege verschwinden nach dem dritten Mal aus der Suite.
+     *
+     * **Warum das kein Schlupfloch ist:** quittiert wird nur, was den Vermerk der
+     * Prävention trägt (`sperrVermerk`, gesetzt allein im WebSocket-Wrapper). Eine
+     * TATSÄCHLICH zustande gekommene fremde Verbindung steht roh in der Aufzeichnung,
+     * trägt diesen Vermerk nicht und bleibt deshalb ein Verstoß — auch wenn jemand
+     * genau ihre URL hier hineinschriebe. Die Quittung kann also bestätigen, dass etwas
+     * verhindert wurde, aber niemals erlauben, dass etwas stattfindet.
+     */
+    sperreErwartet: (...urls: string[]) => void
 }
 
-/** Schon beobachtete Kontexte — ein zweiter Zuhörer brächte nur doppelte Einträge. */
+/** Schon gesicherte Kontexte — ein zweiter Zuhörer brächte nur doppelte Einträge. */
 const beobachtet = new WeakSet<BrowserContext>()
 
 /**
- * Jede Seite dieses Kontexts (auch später geöffnete) meldet ihre WebSockets.
+ * **Beobachten UND verhindern** — beides je Kontext, in einem Zug.
  *
- * `context.pages()` ist für den Fall da, dass der Kontext seine Seite schon hat;
- * `on('page')` für alles danach — Popups, `newPage()` in einem Test, der zweite Tab
+ * Die Beobachtung: jede Seite dieses Kontexts (auch später geöffnete) meldet ihre
+ * WebSockets. `context.pages()` ist für den Fall da, dass der Kontext seine Seite schon
+ * hat; `on('page')` für alles danach — Popups, `newPage()` in einem Test, der zweite Tab
  * (`unread-dot.spec.ts:388`).
+ *
+ * Die Verhinderung (`addInitScript`-Wrapper um `window.WebSocket`, zweite Schicht neben
+ * `--host-resolver-rules` in `playwright.config.ts`): der Konstruktor **wirft** für eine
+ * fremde Herkunft, es entsteht also gar kein Socket. Belegt gegen einen lokalen
+ * TCP-Sonden-Server: die Sonde zählte 0 angenommene Verbindungen, die identische Anfrage
+ * ohne Wrapper zählte 1 (Messtabelle in `hermetik.ts`, Gegenbeweis in der Suite:
+ * `relay-praevention.spec.ts`).
+ *
+ * **Warum kein `context.routeWebSocket`, obwohl der Plan es nennt:** es war zuerst so
+ * gebaut, sperrte zuverlässig — und machte den Buzz-Arm rot. Eine registrierte
+ * `routeWebSocket` ersetzt `window.WebSocket` für die GANZE Seite durch eine Attrappe
+ * (`class WebSocket extends WebSocketMock`, `send` nicht mehr nativ), auch für Herkünfte,
+ * die ihr Muster nicht trifft. Herleitung und Messtabelle stehen im Kopf von `hermetik.ts`.
+ *
+ * **Warum der Wrapper selbst meldet:** ein verhinderter Socket entsteht nie und erzeugt
+ * deshalb kein `page.on('websocket')`-Ereignis. Ohne die Meldung wäre die Prävention
+ * zugleich blind — die Verbindung verhindert und unsichtbar, der Test grün, und dass eine
+ * Fläche nach draußen greift, erführe niemand. Der Vermerk ist für `herkunft()` bewusst
+ * keine gültige Erlaubnis: er fällt so oder so nach „Verstoß" und macht den Test im Abbau
+ * rot. Verhindern ohne Melden wäre die halbe Arbeit.
+ *
+ * **Die Reihenfolge zählt:** ein `addInitScript` gilt erst ab der nächsten Navigation.
+ * Deshalb wird hier direkt beim Anlegen des Kontexts gesichert (und nicht etwa beim ersten
+ * `goto`), und deshalb ist `sichere` async.
  */
-const beobachte = (context: BrowserContext): void => {
+const sichere = async (context: BrowserContext): Promise<void> => {
     if (beobachtet.has(context)) {
         return
     }
     beobachtet.add(context)
     const anSeite = (page: Page): void => {
+        /**
+         * **Eine bekannte fail-open-Stelle, bewusst offen gelassen — hier, nicht im Plan.**
+         *
+         * `aufzeichnung?.` verwirft das Ereignis STILL, wenn gerade keine Aufzeichnung
+         * läuft: in einem `beforeAll`, in einem `afterAll`, zwischen zwei Tests eines
+         * Workers. Ein Socket, der in einem dieser Fenster aufgeht, wird nicht bewacht und
+         * fällt auch niemandem auf.
+         *
+         * Heute folgenlos: vier Specs haben ein `beforeAll`, keines davon öffnet eine
+         * Seite, alle publizieren über `nak`. **Ein künftiges `beforeAll`, das eine Seite
+         * öffnet, wäre unbewacht** — und das ist der Satz, wegen dem dieser Kommentar hier
+         * steht und nicht in einem Dokument, das beim Schreiben eines `beforeAll` niemand
+         * liest.
+         *
+         * Die PRÄVENTION ist davon unberührt: sie hängt am Kontext, nicht an der
+         * Aufzeichnung, und sperrt auch in diesen Fenstern. Was fehlt, ist die Meldung —
+         * also genau die Hälfte, die einem sagt, dass etwas zu reparieren ist.
+         */
         page.on('websocket', (ws) => aufzeichnung?.gesehen.push(ws.url()))
     }
     context.pages().forEach(anSeite)
     context.on('page', anSeite)
+
+    await context.exposeBinding(MELDE_BINDUNG, (_quelle, url: string) => {
+        aufzeichnung?.gesehen.push(sperrVermerk(url))
+    })
+    await context.addInitScript({
+        content: wrapperQuelle({ erlaubteHosts: LOOPBACK_HOSTS, marke: SPERR_MARKE, bindung: MELDE_BINDUNG }),
+    })
 }
 
 export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBackend: void }>({
@@ -145,97 +217,17 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
                 'php',
                 ['artisan', 'serve', '--port', String(servePort)],
                 {
-                    // Default-DB-Sessions/-Cache BLEIBEN: der NIP-98-Login-Handoff legt den
-                    // k1-Challenge im (geteilten) DB-Cache ab und liest ihn beim POST wieder
-                    // — cookie-Sessions/array-Cache brachen genau das. Für die 6 parallelen
-                    // serves die geteilte SQLite nebenläufig-tauglich machen: WAL (Leser
-                    // blocken den Schreiber nicht) + busy_timeout (Schreib-Lock kurz warten
-                    // statt sofort „database is locked"). Rein additiv über env — prod bleibt
-                    // bei null (config/database.php).
-                    env: {
-                        ...process.env,
-                        VITE_HOT_FILE: '/tmp/e2e-vite-never-hot',
-                        DB_JOURNAL_MODE: 'WAL',
-                        DB_BUSY_TIMEOUT: '5000',
-                        // Der PHP-Built-in-Server ist sonst single-threaded → serialisiert
-                        // schon HTML- + Asset-Chunk-Requests EINES Page-Loads. Server-Workers
-                        // bedienen sie parallel → schnellerer Seiten-Aufbau je Test. Mit
-                        // DB-Cache (nicht array) teilen alle Worker-Prozesse den k1-Challenge.
-                        PHP_CLI_SERVER_WORKERS: '4',
-                        // Hermetik des SERVERS. `ProfileCache` (GET /nostr/profiles) fragt
-                        // sonst den Profil-Indexer `wss://purplepag.es/` — eine echte
-                        // WebSocket-Verbindung ins öffentliche Internet, aus jedem Testlauf.
-                        // Leer = nur der eigene Space-Relay wird gefragt.
-                        NOSTR_PROFILE_INDEXER: '',
-                        // …und der „eigene Space" ist im Test der WORKER-Relay, nicht der
-                        // Mitschau-zooid aus der lokalen .env. Ohne das fragte der Server
-                        // :3334 nach Profilen, die nur auf :3335+ liegen, und schrieb das
-                        // Ergebnis („abwesend", 24 h) in den geteilten Cache-Store.
-                        NOSTR_SPACE_URL: `ws://localhost:${zooidPort}`,
-                        // …und die ARTIKEL-Quelle bleibt hier ausdrücklich LEER.
-                        //
-                        // Der Grund ist derselbe Mechanismus wie zwei Zeilen darueber, nur
-                        // an einer Variablen, die es hier bis P0 nicht gab: dieser `serve`
-                        // erbt `...process.env`, und `playwright.config.ts:3` lädt vorher
-                        // die lokale `.env` in genau dieses `process.env`. Steht dort ein
-                        // `NOSTR_BOARD_URL` — und `.env.example:27` führt die Variable, das
-                        // Longform-Vorhaben ist der Anlass, sie auf den PRODUKTIONS-Board-
-                        // Relay zu setzen —, dann rendert dieser GETEILTE Server für alle
-                        // ~60 Specs die Artikel-Einstiege (`@if ($hasBoard)`), und jede Seite,
-                        // die `/articles` berührt, spricht den öffentlichen Relay an. Lesend
-                        // heute, schreibend ab der Kommentar-Phase.
-                        //
-                        // Leer heißt hier NICHT „Default": die Fläche zeigt dann ihren
-                        // ehrlichen „keine Quelle"-Zustand und schickt keinen einzigen REQ
-                        // (`⚡articles.blade.php` `@if (! config('group.board_relay_url'))`,
-                        // `longformFeed.ts` `BOARD_URL`). Genau dieser Zustand ist es, den
-                        // die Bestandssuite bisher gemessen hat — der Riegel hält ihn fest,
-                        // statt ihn der `.env` des jeweiligen Rechners zu überlassen.
-                        //
-                        // `board-fixtures.ts` ist davon unberührt: es spawnt einen ZWEITEN,
-                        // eigenen `serve` mit eigenem env-Objekt und setzt `NOSTR_BOARD_URL`
-                        // dort selbst auf den worker-eigenen zooid. Diese Zeile kann ihn
-                        // nicht erreichen — verifiziert, nicht angenommen (siehe P0-Bericht).
-                        NOSTR_BOARD_URL: '',
-                        // …und die Relays der SOZIALSIGNALE (P6) ebenso.
-                        //
-                        // Diese Variable ist der Grund, warum sie ueberhaupt eine Variable
-                        // ist: `js/longformFeed.ts` (`SEKUNDAER_RELAYS`) fragt fuer die
-                        // Zaehler kind 7/9735/1111 auf FREMDEN Relays ab. Stuenden die
-                        // Adressen als Literal im Code, oeffnete jeder Testlauf eine
-                        // WebSocket-Verbindung nach `wss://nos.lol` — und der Relay-Waechter
-                        // dieser Datei ist fail-closed gegen die Allowlist der eigenen
-                        // Worker-Ports. Nicht „unschoen": JEDER Test, der eine Artikelflaeche
-                        // beruehrt, waere rot, und zwar aus einem Grund, der wie ein
-                        // Regress aussieht.
-                        //
-                        // Leer heisst hier: nur der Board-Relay wird nach Signalen gefragt.
-                        // `board-fixtures.ts` setzt seinen eigenen Wert und ist unberuehrt.
-                        NOSTR_ARTICLE_METRIC_RELAYS: '',
-                        // …und der WORKSPACE zeigt auf den WORKER-Relay, nicht auf das
-                        // Produktions-Buzz aus der lokalen `.env`.
-                        //
-                        // Dieselbe Mechanik wie zwei Riegel darüber, eine Variable weiter:
-                        // dieser `serve` erbt `...process.env`, und `playwright.config.ts`
-                        // lädt vorher die lokale `.env` hinein — dort steht das
-                        // Produktions-Buzz. Client-seitig fangen `useZooid()`/`useBuzz()`
-                        // das seit dem 2026-07-30 ab (`window.__nostrWorkspace = ''`, dort
-                        // mit 25 roten Tests bezahlt), der SERVER sah den Wert aber weiter.
-                        //
-                        // Bis P5 war das folgenlos: der Server benutzte
-                        // `config('group.workspace_url')` nur, um ihn ins `<head>` zu
-                        // schreiben, wo ihn die Stubs überschrieben. Seit P5 entscheidet er
-                        // über MARKUP — die Ortskarte „Forge", die Forge-Zeile der
-                        // Rail-Fußzeile und den vierten Tab auf `/forge`. Ohne diese Zeile
-                        // rendert dieselbe Spec auf einem Rechner mit `.env`-Eintrag anders
-                        // als auf einem ohne, und kein Test sagt einem das.
-                        //
-                        // NICHT leer, sondern der worker-eigene zooid: leer schaltete die
-                        // Forge-Fläche in jedem Lauf ab, und die Specs, die sie brauchen
-                        // (`workspaces.spec.ts`), hätten keinen Gegenstand mehr. Ein echter
-                        // LOKALER Relay hält beides — Markup vorhanden, Ziel harmlos.
-                        NOSTR_WORKSPACE_URL: `ws://localhost:${zooidPort}`,
-                    },
+                    // Die gesamte Server-ENV steht seit dem P7-Gate an EINER Stelle:
+                    // `support/serverEnv.ts`. Vorher war dieser Block an drei Orten von
+                    // Hand dupliziert (hier, `board-fixtures.ts`, und gar nicht in den
+                    // beiden `tinker`-Spawns) — zweimal ist dabei ein Relay-Schlüssel
+                    // durchgerutscht, beide Male von einem Menschen beim Lesen gefunden
+                    // und nie von einem Test. `serverEnv.nodetest.ts` gewinnt die Liste
+                    // der zu neutralisierenden Schlüssel jetzt aus `config/`.
+                    //
+                    // Die Reihenfolge ist tragend: die Überlagerung MUSS hinter
+                    // `...process.env` stehen, sonst gewinnt die `.env` des Rechners.
+                    env: { ...process.env, ...testServerEnv({ slot }) },
                     stdio: 'ignore',
                 },
             )
@@ -282,7 +274,7 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
             const original = browser.newContext.bind(browser)
             browser.newContext = async (...args: Parameters<typeof original>) => {
                 const context = await original(...args)
-                beobachte(context)
+                await sichere(context)
 
                 return context
             }
@@ -302,7 +294,7 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
      */
     relayWaechter: [
         async ({}, use, testInfo) => {
-            const lauf: Aufzeichnung = { gesehen: [], zusaetzlich: [] }
+            const lauf: Aufzeichnung = { gesehen: [], zusaetzlich: [], quittiert: [] }
             aufzeichnung = lauf
             const erlaubt = (): Herkunft[] => [
                 ...erlaubteHerkuenfte({ slot: testInfo.parallelIndex + SLOT_OFFSET }),
@@ -324,16 +316,46 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
                                 // Freigabe, die im Ernstfall fehlt.
                                 throw new Error(`relayWaechter.erlaube: "${url}" ist keine lesbare WebSocket-URL.`)
                             }
+                            if (!istLoopbackHerkunft(h)) {
+                                // **Eine Freigabe gilt nur fürs Loopback.** Bis P6 prüfte
+                                // diese Stelle nur die LESBARKEIT — `erlaube('wss://nostr.
+                                // einundzwanzig.space/')` wäre angenommen worden, und der
+                                // einzige Riegel gegen einen Produktions-Relay wäre damit
+                                // per Einzeiler im Test abschaltbar gewesen. Ein Wächter,
+                                // den sein Prüfling selbst entschärfen kann, ist keiner.
+                                //
+                                // Der Verzicht kostet nichts: alle drei Bestandsaufrufe
+                                // geben `ws://127.0.0.1:<port>/` frei (`nostr-login`,
+                                // `verein-buzz-reconnect`, `relay-guard`) — sie melden
+                                // eigene, im Test gestartete Server an. Und weiter als
+                                // hierhin darf keine Freigabe reichen, weil die Prävention
+                                // (`hermetik.ts`) fremde Herkünfte ohnehin sperrt: eine
+                                // Freigabe darüber hinaus wäre eine Zusage ohne Deckung.
+                                throw new Error(
+                                    `relayWaechter.erlaube: "${url}" ist keine Loopback-Adresse. Freigeben lassen sich nur ` +
+                                        `lokale Server, die der Test selbst startet (localhost, 127.0.0.1, [::1]). Eine fremde ` +
+                                        `Herkunft sperrt die Prävention unabhängig davon — siehe support/hermetik.ts.`,
+                                )
+                            }
                             lauf.zusaetzlich.push(h)
                         }
                     },
                     gesehen: () => [...lauf.gesehen],
+                    sperreErwartet: (...urls: string[]) => {
+                        // Quittiert wird der VERMERK, nicht die URL: nur was die
+                        // Prävention selbst als gesperrt eingetragen hat, kann hier
+                        // wegfallen. Begründung am Typ.
+                        lauf.quittiert.push(...urls.map(sperrVermerk))
+                    },
                 })
             } finally {
                 aufzeichnung = null
             }
 
-            const treffer = verstoesse(lauf.gesehen, erlaubt())
+            const treffer = verstoesse(
+                lauf.gesehen.filter((eintrag) => !lauf.quittiert.includes(eintrag)),
+                erlaubt(),
+            )
             if (treffer.length > 0) {
                 throw new Error(verstossMeldung(testInfo.title, treffer, erlaubt()))
             }
@@ -350,7 +372,7 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
      */
     context: async ({ relayWaechter, context }, use) => {
         void relayWaechter
-        beobachte(context)
+        await sichere(context)
         await use(context)
     },
 })
