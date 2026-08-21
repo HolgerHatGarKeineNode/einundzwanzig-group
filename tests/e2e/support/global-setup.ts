@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import type { FullConfig } from '@playwright/test'
 import { ownedRunMarkerPaths } from './runMarkers'
+import { SOURCES_HASH_CMD, SOURCES_STAMP, sourcesHash } from './sourcesStamp'
 
 /**
  * Läuft EINMAL vor allen Workern. Baut die geteilten Artefakte, die sonst mehrere
@@ -13,21 +14,10 @@ import { ownedRunMarkerPaths } from './runMarkers'
  */
 
 const MANIFEST = 'public/build/manifest.json'
-/** Content-Abzug des Build-Inputs — siehe `sourcesHash()`. Wird nach jedem Build neu geschrieben. */
-const SOURCES_STAMP = 'public/build/.sources-stamp'
+// `SOURCES_STAMP`, `SOURCES_HASH_CMD` und `sourcesHash()` wohnen seit dem Bundle-Riegel
+// in `./sourcesStamp` — dieselbe Frage („ist der Build aktuell?") darf nicht zwei
+// Antworten haben. Die Begründung für Content statt mtime steht dort.
 
-/**
- * Hash über EXAKT die Roots, die das bisherige mtime-Kriterium beobachtete (nichts
- * dazugekommen, nichts weggelassen): Determinismus über `LC_ALL=C sort`, damit kein
- * Wechsel der Shell-Locale die Reihenfolge und damit den Hash kippt.
- */
-const SOURCES_HASH_CMD =
-    `find resources packages/*/resources packages/*/js package.json vite.config.* -type f 2>/dev/null ` +
-    `| LC_ALL=C sort | xargs -r sha256sum | sha256sum | cut -d' ' -f1`
-
-function sourcesHash(): string {
-    return execFileSync('bash', ['-c', SOURCES_HASH_CMD]).toString().trim()
-}
 
 /**
  * Vite nur bauen, wenn nötig — INHALTSbasiert, nicht mtime-basiert. Bei unveränderten

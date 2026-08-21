@@ -197,6 +197,21 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
                         // dort selbst auf den worker-eigenen zooid. Diese Zeile kann ihn
                         // nicht erreichen — verifiziert, nicht angenommen (siehe P0-Bericht).
                         NOSTR_BOARD_URL: '',
+                        // …und die Relays der SOZIALSIGNALE (P6) ebenso.
+                        //
+                        // Diese Variable ist der Grund, warum sie ueberhaupt eine Variable
+                        // ist: `js/longformFeed.ts` (`SEKUNDAER_RELAYS`) fragt fuer die
+                        // Zaehler kind 7/9735/1111 auf FREMDEN Relays ab. Stuenden die
+                        // Adressen als Literal im Code, oeffnete jeder Testlauf eine
+                        // WebSocket-Verbindung nach `wss://nos.lol` — und der Relay-Waechter
+                        // dieser Datei ist fail-closed gegen die Allowlist der eigenen
+                        // Worker-Ports. Nicht „unschoen": JEDER Test, der eine Artikelflaeche
+                        // beruehrt, waere rot, und zwar aus einem Grund, der wie ein
+                        // Regress aussieht.
+                        //
+                        // Leer heisst hier: nur der Board-Relay wird nach Signalen gefragt.
+                        // `board-fixtures.ts` setzt seinen eigenen Wert und ist unberuehrt.
+                        NOSTR_ARTICLE_METRIC_RELAYS: '',
                         // …und der WORKSPACE zeigt auf den WORKER-Relay, nicht auf das
                         // Produktions-Buzz aus der lokalen `.env`.
                         //

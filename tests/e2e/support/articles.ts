@@ -23,8 +23,16 @@ export type RelayArticle = {
     created_at: number
 }
 
-/** Event-ids dieses Worker-Prozesses, in Publish-Reihenfolge. */
-const published: string[] = []
+/**
+ * Event-ids dieses Worker-Prozesses, in Publish-Reihenfolge — Artikel UND ihre
+ * Sozialsignale (kind 7/1111/9735, seit P6).
+ *
+ * **Die Signale gehören hier hinein, nicht nur die Artikel.** Der worker-eigene zooid
+ * überlebt den Lauf (RUNMARK-Wiederverwendung); eine Reaktion, die niemand abräumt,
+ * zählt beim nächsten Lauf an einem Artikel mit, der zufällig dieselbe Adresse trägt —
+ * und ein Zähler, der „3" statt „1" zeigt, sieht wie ein Fehler des Produkts aus.
+ */
+const published: { id: string; sec: string }[] = []
 
 /** `nak` mit Wiederholung — gegen Umgebungs-Transienz (Muster `quote-card.spec.ts`). */
 function nak(args: readonly string[], attempts = 3): string {
@@ -140,14 +148,206 @@ export function publishArticle(
     if (!found) {
         throw new Error(`Artikel "${opts.identifier}" wurde publiziert, aber die Requery fand ihn nicht: ${relayWs}`)
     }
-    published.push(found.id)
+    published.push({ id: found.id, sec })
 
     return found.id
 }
 
-/** Löscht alle registrierten Artikel dieses Worker-Prozesses (NIP-09, kind 5) und leert die Liste. */
-export function cleanupArticles(relayWs: string, sec: string): void {
-    for (const id of published.splice(0)) {
+/**
+ * Die NIP-01-Adresse eines Artikels — `30023:<pubkey>:<d>`.
+ *
+ * **Bewusst hier ausgeschrieben und nicht aus `js/articleMetrics.ts` importiert.** Der
+ * Test soll die Form unabhängig behaupten; ein Import machte die Fixture zur Kopie der
+ * geprüften Funktion, und ein Fehler in ihr wäre auf beiden Seiten derselbe.
+ */
+export function artikelAdresse(pubkeyHex: string, identifier: string): string {
+    return `30023:${pubkeyHex}:${identifier}`
+}
+
+/**
+ * Publiziert eine Reaktion (kind 7, NIP-25) auf einen Artikel — adressiert über `a`.
+ *
+ * `a` und nicht `e`: ein 30023 ist ersetzbar, und die Adresse überlebt jede
+ * Überarbeitung. Beide Formen kommen im echten Bestand vor (deshalb fragt die Fläche
+ * auch beide ab); hier steht die, auf die es ankommt.
+ */
+export function publishReaction(relayWs: string, sec: string, adresse: string, content = '+'): void {
+    merkeId(nak(['event', '--auth', '--sec', sec, '-k', '7', '-t', `a=${adresse}`, '-c', content, relayWs]), sec, relayWs)
+}
+
+/**
+ * Die Event-id aus `nak event`s Ausgabe ziehen und fürs Abräumen merken.
+ *
+ * `nak event` druckt das signierte Ereignis als JSON — anders als bei kind 30023 braucht
+ * es hier keine Requery: die Id steht unveränderlich in der Ausgabe, und ein
+ * nicht-ersetzbares Ereignis kann nicht in mehreren Fassungen vorliegen. Findet sich
+ * keine Id, wird still nichts gemerkt: ein werfender Helfer überschriebe den Testbefund
+ * mit einem Infrastrukturfehler.
+ */
+function merkeId(ausgabe: string, sec: string, relayWs: string): void {
+    const id = idAusAusgabe(ausgabe)
+    if (!id) {
+        throw new Error(`nak hat kein Ereignis gedruckt — Ausgabe:\n${ausgabe.trim() || '(leer)'}`)
+    }
+    // **REQUERY, nicht der Rückgabewert — der Weg von `publishArticle` 60 Zeilen höher.**
+    //
+    // Der erste Entwurf prüfte nur, ob `nak event` ein parsebares Ereignis druckte, und
+    // trug im Docblock „Fail-CLOSED" — eine Zusage ohne Deckung. **Gemessen:** `nak event`
+    // druckt das signierte Ereignis auch bei ABLEHNUNG auf stdout, mit **Exit-Code 0**.
+    // Mit einem Nicht-Mitglied signiert lehnte der zooid viermal ab
+    // (`restricted: you are not a member of this relay`), und die Meldung „nicht
+    // angenommen" erschien **null Mal**; der Test scheiterte erst später und aus dem
+    // falschen Grund.
+    //
+    // Ob ein Ereignis wirklich auf dem Relay liegt, beantwortet nur der Relay selbst.
+    const gefunden = nak(['req', '--auth', '--sec', sec, '-i', id, relayWs])
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .some((zeile) => {
+            try {
+                return (JSON.parse(zeile) as { id?: string }).id === id
+            } catch {
+                return false
+            }
+        })
+    if (!gefunden) {
+        throw new Error(
+            `Der Relay hat das Ereignis ${id.slice(0, 12)}… NICHT angenommen (Requery leer). ` +
+                `nak meldet Ablehnungen nur auf stderr und beendet sich mit 0 — der Rückgabewert sagt darüber nichts.`,
+        )
+    }
+    published.push({ id, sec })
+}
+
+/** Die Event-Id aus `nak event`s Ausgabe ziehen; `''`, wenn keine dasteht. */
+function idAusAusgabe(ausgabe: string): string {
+    for (const zeile of ausgabe.trim().split('\n')) {
+        try {
+            const event = JSON.parse(zeile) as { id?: string }
+            if (typeof event.id === 'string' && event.id.length === 64) {
+                return event.id
+            }
+        } catch {
+            // keine JSON-Zeile — nak druckt auch Statuszeilen
+        }
+    }
+
+    return ''
+}
+
+/**
+ * Publiziert einen NIP-22-Kommentar (kind 1111), der den Artikel **nur im grossen `A`**
+ * nennt.
+ *
+ * **Das ist der Fall, der einen `#a`-only-Filter auffliegen lässt** und deshalb der
+ * Grund, warum dieser Helfer so und nicht anders baut: eine Antwort auf einen Kommentar
+ * trägt im kleinen `a` den ELTERNKOMMENTAR und nur im `A` den Artikel. Am 2026-08-21
+ * über drei Relays gemessen sind 7 der 64 Artikel-Kommentare ausschliesslich über `#A`
+ * zu finden.
+ */
+export function publishCommentRootOnly(relayWs: string, sec: string, adresse: string, content = 'Ein Kommentar.'): void {
+    merkeId(nak([
+        'event',
+        '--auth',
+        '--sec',
+        sec,
+        '-k',
+        '1111',
+        '-t',
+        `A=${adresse}`,
+        '-t',
+        // Der Elternteil ist ein anderer Kommentar, nicht der Artikel.
+        'a=30023:0000000000000000000000000000000000000000000000000000000000000000:ein-anderer-kommentar',
+        '-c',
+        content,
+        relayWs,
+    ]), sec, relayWs)
+}
+
+/**
+ * Publiziert eine Zap-Quittung (kind 9735), die welshmans `zapFromEvent` **akzeptiert**.
+ *
+ * ── Warum das nicht trivial ist ────────────────────────────────────────────────────
+ *
+ * Eine kind 9735 behauptet eine Zahlung, sie beweist sie nicht — und welshman prüft
+ * entsprechend streng (`bolt11` gegen das `amount`-Tag des Requests, `lnurl` gegen den
+ * aufgelösten Zapper, Signer gegen dessen `nostrPubkey`). Ein naiv zusammengebautes
+ * Ereignis zählt deshalb **null**, und der Test wäre aus dem falschen Grund rot.
+ *
+ * Genutzt wird hier der Zweig „`p` === Signer der Quittung" (`Zaps.js`): welshman hält
+ * ihn ohne aufgelösten Zapper für legitim. Damit braucht der Test keinen LNURL-Server.
+ *
+ * **`empfaengerPub` ist zugleich der Riegel und die Falle.** Seit dem Sicherheitsbefund
+ * verwirft `summiereZaps` jede Quittung, deren `p`-Tag nicht der Artikel-AUTOR ist —
+ * derselbe Kurzschluss macht sonst die Sat-Summe eines fremden Artikels für jeden Dritten
+ * frei setzbar. Wer hier einen anderen Pubkey als den Autor übergibt, baut deshalb den
+ * ANGRIFFSFALL, nicht den Normalfall; beide werden in `article-metrics.spec.ts` gebraucht
+ * und stehen dort ausdrücklich benannt.
+ *
+ * `msats` wird als Piko-BTC in den bolt11-HRP geschrieben (`p` = 0,1 msat, am
+ * installierten welshman nachgemessen: `lnbc2100000p` → 210 000 msats). Die Rechnung ist
+ * kein gültiges Lightning-Objekt — `getInvoiceAmount` liest ausschliesslich den
+ * Betragsteil.
+ */
+export function publishZapReceipt(
+    relayWs: string,
+    sec: string,
+    empfaenger: string | string[],
+    adresse: string,
+    msats: number,
+): void {
+    // **`empfaenger` darf eine LISTE sein**, und das ist kein Komfort: Nostr verbietet
+    // doppelte Tags nicht, Relays deduplizieren sie nicht, und genau daran ist der erste
+    // Riegel dieser Phase gescheitert. Ein Fixture, das nur einen `p`-Tag bauen kann,
+    // kann die Umgehung `[["p",AUTOR],["p",ANGREIFER]]` nicht darstellen.
+    const pListe = Array.isArray(empfaenger) ? empfaenger : [empfaenger]
+    const request = JSON.stringify({
+        kind: 9734,
+        pubkey: pListe[pListe.length - 1],
+        tags: [...pListe.map((wert) => ['p', wert]), ['amount', String(msats)], ['a', adresse]],
+        content: '',
+    })
+    merkeId(nak([
+        'event',
+        '--auth',
+        '--sec',
+        sec,
+        '-k',
+        '9735',
+        '-t',
+        `a=${adresse}`,
+        ...pListe.flatMap((wert) => ['-t', `p=${wert}`]),
+        '-t',
+        `bolt11=lnbc${msats * 10}p1p0000000`,
+        '-t',
+        `description=${request}`,
+        '-c',
+        '',
+        relayWs,
+    ]), sec, relayWs)
+}
+
+/**
+ * Löscht alle registrierten Ereignisse dieses Worker-Prozesses (NIP-09, kind 5) und
+ * leert die Liste — Artikel und, seit P6, ihre Sozialsignale.
+ *
+ * **Jedes Ereignis wird mit dem Schlüssel gelöscht, der es signiert hat.** Vorher lief
+ * das pauschal über einen mitgegebenen Schlüssel, und der Relay lehnte jede fremde
+ * Löschung ab: `blocked: you are not the author of this event` — gemessen **zweimal je
+ * Lauf** von `article-metrics.spec.ts`, für die beiden Angriffsquittungen, die
+ * absichtlich mit einem ANDEREN Schlüssel signiert werden als der Artikel.
+ *
+ * Folgenlos war das nur, solange der Aufräumer schwieg. Da die Publish-Helfer seit
+ * diesem Auftrag **werfen**, wäre daraus ohne diesen Umbau sofort ein roter Lauf
+ * geworden — und zwar einer, bei dem unklar bliebe, ob der Riegel oder die Ursache
+ * schuld ist.
+ *
+ * `_sec` bleibt als Parameter erhalten, damit kein Aufrufer angefasst werden muss; er
+ * wird nicht mehr gelesen.
+ */
+export function cleanupArticles(relayWs: string, _sec?: string): void {
+    for (const { id, sec } of published.splice(0)) {
         try {
             execFileSync(NAK, ['event', '--auth', '--sec', sec, '-k', '5', '-t', `e=${id}`, relayWs], {
                 encoding: 'utf8',

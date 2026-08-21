@@ -3,7 +3,7 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "vite build",
+        "build": "vite build && node --experimental-strip-types tests/e2e/support/schreibeStamp.ts",
         "dev": "vite",
         "test:unit": "node --test --experimental-strip-types \"packages/*/js/**/*.test.ts\" \"tests/**/*.nodetest.ts\"",
         "test:e2e": "playwright test",
