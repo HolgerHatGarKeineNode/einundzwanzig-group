@@ -1,5 +1,6 @@
 import { test as base, expect, type Page, type Locator } from './fixtures'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { testServerEnv } from './serverEnv'
 
 /**
  * EIGENER `php artisan serve`-Prozess für `longform-reader.spec.ts` (P7) — mit
@@ -71,52 +72,21 @@ export const test = base.extend<object, { boardServer: string }>({
             // Eigener Port-Bereich, kollidiert mit keinem bestehenden (serve 8137+,
             // zooid 3335+, buzz 3001+ — siehe fixtures.ts/zooid.ts/buzz.ts).
             const port = 8437 + slot
-            const zooidPort = 3335 + slot
-            const boardUrl = `ws://localhost:${zooidPort}`
 
             const serve: ChildProcess = spawn(
                 'php',
                 ['artisan', 'serve', '--port', String(port)],
                 {
-                    env: {
-                        ...process.env,
-                        VITE_HOT_FILE: '/tmp/e2e-vite-never-hot',
-                        DB_JOURNAL_MODE: 'WAL',
-                        DB_BUSY_TIMEOUT: '5000',
-                        PHP_CLI_SERVER_WORKERS: '4',
-                        NOSTR_PROFILE_INDEXER: '',
-                        // Space UND Board zeigen auf denselben worker-eigenen zooid — der
-                        // Login-Flow (`loginNsec`) und `useZooid()`-Stubs funktionieren
-                        // dadurch unverändert, während `/articles` server-seitig eine
-                        // echte Quelle sieht.
-                        NOSTR_SPACE_URL: boardUrl,
-                        NOSTR_BOARD_URL: boardUrl,
-                        // Die Sozialsignale (P6) kommen im Test aus DEMSELBEN Relay wie
-                        // die Artikel. Der Produktivbetrieb fragt hier zwei fremde Relays
-                        // (`.env.example`: nos.lol, damus); im Test waere jede fremde
-                        // Adresse ein Bruch des Relay-Waechters. Ein Wert und nicht leer,
-                        // damit der Multi-Relay-Pfad im E2E ueberhaupt einen Gegenstand hat.
-                        NOSTR_ARTICLE_METRIC_RELAYS: boardUrl,
-                        // …und der WORKSPACE ebenso, aus demselben Grund eine Variable
-                        // weiter. Dieser `serve` erbt `...process.env`, und
-                        // `playwright.config.ts` lädt vorher die lokale `.env` hinein — die
-                        // trägt dort das PRODUKTIONS-Buzz. Client-seitig fängt `useZooid()`
-                        // das ab (`window.__nostrWorkspace = ''`), aber der SERVER sieht
-                        // den Wert trotzdem: seit P5 entscheidet er darüber, ob die
-                        // Ortskarte „Forge", die Forge-Zeile der Rail-Fußzeile und der
-                        // vierte Forge-Tab überhaupt gerendert werden.
-                        //
-                        // Zwei Dinge auf einmal: der Produktions-Host verlässt die
-                        // Server-ENV (dieselbe Klasse wie der `NOSTR_BOARD_URL`-Riegel in
-                        // `fixtures.ts`), und das Markup wird von der `.env` des jeweiligen
-                        // Rechners unabhängig — ohne diese Zeile rendert dieselbe Spec auf
-                        // Rechner A mit und auf Rechner B ohne Forge-Karte.
-                        //
-                        // Der worker-eigene zooid als Wert: er ist ein echter, LOKALER
-                        // Relay. Ein `wss://…`-Platzhalter wäre auch nicht-leer, zeigte aber
-                        // nach außen, sobald jemand die Client-Stubs entfernt.
-                        NOSTR_WORKSPACE_URL: boardUrl,
-                    },
+                    // Ein Ort für die Server-ENV (`support/serverEnv.ts`) — dieselbe
+                    // Überlagerung wie beim Worker-`serve`, nur mit `mitBoard: true`:
+                    // Board und Metrik-Relays zeigen hier auf DENSELBEN worker-eigenen
+                    // zooid, damit `/articles` server-seitig eine echte, aber lokale
+                    // Quelle sieht und der Multi-Relay-Pfad im E2E einen Gegenstand hat.
+                    //
+                    // Der Unterschied zu vorher ist nicht der Wert, sondern die Bauform:
+                    // die Liste der zu neutralisierenden Schlüssel wird nicht mehr an
+                    // drei Stellen von Hand geführt (siehe Kopf von `serverEnv.ts`).
+                    env: { ...process.env, ...testServerEnv({ slot, mitBoard: true }) },
                     stdio: 'ignore',
                 },
             )

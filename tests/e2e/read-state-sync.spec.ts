@@ -178,7 +178,7 @@ async function login(page: Page): Promise<void> {
  * Einen Raum ECHT lesen: öffnen, den erwarteten Inhalt abwarten, zurück.
  *
  * `markRead()` feuert HIER ZWEIMAL, nicht einmal: schon beim ÖFFNEN (der initiale
- * Auto-Scroll-zum-Boden ruft `scrollToBottom()` → `markRead()`, `bridge.ts:3689-3695`)
+ * Auto-Scroll-zum-Boden ruft `scrollToBottom()` → `markRead()`, `bridge.ts`, `scrollToBottom()`)
  * UND nochmal beim Verlassen (`destroy()`, wenn der Nutzer am Boden steht). Beides
  * zusammen ist der Grund, warum es in Sync 1 KEINEN einzelnen, exakten Referenzpunkt für
  * „wann hat die Drossel zu laufen begonnen" gibt — die zweite Fassung dieses Ankers hat

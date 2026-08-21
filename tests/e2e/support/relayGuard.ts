@@ -9,9 +9,9 @@
  *
  * ── Warum es den Wächter gibt ───────────────────────────────────────────────────────
  *
- * Die Hermetik der Suite hängt heute an drei Stellen, die alle **setzen** und keine, die
- * **prüft**: `fixtures.ts` überschreibt `NOSTR_SPACE_URL`/`NOSTR_BOARD_URL`/
- * `NOSTR_PROFILE_INDEXER` in der Server-ENV, `support/zooid.ts` schiebt dem Browser per
+ * Die Hermetik der Suite hängt an drei Stellen, die alle **setzen** und keine, die
+ * **prüft**: `support/serverEnv.ts` überschreibt die sieben `NOSTR_*`-Schlüssel in der
+ * Server-ENV jedes gespawnten PHP-Prozesses, `support/zooid.ts` schiebt dem Browser per
  * `addInitScript` seine Quelle unter, und `support/articles.ts` rechnet die nak-Ziel-URL
  * aus dem eigenen Worker-Port. Fällt eine dieser Stellen aus — eine neue Fläche liest
  * ihre Relay-URL woanders her, ein `addInitScript` läuft zu spät, ein Default im
@@ -36,11 +36,22 @@
  * Wächter sahen jeweils dasselbe: `ws://localhost:3999/` (niemand hört) → readyState 3,
  * **nicht** beobachtet · `ws://127.0.0.1:<serve>/` (HTTP, lehnt den Handschlag ab) →
  * readyState 3, beobachtet · `wss://nostr.einundzwanzig.space/` → readyState 1,
- * beobachtet. Der blinde Fleck ist damit genau der Fall, in dem **kein Byte** einen
- * fremden Rechner erreicht hat; der Fall, um den es geht, liegt vollständig im Sichtfeld.
- * Angenehmer Nebeneffekt: die beiden Bestands-Konstruktionen mit absichtlich totem Socket
- * (`support/verein.ts` `stubDeadSpace` auf `ws://127.0.0.1:1/`, `longform-reader.spec.ts`
- * `SILENT_BOARD_PORT`) brauchen deshalb keine Freigabe.
+ * beobachtet.
+ *
+ * **Der blinde Fleck ist damit der Fall, in dem die TCP-Verbindung nicht zustande kommt**
+ * — und das ist NICHT dasselbe wie „kein Byte hat einen fremden Rechner erreicht", auch
+ * wenn hier ursprünglich genau das stand. Die Aussage hält für den gemessenen Fall (ein
+ * lokaler Port, auf dem niemand lauscht: das SYN geht an den eigenen Kernel). Sie hält
+ * **nicht** für einen fremden Hostnamen, der nicht auflöst — die DNS-Anfrage verlässt die
+ * Maschine —, und für `wss://` mit ungültigem Zertifikat ist sie von den drei Messungen
+ * gar nicht abgedeckt: dort steht der SNI-Name bereits beim Fremden, bevor irgendetwas
+ * scheitert. Der Schaden ist in beiden Fällen gering, die Behauptung war trotzdem weiter
+ * als die Messung. Seit dem P7-Gate deckt die **Prävention** (`hermetik.ts`) genau diese
+ * Lücke: eine fremde Herkunft löst gar nicht erst auf.
+ *
+ * Angenehmer Nebeneffekt der Grenze: die beiden Bestands-Konstruktionen mit absichtlich
+ * totem Socket (`support/verein.ts` `stubDeadSpace` auf `ws://127.0.0.1:1/`,
+ * `longform-reader.spec.ts` `SILENT_BOARD_PORT`) brauchen keine Freigabe.
  *
  * ── Warum Herkunft (Host + Port) und nicht die ganze URL ────────────────────────────
  *

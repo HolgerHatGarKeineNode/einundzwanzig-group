@@ -159,3 +159,44 @@ describe('Bundle-Grenze: der Renderer bleibt aus dem Boot-Pfad', () => {
         )
     })
 })
+
+/**
+ * Die Zusage des Stamps — **eine** Wahrheit für alle, und mit dem sicheren
+ * Abtastzeitpunkt.
+ *
+ * `global-setup.ts` zieht den Quell-Hash bewusst VOR dem Build und schreibt ihn erst
+ * danach, mit der ausdrücklichen Begründung: ändert sich eine Quelle während des Builds,
+ * passt ein danach gezogener Stamp nicht mehr zum gebauten Stand — er behauptete Frische,
+ * die das Artefakt nicht hat. `schreibeStamp.ts` machte es bis zum P7-Gate umgekehrt, in
+ * derselben Sekunde, in der sein Modulkopf „eine Wahrheit für alle" zusagte.
+ *
+ * Dieser Fall hält die Reihenfolge fest. Ohne ihn wäre der Rückfall in die unsichere
+ * Richtung eine stille Zeilenvertauschung, die kein Test bemerkt — genau die Klasse
+ * Fehler, die dieser Plan dreimal aufgeschrieben hat.
+ */
+describe('Der Quell-Stamp: erst hashen, dann bauen', () => {
+    const quelle = (): string => {
+        const inhalt = readFileSync(join(wurzel, 'tests/e2e/support/schreibeStamp.ts'), 'utf8')
+        assert.ok(inhalt.length > 0, 'schreibeStamp.ts ist leer — diese Sonde misst dann nichts')
+
+        return inhalt
+    }
+
+    test('der Hash entsteht VOR dem Build-Aufruf', () => {
+        const inhalt = quelle()
+        const gehasht = inhalt.indexOf('sourcesHash()')
+        const gebaut = inhalt.indexOf("['build']")
+        const geschrieben = inhalt.indexOf('writeFileSync(SOURCES_STAMP')
+        assert.ok(gehasht > -1 && gebaut > -1 && geschrieben > -1, 'Schnittmarken veraltet — dieser Fall misst nichts mehr')
+        assert.ok(gehasht < gebaut, 'der Quell-Hash wird NACH dem Build gezogen — falsch grün ist teurer als ein doppelter Build')
+        assert.ok(gebaut < geschrieben, 'der Stamp wird geschrieben, bevor der Build durch ist')
+    })
+
+    test('und `npm run build` geht wirklich über dieses Modul', () => {
+        const skripte = JSON.parse(readFileSync(join(wurzel, 'package.json'), 'utf8')).scripts as Record<string, string>
+        assert.match(skripte.build as string, /schreibeStamp\.ts/)
+        // Auf den AUFRUF gemustert: stünde `vite build &&` weiterhin davor, liefe der
+        // Build zweimal und der Hash wieder zur falschen Zeit.
+        assert.ok(!(skripte.build as string).includes('vite build'), `build ruft vite weiterhin selbst: ${skripte.build}`)
+    })
+})

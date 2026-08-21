@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\TestCase;
@@ -407,4 +408,78 @@ test('ohne Workspace-Config bleibt die Forge-Zeile der Fußzeile aus', function 
 
     expect($html)->toContain('data-rail-fuss="artikel"');
     expect($html)->not->toContain('data-rail-fuss="forge"');
+});
+
+// ── 33ab: ein Glyph, zwei Bedeutungen ───────────────────────────────────────────────
+
+/**
+ * Die `d`-Werte aller `<path>` eines SVG — das, was ein Nutzer als FORM sieht.
+ *
+ * Verglichen wird die Geometrie und nicht der Icon-Name, weil der Name im gerenderten
+ * HTML gar nicht mehr vorkommt: Flux inlint das SVG. Ein Test auf `icon="…"` prüfte die
+ * Blade-Quelle, nicht die Seite.
+ *
+ * Fail-closed: kein `<path>` gefunden heißt, die Sonde hat ihren Gegenstand verloren.
+ *
+ * @return list<string>
+ */
+function svgPfade(string $svg): array
+{
+    preg_match_all('/ d="([^"]+)"/', $svg, $treffer);
+    if ($treffer[1] === []) {
+        throw new RuntimeException('Kein <path d="…"> im SVG — diese Sonde misst nichts.');
+    }
+
+    return $treffer[1];
+}
+
+/** Das erste `<svg>` NACH einem Anker. Wirft, wenn der Anker oder das SVG fehlt. */
+function svgNach(string $html, string $anker): string
+{
+    $von = strpos($html, $anker);
+    if ($von === false) {
+        throw new RuntimeException("Anker '{$anker}' nicht gefunden — der Test misst nichts.");
+    }
+    $auf = strpos($html, '<svg', $von);
+    $zu = $auf === false ? false : strpos($html, '</svg>', $auf);
+    if ($auf === false || $zu === false) {
+        throw new RuntimeException("Kein SVG hinter '{$anker}'.");
+    }
+
+    return substr($html, $auf, $zu - $auf + 6);
+}
+
+/**
+ * **Der Threads-Tab und die Chat-Ortskarte tragen nicht mehr dasselbe Zeichen.**
+ *
+ * Bis zum P7-Gate war beides `chat-bubble-left-right` — zwei verschiedene Ziele, ein
+ * Symbol, zwanzig Pixel auseinander (Nielsen #4, Konsistenz und Standards).
+ *
+ * **Warum der Vergleich gegen GERENDERTE Referenzen läuft und nicht Karte gegen Tab:**
+ * die beiden stehen in verschiedenen Größen im Markup (Ortskarte `viewBox 0 0 24 24`,
+ * Tab `viewBox 0 0 20 20`). Heroicons zeichnet für jede Größe eigene Pfade — ein direkter
+ * Vergleich der beiden Stellen wäre also auch dann grün geblieben, wenn BEIDE weiterhin
+ * die Sprechblase zeigten. Genau diese Sorte tautologisch grüner Test ist der Grund,
+ * warum es diesen Fall überhaupt gibt.
+ */
+test('Threads-Tab und Chat-Ortskarte zeigen verschiedene Zeichen', function () {
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+    $html = (string) alsMitglied($this, 'group.spaces')->assertOk()->getContent();
+
+    $tab = svgPfade(svgNach($html, 'data-flux-tab="data-flux-tab" name="threads"'));
+    $karte = svgPfade(svgNach($html, 'data-ortskarte="chat"'));
+
+    // 1. Der Tab zeigt WIRKLICH den Antwort-Pfeil — die Positivkontrolle. Ohne sie
+    //    bestünde der Fall auch mit einem Icon, das gar nicht rendert.
+    expect($tab)->toBe(svgPfade(Blade::render('<flux:icon.arrow-turn-down-right variant="mini" />')));
+
+    // 2. Und NICHT die Sprechblase, in genau der Größe, in der er sie zeigen würde.
+    expect($tab)->not->toBe(svgPfade(Blade::render('<flux:icon.chat-bubble-left-right variant="mini" />')));
+
+    // 3. Die Ortskarte behält ihr Bubble-Zeichen: das ist die andere Hälfte der Aussage.
+    //    Getauscht wurde EIN Glyph, nicht die Ikonografie der Seite.
+    //    `variant="solid"`, weil die Karte genau die gefüllte Fassung rendert (viewBox 24,
+    //    `fill="currentColor"`) — mit der Outline-Fassung verglichen wäre der Fall aus dem
+    //    falschen Grund rot, und ein „Variante angepasst"-Reflex hätte ihn entschärft.
+    expect($karte)->toBe(svgPfade(Blade::render('<flux:icon.chat-bubble-left-right variant="solid" />')));
 });

@@ -1236,7 +1236,7 @@ test('Anker 12: geteilter Thread-Link im frischen Tab — zweimal Zurück landet
  *
  * **Der Zustand wird im Harness erzeugt, und das ist hier keine Bequemlichkeit.** Über
  * die App ist er nicht herstellbar: `joined` und `roomNames` kommen aus DERSELBEN
- * Projektion (`joinedRoomHs`/`joinedRoomNames`, `js/bridge.ts:1042/1051`, beide auf
+ * Projektion (`joinedRoomHs`/`joinedRoomNames`, `js/bridge.ts`, beide `derived(activeSpaceView, …)`, beide auf
  * `activeSpaceView.userRooms` derived), ihre Schlüsselmengen sind also stets identisch —
  * und `displayRoom()` fällt ohnehin auf `h` zurück, ein leerer Name entsteht dort nie.
  * Ein Ereignis ohne Namen wird deshalb schon von Regel 5 übersprungen, bevor „verwaist"
