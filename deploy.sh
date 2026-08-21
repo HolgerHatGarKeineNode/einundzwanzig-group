@@ -15,6 +15,59 @@ set -euo pipefail
 REMOTE="21-dedicated-prod-web-zooid"
 APP_DIR="webclient"
 
+# ── SSH-Zugang klären, BEVOR eine Minute Arbeit hineinfließt ────────────────────────
+#
+# Der Deploy fasst den Server an zwei Stellen an: rsync (3/5) und ssh (4/5). Beide
+# liegen HINTER Test-Gate und Build, also hinter mehreren Minuten. Wird die
+# Passphrase erst dort fällig, ist die Arbeit getan und der Lauf hängt an einem
+# Prompt — in einer Agenten-, Cron- oder Hook-Sitzung sieht den niemand, und das
+# Skript steht bis zum Timeout. Deshalb steht die Klärung hier vorne.
+#
+# 1. DEN AGENT FINDEN. `SSH_AUTH_SOCK` fehlt in jeder Umgebung, die nicht aus der
+#    Desktop-Sitzung geerbt hat — der Socket liegt trotzdem da. `ssh-add -l` meldet
+#    dann „Could not open a connection to your authentication agent", und das liest
+#    sich wie „kein Schlüssel geladen", obwohl der Schlüssel bereitliegt.
+uid=$(id -u)
+if [ -z "${SSH_AUTH_SOCK:-}" ] && [ -S "/run/user/${uid}/ssh-agent.socket" ]; then
+    export SSH_AUTH_SOCK="/run/user/${uid}/ssh-agent.socket"
+fi
+
+# 2. ASKPASS NUR MIT DESKTOP. Ohne DISPLAY/WAYLAND_DISPLAY wäre der Dialog
+#    unsichtbar; dann ist der Terminal-Prompt der bessere Weg, und
+#    `SSH_ASKPASS_REQUIRE` bleibt ungesetzt, damit ssh selbst entscheidet.
+#    `prefer` und nicht `force`: mit Terminal darf ssh weiterhin dort fragen, falls
+#    kein Dialog aufgeht.
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    for kandidat in "${SSH_ASKPASS:-}" ksshaskpass ssh-askpass /usr/lib/ssh/ssh-askpass; do
+        [ -n "$kandidat" ] || continue
+        if pfad=$(command -v "$kandidat" 2>/dev/null); then
+            export SSH_ASKPASS="$pfad" SSH_ASKPASS_REQUIRE=prefer
+            break
+        fi
+    done
+fi
+
+# 3. EINMAL ANKLOPFEN. Steht der Zugang, kostet das eine Sekunde. Steht er nicht,
+#    wird die Passphrase JETZT abgefragt statt mitten im rsync — und wenn auch das
+#    nicht trägt, bricht der Deploy ab, bevor Tests und Build gelaufen sind.
+#    `</dev/null` beim `ssh-add`: ohne Askpass-Programm scheitert es damit sofort,
+#    statt auf eine Eingabe zu warten, die niemand tätigen kann.
+echo "▸ 0/5  SSH-Zugang zu ${REMOTE} prüfen"
+if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE" true 2>/dev/null; then
+    echo "  · Schlüssel nicht einsatzbereit — Passphrase wird jetzt abgefragt"
+    # `2>/dev/null`: dieser Host hat `RequestTTY` gesetzt, worauf schon die reine
+    # Konfigurationsauflösung „Pseudo-terminal will not be allocated" auf stderr
+    # schreibt. Gefragt ist hier nur der Schlüsselpfad, nicht die Diagnostik.
+    schluessel=$(ssh -G "$REMOTE" 2>/dev/null | awk '/^identityfile /{print $2; exit}' | sed "s#^~#$HOME#")
+    ssh-add "$schluessel" </dev/null || true
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE" true 2>/dev/null || {
+        echo "  ✗ Kein Zugang zu ${REMOTE} — Deploy abgebrochen, bevor Tests und Build liefen." >&2
+        echo "    Prüfen: 'ssh ${REMOTE} true' von Hand, und ob der Alias in ~/.ssh/config aufgelöst wird." >&2
+        exit 1
+    }
+fi
+echo "  ✓ Zugang steht"
+
 # Test-Gate VOR dem Deploy: rsync (Schritt 2) überträgt den Arbeitsbaum, nicht
 # origin/master und nicht HEAD — eine GitHub-CI würde also etwas anderes prüfen,
 # als hier tatsächlich auf Prod landet. Deshalb steht das Gate hier statt in CI.
