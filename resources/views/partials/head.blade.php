@@ -58,6 +58,21 @@
     <script>window.__nostrBoard = window.__nostrBoard ?? @js(config('group.board_relay_url'));</script>
 @endif
 
+{{-- P6 — Relays der SOZIALSIGNALE zu den Artikeln (kind 7/9735/1111), kommagetrennt.
+     Nur gesetzt, wenn konfiguriert; leer heißt „nur der Board". Gleiche `??`-Regel wie
+     oben, damit ein E2E-Lauf sie per addInitScript auf seinen eigenen Relay ziehen —
+     oder ausdrücklich leeren — kann. Die Artikel selbst kommen weiterhin NUR vom Board.
+
+     **Diese Zeile steht ZWEIMAL im Baum, und das ist kein Versehen:** daneben gibt es
+     `packages/einundzwanzig-group/resources/views/partials/head.blade.php`, den
+     Minimal-Head für den Portal-/Fremdhost-Betrieb (aktiv über
+     `config('group.head_partial')`). Wer hier etwas ergänzt und dort nicht, baut ein
+     Feature, das auf einem der beiden Wege still gar nichts tut — sichtbar wäre nur eine
+     kleinere Zahl. `tests/Feature/ArticleMetricRelaysTest.php` hält beide zusammen. --}}
+@if (config('group.article_relay_urls'))
+    <script>window.__nostrArticleRelays = window.__nostrArticleRelays ?? @js(config('group.article_relay_urls'));</script>
+@endif
+
 {{-- Plattform-Flag: auf dem Gerät gated die Insel client-seitig (kein NIP-98).
      Ein vorab gesetztes Flag gewinnt (E2E via addInitScript, wie __nostrRelays). --}}
 <script>window.__nostrMobile = window.__nostrMobile ?? @js((bool) config('nativephp-internal.running'));</script>

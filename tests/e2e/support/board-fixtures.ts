@@ -91,6 +91,12 @@ export const test = base.extend<object, { boardServer: string }>({
                         // echte Quelle sieht.
                         NOSTR_SPACE_URL: boardUrl,
                         NOSTR_BOARD_URL: boardUrl,
+                        // Die Sozialsignale (P6) kommen im Test aus DEMSELBEN Relay wie
+                        // die Artikel. Der Produktivbetrieb fragt hier zwei fremde Relays
+                        // (`.env.example`: nos.lol, damus); im Test waere jede fremde
+                        // Adresse ein Bruch des Relay-Waechters. Ein Wert und nicht leer,
+                        // damit der Multi-Relay-Pfad im E2E ueberhaupt einen Gegenstand hat.
+                        NOSTR_ARTICLE_METRIC_RELAYS: boardUrl,
                         // …und der WORKSPACE ebenso, aus demselben Grund eine Variable
                         // weiter. Dieser `serve` erbt `...process.env`, und
                         // `playwright.config.ts` lädt vorher die lokale `.env` hinein — die
