@@ -1,0 +1,189 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpFoundation\Response;
+use Tests\TestCase;
+
+/**
+ * Der Platzhalter des Navigators (`rail-skelett.blade.php`) und die ausdrückliche
+ * Grid-Platzierung der Bühne — alles, was der SERVER entscheidet.
+ *
+ * ── Was hier geprüft wird und was nicht ─────────────────────────────────────────────
+ * Hier: dass der Platzhalter im AUSGELIEFERTEN HTML steht, genau einmal, vor der Rail,
+ * ohne bedienbares Element, und dass die Bühne ihre Spur ausdrücklich nennt. Das ist die
+ * Hälfte, die kein Browser braucht.
+ *
+ * Nicht hier: die Geometrie. Ob der Platzhalter die Spur wirklich füllt und ob die Bühne
+ * vom ersten Paint an 1120 px breit ist, entscheidet das Layout-Engine —
+ * `tests/e2e/desktop-boot-geometrie.spec.ts` misst es am lebenden Element. Ein
+ * Server-Test, der `xl:col-start-2` im HTML findet, hat über die gerenderte Breite nichts
+ * gesagt.
+ *
+ * ── Warum diese Datei im Host liegt ────────────────────────────────────────────────
+ * `packages/einundzwanzig-group` hat kein `tests/`-Verzeichnis und keine `autoload-dev`;
+ * Pest findet dort nichts. Dieselbe Begründung wie in `OrtskartenTest.php`.
+ */
+
+/**
+ * Der `<div data-rail-skelett …>`-Block, und NICHTS daneben.
+ *
+ * **Fail-closed:** fehlt der Platzhalter, wirft die Sonde. Ein Test, der „kein `<button>`
+ * gefunden" meldet, weil er gar nichts gefunden hat, prüft die leere Menge.
+ *
+ * Gemustert wird auf `data-rail-skelett` und die Eingrenzung läuft bis zum
+ * abschließenden `</div>` des Blocks — gezählt über die Verschachtelungstiefe, nicht
+ * über das erste `</div>`: der Platzhalter enthält gut 40 verschachtelte `<div>`.
+ *
+ * @param  TestResponse<Response>  $res
+ */
+function railSkelettHtml(TestResponse $res): string
+{
+    $html = $res->getContent();
+    if ($html === false) {
+        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
+    }
+
+    $anker = strpos($html, 'data-rail-skelett');
+    if ($anker === false) {
+        throw new RuntimeException('Kein Rail-Platzhalter in der Antwort (Anker data-rail-skelett fehlt).');
+    }
+
+    $start = strrpos(substr($html, 0, $anker), '<div');
+    if ($start === false) {
+        throw new RuntimeException('Zum Platzhalter gehört kein öffnendes <div> — Markup umgebaut?');
+    }
+
+    // Tiefenzählung über `<div`/`</div`. Der Platzhalter enthält kein anderes Element,
+    // das `div` heißt, und keine Zeichenkette `<div` in einem Attributwert.
+    $tiefe = 0;
+    $pos = $start;
+    $len = strlen($html);
+    while ($pos < $len) {
+        $auf = strpos($html, '<div', $pos);
+        $zu = strpos($html, '</div>', $pos);
+        if ($zu === false) {
+            throw new RuntimeException('Der Platzhalter-Block wird nie geschlossen.');
+        }
+        if ($auf !== false && $auf < $zu) {
+            $tiefe++;
+            $pos = $auf + 4;
+
+            continue;
+        }
+        $tiefe--;
+        $pos = $zu + 6;
+        if ($tiefe === 0) {
+            return substr($html, $start, $pos - $start);
+        }
+    }
+
+    throw new RuntimeException('Der Platzhalter-Block wird nie geschlossen.');
+}
+
+/**
+ * Ein angemeldeter Aufruf. Gleiche Bauform wie in `OrtskartenTest.php`; die Testinstanz
+ * kommt als Argument, weil PHPStan auf Pests `test()`-Helfer kein `withSession()` kennt.
+ *
+ * @return TestResponse<Response>
+ */
+function alsMitgliedAufSeite(TestCase $t, string $route): TestResponse
+{
+    return $t->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route($route));
+}
+
+// ── Der Kernbeweis ──────────────────────────────────────────────────────────────────
+
+test('KERNBEWEIS: der Platzhalter steht genau einmal, VOR der Rail, und die Bühne nennt ihre Spur', function () {
+    $res = alsMitgliedAufSeite($this, 'group.articles')->assertOk();
+    $html = $res->getContent();
+
+    // 1. Genau EINMAL. Zweimal wären zwei Grid-Items in derselben Zelle, und die
+    //    Zusage „eine Spalte 1" wäre verletzt.
+    expect(substr_count((string) $html, 'data-rail-skelett'))->toBe(1);
+
+    // 2. VOR der Rail. Der Platzhalter füllt die Spur, solange die Rail nicht
+    //    existiert — stünde er dahinter, wäre bis zum Boot die Bühne das erste Kind
+    //    im Fluss, und genau das war der Fehler.
+    $skelett = strpos((string) $html, 'data-rail-skelett');
+    $rail = strpos((string) $html, 'x-if="$store.viewport?.desktop"');
+    // Fail-closed und zugleich die Typverengung: fehlt einer der beiden Anker, hat der
+    // Reihenfolge-Vergleich keinen Gegenstand und darf nicht still „kleiner" melden.
+    if ($skelett === false || $rail === false) {
+        throw new RuntimeException('Platzhalter- oder Rail-Anker fehlt — die Reihenfolge ist nicht prüfbar.');
+    }
+    expect($skelett)->toBeLessThan($rail);
+
+    // 3. Die Bühne nennt ihre Spur AUSDRÜCKLICH. Literal, nicht über eine Konstante:
+    //    ein Symbol gegen sich selbst geprüft hält keinen Wert fest.
+    expect($html)->toContain('xl:col-start-2 xl:row-start-1 xl:flex xl:min-h-0 xl:flex-col');
+    // Und die Rail sitzt in derselben Zelle wie der Platzhalter.
+    expect(substr_count((string) $html, 'xl:col-start-1 xl:row-start-1'))->toBe(2);
+
+    // 4. Die Spur ist 20 rem breit — der Wert, an dem die 320 px der E2E-Messung
+    //    hängen. Steht er anders da, misst der E2E-Test gegen eine andere Zahl.
+    expect($html)->toContain('xl:grid-cols-[20rem_minmax(0,1fr)]');
+});
+
+test('der Platzhalter trägt kein bedienbares Element und ist für Hilfstechnik unsichtbar', function () {
+    $block = railSkelettHtml(alsMitgliedAufSeite($this, 'group.articles')->assertOk());
+
+    // Für 250 ms zwanzig leere Tab-Stopps vor dem Inhalt wären schlimmer als der
+    // Sprung, den der Platzhalter behebt (WCAG 2.4.3).
+    foreach (['<a ', '<a>', '<button', '<input', '<select', '<textarea', 'tabindex'] as $verboten) {
+        expect($block)->not->toContain($verboten);
+    }
+
+    // Er trägt keine Information — ein Screenreader liest ihn nicht.
+    expect($block)->toContain('aria-hidden="true"');
+
+    // Und er verschwindet an derselben Bedingung, an der die Rail entsteht.
+    expect($block)->toContain('x-show="!$store.viewport?.desktop"');
+});
+
+test('der Platzhalter steht auf jeder Fläche mit Chassis — nicht nur auf /articles', function () {
+    // Eine Zusage über EINEN Ort ist keine: das Chassis ist `app-frame`, und das
+    // trägt jede Fläche hinter dem Gate.
+    foreach (['group.articles', 'group.spaces', 'group.directory'] as $route) {
+        $html = alsMitgliedAufSeite($this, $route)->assertOk()->getContent();
+        expect(substr_count((string) $html, 'data-rail-skelett'))->toBe(1);
+    }
+});
+
+test('ohne Chassis (chrome=false) gibt es keinen Platzhalter', function () {
+    // `rail=false` schaltet das Desktop-Chassis pro Seite ab. Ein Platzhalter für eine
+    // Spur, die es nicht gibt, wäre eine 320-px-Fläche mitten im Onboarding.
+    $html = $this->get(route('group.nostr-login'))->assertOk()->getContent();
+
+    expect($html)->not->toContain('data-rail-skelett');
+});
+
+test('auf dem Gerät (NativePHP) gibt es keinen Platzhalter', function () {
+    // Dieselbe Bedingung wie für die Rail selbst: der Host entscheidet, nicht die
+    // Breite. Ein iPad quer misst 1366 px und bekäme sonst eine Desktop-Spur.
+    config(['nativephp-internal.running' => true]);
+
+    $html = alsMitgliedAufSeite($this, 'group.articles')->assertOk()->getContent();
+
+    expect($html)->not->toContain('data-rail-skelett');
+});
+
+test('das Lade-Skelett der Artikelliste trägt die Spaltenzahl der fertigen Liste', function () {
+    $html = (string) alsMitgliedAufSeite($this, 'group.articles')->assertOk()->getContent();
+
+    // Die Klassenliste steht ZWEIMAL in der Antwort: einmal am Lade-Skelett, einmal
+    // am fertigen Raster. Genau das ist die Zusage — wechselte eines die Spurenzahl
+    // und das andere nicht, sprängen beim Eintreffen der Daten alle Karten (gemessen:
+    // Kartenbreite 522 px → 344 px bei 1440 px). Der Literal steht hier ausgeschrieben
+    // und nicht als Variable gegen sich selbst.
+    expect(substr_count($html, 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'))->toBe(2);
+    // Und das fertige Raster ist wirklich das zweite Vorkommen, nicht ein drittes
+    // Skelett: es trägt seinen eigenen Anker.
+    expect($html)->toContain('data-artikel-raster');
+
+    // Und der Platz des Filterkopfs ist reserviert, solange geladen wird: 40 + 8 + 44
+    // plus `mb-3`. Ohne die Reservierung rutschte die Liste beim Eintreffen der Daten
+    // um 103,6 px nach unten (am gerenderten Element gemessen).
+    expect($html)->toContain('<div x-show="loading" aria-hidden="true" class="mb-3 space-y-2">');
+});
