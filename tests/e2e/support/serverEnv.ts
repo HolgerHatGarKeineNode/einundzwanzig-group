@@ -48,6 +48,20 @@ export type ServerEnvOptionen = {
      * LOKALE Quelle.
      */
     mitBoard?: boolean
+    /**
+     * Ob `NOSTR_WORKSPACE_URL` LEER bleibt statt auf den worker-eigenen Relay zu zeigen.
+     *
+     * Default `false` — der Normalfall ist die gesetzte Adresse, Begründung unten an der
+     * Variablen selbst. `true` braucht genau ein Test: `desktop-boot-geometrie.spec.ts`
+     * misst die Rail-Fußzeile in der Lage OHNE Workspace, und ob die Forge-Zeile dort
+     * existiert, entscheidet der Server beim Rendern.
+     *
+     * **Warum das eine Option des Helfers ist und keine Zeile im Spec.** Ein
+     * handgeschriebenes `NOSTR_WORKSPACE_URL: ''` neben dem Spread wäre die vierte Kopie
+     * der Liste, gegen die der Kopf dieser Datei geschrieben ist — und `serverEnv.nodetest.ts`
+     * verbietet die Form ausdrücklich. Die Ausnahme gehört dorthin, wo die Regel steht.
+     */
+    ohneWorkspace?: boolean
 }
 
 /**
@@ -57,7 +71,7 @@ export type ServerEnvOptionen = {
  * tragend — die Überlagerung muss NACH `...process.env` stehen, sonst gewinnt die `.env`
  * des Rechners.
  */
-export const testServerEnv = ({ slot, mitBoard = false }: ServerEnvOptionen): Record<string, string> => {
+export const testServerEnv = ({ slot, mitBoard = false, ohneWorkspace = false }: ServerEnvOptionen): Record<string, string> => {
     const workerRelay = `ws://localhost:${ZOOID_BASE_PORT + slot}`
     const artikelQuelle = mitBoard ? workerRelay : ''
 
@@ -100,7 +114,7 @@ export const testServerEnv = ({ slot, mitBoard = false }: ServerEnvOptionen): Re
         // dieser Wert über MARKUP — Ortskarte „Forge", Forge-Zeile der Rail-Fußzeile,
         // vierter Tab auf `/forge`. Ohne ihn rendert dieselbe Spec auf einem Rechner mit
         // `.env`-Eintrag anders als auf einem ohne, und kein Test sagt einem das.
-        NOSTR_WORKSPACE_URL: workerRelay,
+        NOSTR_WORKSPACE_URL: ohneWorkspace ? '' : workerRelay,
         // ── Und die beiden, die heute noch folgenlos sind ───────────────────────────
         //
         // `NOSTR_BOT_NSEC`/`NOSTR_BOT_RELAY` liest bisher nur

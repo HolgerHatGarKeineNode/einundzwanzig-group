@@ -46,6 +46,14 @@ function railSkelettHtml(TestResponse $res): string
         throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
     }
 
+    return railSkelettHtmlAus($html);
+}
+
+/**
+ * Dasselbe aus einem rohen HTML-String — für `Blade::render`, das keine Response liefert.
+ */
+function railSkelettHtmlAus(string $html): string
+{
     $anker = strpos($html, 'data-rail-skelett');
     if ($anker === false) {
         throw new RuntimeException('Kein Rail-Platzhalter in der Antwort (Anker data-rail-skelett fehlt).');
@@ -188,6 +196,58 @@ test('auf dem Gerät (NativePHP) gibt es keinen Platzhalter', function () {
     expect($html)->not->toContain('data-rail-skelett');
 });
 
+test('die Zeilen des Platzhalters folgen der KONFIGURATION, nicht einer Zahl', function () {
+    // ── Warum drei Längen und nicht die heutige Drei ────────────────────────────────
+    //
+    // Die Nav-Zeilen kamen als feste 3 im Markup und hängen jetzt an
+    // `config('group.nav')`. Eine Zusicherung `toBe(3)` wäre exakt so viel wert wie die
+    // feste 3 selbst: sie stimmte heute und bliebe grün, wenn jemand die Kopplung
+    // zurückdreht. Geprüft wird deshalb die KOPPLUNG — mehrere Längen, und je Länge
+    // muss der Platzhalter genau so viele Zeilen tragen wie die echte Rail.
+    //
+    // `gap-2.5 rounded-tile px-2` ist der Fingerabdruck einer Nav-Zeile: die
+    // Flächenzeilen darüber (Artikel/Forge) tragen `gap-2`, der Space-Kopf trägt zwar
+    // `gap-2.5`, aber kein `rounded-tile`.
+    $zeile = fn (string $html): int => substr_count($html, 'gap-2.5 rounded-tile px-2');
+
+    foreach ([2, 3, 5] as $anzahl) {
+        config(['group.nav' => array_fill(0, $anzahl, [
+            'key' => 'chat', 'route' => 'group.spaces', 'match' => 'group.spaces',
+            'icon' => 'chat-bubble-left-right', 'label' => 'Räume', 'gate' => 'nostr',
+        ])]);
+        config(['nativephp-internal.running' => false]);
+
+        $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+        $platzhalter = railSkelettHtmlAus($ganz);
+        $rail = str_replace($platzhalter, '', $ganz);
+
+        // Beide Seiten lesen dieselbe Config — und zwar für JEDE geprüfte Länge.
+        expect($zeile($platzhalter))->toBe($anzahl);
+        expect($zeile($rail))->toBe($anzahl);
+    }
+});
+
+test('der Platzhalter bleibt unter einem Kilobyte auf der Leitung', function () {
+    // Der Preis, den JEDES Telefon zahlt: unterhalb `xl` ist der Platzhalter `hidden`
+    // (kein Layout, kein Paint, keine Insel), im DOM steht er trotzdem. Der Docblock
+    // von `rail-skelett.blade.php` nennt dafür eine Zahl — und eine Zahl ohne Riegel
+    // wandert. Hier stand sie zuerst aus einem Wegwerf-Skript, das niemand wieder
+    // ausführen kann.
+    //
+    // Eine SCHRANKE und keine exakte Byte-Zahl: der genaue Wert bewegt sich mit jeder
+    // Klassenänderung, die Aussage „das ist billig" nicht. Gemessen am 2026-08-21:
+    // 13.076 Bytes roh, nach gzip 538 — die Schranke lässt knapp das Doppelte zu und
+    // schlägt an, bevor jemand die Liste auf dreißig Zeilen aufbläst.
+    $mit = (string) alsMitgliedAufSeite($this, 'group.articles')->assertOk()->getContent();
+    $ohne = str_replace(railSkelettHtmlAus($mit), '', $mit);
+
+    $aufDerLeitung = strlen((string) gzencode($mit, 6)) - strlen((string) gzencode($ohne, 6));
+    expect($aufDerLeitung)->toBeLessThan(1024);
+    // Und die Gegenrichtung: fände die Sonde den Block nicht, wäre die Differenz 0 und
+    // die Schranke trivial erfüllt.
+    expect($aufDerLeitung)->toBeGreaterThan(0);
+});
+
 test('das Lade-Skelett der Artikelliste trägt die Spaltenzahl der fertigen Liste', function () {
     $html = (string) alsMitgliedAufSeite($this, 'group.articles')->assertOk()->getContent();
 
@@ -203,6 +263,9 @@ test('das Lade-Skelett der Artikelliste trägt die Spaltenzahl der fertigen List
 
     // Und der Platz des Filterkopfs ist reserviert, solange geladen wird: 40 + 8 + 44
     // plus `mb-3`. Ohne die Reservierung rutschte die Liste beim Eintreffen der Daten
-    // um 103,6 px nach unten (am gerenderten Element gemessen).
+    // um 103,6 px nach unten — am gerenderten Element gemessen, 1440 px, 2026-08-21,
+    // VOR der Reparatur. Dass es heute nicht mehr passiert, hält
+    // `tests/e2e/desktop-boot-geometrie.spec.ts` fest; dieser Test hier prüft nur, dass
+    // die Reservierung im ausgelieferten HTML überhaupt steht.
     expect($html)->toContain('<div x-show="loading" aria-hidden="true" class="mb-3 space-y-2">');
 });

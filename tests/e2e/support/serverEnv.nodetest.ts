@@ -201,28 +201,106 @@ test('der E2E-Einstieg räumt die gebackene Config weg', () => {
     }
 })
 
-test('alle vier Prozess-Spawns ziehen ihre ENV aus dem Helfer', () => {
-    for (const [pfad, muster] of [
-        ['tests/e2e/support/fixtures.ts', /env: \{ \.\.\.process\.env, \.\.\.testServerEnv\(\{ slot \}\) \}/],
-        ['tests/e2e/support/board-fixtures.ts', /env: \{ \.\.\.process\.env, \.\.\.testServerEnv\(\{ slot, mitBoard: true \}\) \}/],
-        ['tests/e2e/blossom-media-guard.spec.ts', /env: \{ \.\.\.process\.env, \.\.\.testServerEnv\(\{ slot: 0 \}\) \}/],
-        ['tests/e2e/composer-attachment-preview.spec.ts', /env: \{ \.\.\.process\.env, \.\.\.testServerEnv\(\{ slot: 0 \}\) \}/],
-    ] as const) {
-        assert.match(lies(pfad), muster, `${pfad} setzt seine Server-ENV nicht über testServerEnv`)
+/**
+ * **Findet die Stellen SELBST.** Hier stand eine Aufzählung von vier Pfaden — und eine
+ * Aufzählung ist genau die ungeführte Handliste, gegen die der Kopf dieser Datei
+ * geschrieben ist. Sie hat prompt versagt: ein fünfter `serve`
+ * (`desktop-boot-geometrie.spec.ts`) kam dazu und stand in keiner der beiden Listen.
+ * Zweimal dieselbe Lektion ist Zufall, dreimal ist Bauform.
+ *
+ * ── Was eine Fundstelle AUSMACHT, und warum nicht „spawnt einen serve" ─────────────
+ * Der erste Entwurf dieses Scanners suchte `spawn(` zusammen mit `artisan` und `serve`.
+ * Er fand damit drei Dateien — und **zwei der vier aus der alten Handliste nicht**:
+ * `blossom-media-guard.spec.ts` und `composer-attachment-preview.spec.ts` starten
+ * `execFileSync('php', ['artisan', 'tinker', …])`, keinen `serve`. Ein Scanner, der
+ * weniger findet als die Liste, die er ersetzt, ist eine Verschlechterung mit besserem
+ * Ruf.
+ *
+ * Das gemeinsame Merkmal ist nicht „serve", sondern: **ein Kindprozess wird gestartet
+ * UND bekommt eine `env`**. Genau dann erbt ein PHP-Prozess die Umgebung des Laufs, und
+ * genau dann muss die Überlagerung aus dem Helfer kommen. Danach wird gesucht.
+ *
+ * **Fail-closed:** findet der Scanner weniger als die vier heute bekannten Stellen,
+ * wirft er. Ein Wächter, der leer läuft, meldet Unbedenklichkeit — dieselbe
+ * Ausfallrichtung, die in diesem Haus schon ein Messgerät grün lügen ließ. Die Zahl ist
+ * eine UNTERGRENZE und kein Soll: neue Stellen dürfen dazukommen, verschwinden darf
+ * keine, ohne dass jemand hinsieht.
+ */
+const MINDESTENS_BEKANNTE_STELLEN = 4
+
+const kindprozessStellen = (): string[] => {
+    const gefunden: string[] = []
+    const lauf = (verzeichnis: string): void => {
+        for (const eintrag of readdirSync(join(WURZEL, verzeichnis))) {
+            const rel = `${verzeichnis}/${eintrag}`
+            if (statSync(join(WURZEL, rel)).isDirectory()) {
+                lauf(rel)
+
+                continue
+            }
+            if (!eintrag.endsWith('.ts')) {
+                continue
+            }
+            const inhalt = ohneKommentare(lies(rel))
+            const startet = /\b(?:spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(/.test(inhalt)
+            const mitEnv = /\benv\s*:/.test(inhalt)
+            if (startet && mitEnv) {
+                gefunden.push(rel)
+            }
+        }
+    }
+    lauf('tests/e2e')
+
+    return gefunden.sort()
+}
+
+/**
+ * Kommentare und Zeilenkommentare entfernen, bevor gemustert wird.
+ *
+ * Ohne das fände der Scanner sich selbst: diese Datei SCHREIBT über `spawn(` und `env:`,
+ * ohne beides zu tun. Ein Wächter, der seine eigene Prosa für einen Verstoß hält, ist
+ * derselbe Fehler wie einer, der nichts findet — nur lauter.
+ */
+function ohneKommentare(quelle: string): string {
+    return quelle.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+}
+
+test('jede gefundene Kindprozess-Stelle zieht ihre ENV aus dem Helfer', () => {
+    const dateien = kindprozessStellen()
+    assert.ok(
+        dateien.length >= MINDESTENS_BEKANNTE_STELLEN,
+        `Scanner fand ${dateien.length} Stellen (${dateien.join(', ')}), erwartet mindestens ` +
+            `${MINDESTENS_BEKANNTE_STELLEN} — er misst nicht, was er behauptet.`,
+    )
+
+    for (const pfad of dateien) {
+        assert.match(
+            lies(pfad),
+            /\.\.\.testServerEnv\(\{/,
+            `${pfad} startet einen Kindprozess mit eigener env, zieht sie aber nicht über testServerEnv`,
+        )
     }
 })
 
-test('kein Spawn setzt NOSTR_-Variablen an testServerEnv vorbei', () => {
-    // Der Rückweg: eine handgeschriebene `NOSTR_…:`-Zeile in einer dieser Dateien wäre
-    // die vierte Kopie und damit der Anfang derselben Geschichte von vorn.
-    for (const pfad of [
-        'tests/e2e/support/fixtures.ts',
-        'tests/e2e/support/board-fixtures.ts',
-        'tests/e2e/blossom-media-guard.spec.ts',
-        'tests/e2e/composer-attachment-preview.spec.ts',
-    ]) {
-        const eigenmaechtig = lies(pfad).match(/^\s+NOSTR_[A-Z0-9_]+:/gm)
-        assert.equal(eigenmaechtig, null, `${pfad} setzt NOSTR_-Variablen selbst: ${eigenmaechtig?.join(', ')}`)
+test('keine Kindprozess-Stelle setzt NOSTR_-Variablen an testServerEnv vorbei', () => {
+    // Der Rückweg: eine handgeschriebene `NOSTR_…:`-Zuweisung wäre die nächste Kopie der
+    // Liste und der Anfang derselben Geschichte von vorn.
+    //
+    // **Nicht am Zeilenanfang geankert.** Das Muster stand als `/^\s+NOSTR_…/gm` da und
+    // traf damit nur Verstöße, die zufällig am Zeilenanfang stehen — ein
+    // `{ ...testServerEnv({ slot }), NOSTR_WORKSPACE_URL: '' }` auf EINER Zeile ging
+    // durch. Genau diese Form stand kurzzeitig in `desktop-boot-geometrie.spec.ts`; die
+    // Ausnahme ist jetzt eine Option des Helfers (`ohneWorkspace`).
+    const dateien = kindprozessStellen()
+    assert.ok(dateien.length >= MINDESTENS_BEKANNTE_STELLEN, `Scanner fand ${dateien.length} Stellen — er misst nichts.`)
+
+    for (const pfad of dateien) {
+        const eigenmaechtig = ohneKommentare(lies(pfad)).match(/NOSTR_[A-Z0-9_]+\s*:/g)
+        assert.equal(
+            eigenmaechtig,
+            null,
+            `${pfad} setzt NOSTR_-Variablen selbst: ${eigenmaechtig?.join(', ')} — gehört als Option in testServerEnv`,
+        )
     }
 })
 

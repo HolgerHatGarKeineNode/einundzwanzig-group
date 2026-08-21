@@ -10,15 +10,26 @@
  * als DOM-Knoten. Die Bühne war damit das erste Kind im Fluss und wurde per
  * Auto-Placement in Spur 1 gelegt — in die 20 rem des Navigators.
  *
- * Gemessen am 2026-08-21 (Playwright, JS-Antwort um 600 ms verzögert, 1440×900):
+ * ── Die Messreihe, und WOHER jede Zeile stammt ─────────────────────────────────────
+ * Diese Datei ist die EINZIGE Stelle, an der die Reihe steht; `rail-skelett.blade.php`
+ * und `app-frame.blade.php` verweisen hierher, statt sie zu wiederholen. Eine Zahl an
+ * drei Orten ist an zweien falsch, sobald jemand einen korrigiert — genau das ist in
+ * dieser Arbeit passiert.
+ *
+ * **Die Spalten „vorher/nachher" stammen aus einem datierten Lauf** (2026-08-21,
+ * Playwright, eigenes Wegwerf-Instrument: rAF-Sampler + PerformanceObserver, JS-Antwort
+ * um 600 ms verzögert, 1440×900, je fünf Läufe). Sie sind hier NICHT reproduzierbar —
+ * kein Test misst Millisekunden. **Reproduzierbar sind die Geometriezeilen**: `#buehne`,
+ * die Ortskarte und die Blockhöhen weiter unten stehen in den Tests dieser Datei als
+ * Literal und werden bei jedem Lauf nachgeprüft.
  *
  * | | vorher | nachher |
  * |---|---|---|
  * | Frames mit falscher Bühnenbreite | 35–36 von ~176 | **0 von ~176** |
  * | Dauer des kaputten Fensters | **830–837 ms** | **0 ms** |
  * | dasselbe ungedrosselt | 310 ms (3–4 Frames) | 0 ms |
- * | `#buehne` | 320 px @ x=0 | 1120 px @ x=320 |
- * | Ortskarte / Beschriftung | 80 px / „C…" | 346,7 px / voll |
+ * | `#buehne` (Test) | 320 px @ x=0 | 1120 px @ x=320 |
+ * | Ortskarte / Beschriftung (Test) | 80 px / „C…" | volle Breite, ungekürzt |
  * | CLS | **0,3865** | **0,0124–0,0168** (10 Läufe) |
  * | 1279 px (unter `xl`, Kontrolle) | 0 Frames / CLS 0 | unverändert |
  *
@@ -81,6 +92,16 @@ import { cleanupArticles, publishArticle } from './support/articles'
 import { testServerEnv } from './support/serverEnv'
 import { spawn, type ChildProcess } from 'node:child_process'
 
+/**
+ * `E2E_SLOT_OFFSET` verschiebt alle Portbereiche eines Laufs, damit zwei Läufe auf
+ * derselben Maschine einander nicht die Relays abräumen.
+ *
+ * **Diese Datei verengt die nutzbare Spanne** — und das steht hier, wo der Offset
+ * gelesen wird, nicht nur in einem Bericht: die Bereiche liegen 100 auseinander
+ * (serve 8137+, board 8437+, dieser 8537+). Ein Offset von **100 oder mehr** schiebt
+ * `board 8437+slot` genau auf `8537+slot` dieses Serves. Vor diesem Serve war der
+ * nächste belegte Bereich 300 entfernt; nutzbar ist jetzt **1…99**.
+ */
 const SLOT_OFFSET = Number(process.env.E2E_SLOT_OFFSET ?? '0')
 
 /**
@@ -106,9 +127,12 @@ const testOhneWorkspace = boardTest.extend<object, { serverOhneWorkspace: string
             const port = 8537 + slot
             const serve: ChildProcess = spawn('php', ['artisan', 'serve', '--port', String(port)], {
                 // `mitBoard: true` wie in `board-fixtures.ts`, damit `/articles` eine
-                // echte lokale Quelle sieht — und danach der EINE Schlüssel, um den es
-                // geht, ausdrücklich geleert.
-                env: { ...process.env, ...testServerEnv({ slot, mitBoard: true }), NOSTR_WORKSPACE_URL: '' },
+                // echte lokale Quelle sieht; `ohneWorkspace: true` leert den EINEN
+                // Schlüssel, um den es hier geht. Beides als OPTION des Helfers und
+                // nicht als Zeile daneben: eine handgeschriebene `NOSTR_…:`-Zuweisung
+                // wäre die vierte Kopie der Liste, und `serverEnv.nodetest.ts` verbietet
+                // die Form.
+                env: { ...process.env, ...testServerEnv({ slot, mitBoard: true, ohneWorkspace: true }) },
                 stdio: 'ignore',
             })
             const frist = Date.now() + 60_000
@@ -383,39 +407,59 @@ testOhneWorkspace(
     },
 )
 
-test('die Space-Beschreibung ist die eine Höhe, die der Server nicht kennt — der Kopf wächst, die Liste federt', async ({
-    page,
-}) => {
-    // `x-show="space?.description"` hängt an einem Relay-Datum. Kein server-gerenderter
-    // Platzhalter kann das vorhersagen, und deshalb reserviert er die sichere
-    // UNTERGRENZE statt zu raten. Was bleibt, ist eine Bewegung — und die Richtung ist
-    // die Zusage: der Kopf darf wachsen, wenn die Beschreibung eintrifft, aber nie
-    // schrumpfen. Ein Schrumpfen zöge den Inhalt darunter nach oben.
-    await page.setViewportSize({ width: BREITE, height: 900 })
-    await vorDemBoot(page)
-    const { platzhalter, rail } = await vergleich(page)
+for (const { hoehe, federt } of [
+    { hoehe: 900, federt: true },
+    { hoehe: 360, federt: false },
+] as const) {
+    test(`die Space-Beschreibung ist die eine Höhe, die der Server nicht kennt — 1440×${hoehe}`, async ({ page }) => {
+        // `x-show="space?.description"` hängt an einem Relay-Datum. Kein
+        // server-gerenderter Platzhalter kann das vorhersagen, und deshalb reserviert er
+        // die sichere UNTERGRENZE statt zu raten. Was bleibt, ist eine Bewegung — und
+        // die Richtung ist die Zusage: der Kopf darf wachsen, wenn die Beschreibung
+        // eintrifft, aber nie schrumpfen.
+        //
+        // ── WOHIN die 4,8 px gehen, hängt an der Fensterhöhe ────────────────────────
+        // Hier stand „die Fußzeile hängt am unteren Rand einer `h-dvh`-Spalte, ihre
+        // y-Position ist von der Kopfhöhe unabhängig" — unbedingt, und damit falsch.
+        // Die Liste ist die einzige Fläche mit `flex-1`; sie federt, SOLANGE sie Spiel
+        // hat. Ihr Boden ist das eigene `pb-2` (8 px), erreicht bei einer Fensterhöhe
+        // von 60 + 36 + 264 + 8 = **368 px**. Darunter kann sie nichts mehr abgeben und
+        // die Fußzeile rückt selbst.
+        //
+        // Am gerenderten Element gemessen (2026-08-21, Sonde über drei Höhen):
+        //   1440×900  Kopf +4,80 · Liste −4,80 · Fußzeile-y ±0
+        //   1440×500  Kopf +4,80 · Liste −4,80 · Fußzeile-y ±0
+        //   1440×360  Kopf +4,80 · Liste  ±0   · Fußzeile-y **+4,80**
+        // Beide Seiten der Grenze laufen hier als eigener Fall — eine Regel, die nur an
+        // einer Stelle geprüft ist, ist keine Regel, sondern ein Messpunkt.
+        await page.setViewportSize({ width: BREITE, height: hoehe })
+        await vorDemBoot(page)
+        const { platzhalter, rail } = await vergleich(page)
 
-    // Kopf: +4,8 px. Der Wert steht als Literal da, damit stilles Wachsen auffällt.
-    // `toBeCloseTo`, weil 64,8 − 60 in IEEE-754 als 4,799999999999997 herauskommt —
-    // zwei Nachkommastellen sind hier eine Zehntel-Subpixel-Grenze, keine Aufweichung.
-    expect(rail[0].h - platzhalter[0].h).toBeCloseTo(4.8, 2)
-    expect(rail[0].h).toBe(64.8)
-    // Die Bewegung bleibt IM Kopf und in der Liste, die sie schluckt. Suchfeld und
-    // Fußzeile stehen still — die Fußzeile hängt am unteren Rand einer `h-dvh`-Spalte,
-    // ihre y-Position ist von der Kopfhöhe unabhängig.
-    expect(rail[1].h).toBe(platzhalter[1].h)
-    expect(rail[3].h).toBe(platzhalter[3].h)
-    expect(rail[3].y).toBe(platzhalter[3].y)
-    // ERHALTUNG: was der Kopf gewinnt, gibt die Liste ab — und nichts leckt woandershin.
-    // (Hier stand zuerst „kein Block wird kleiner". Das war falsch und wurde von der
-    // Messung widerlegt: die Liste MUSS abgeben, sie ist die einzige Fläche mit
-    // `flex-1`. Eine Zusage, die weiter reicht als die Sache, ist keine.)
-    expect(platzhalter[2].h - rail[2].h).toBeCloseTo(rail[0].h - platzhalter[0].h, 2)
-    // Die drei starren Blöcke behalten ihre Höhe — nur die Liste federt.
-    for (const i of [0, 1, 3]) {
-        expect(rail[i].h).toBeGreaterThanOrEqual(platzhalter[i].h - 0.05)
-    }
-})
+        // Kopf: +4,8 px, in beiden Lagen. Der Wert steht als Literal da, damit stilles
+        // Wachsen auffällt. `toBeCloseTo`, weil 64,8 − 60 in IEEE-754 als
+        // 4,799999999999997 herauskommt — zwei Nachkommastellen sind eine
+        // Zehntel-Subpixel-Grenze, keine Aufweichung.
+        expect(rail[0].h - platzhalter[0].h).toBeCloseTo(4.8, 2)
+        expect(rail[0].h).toBe(64.8)
+        // Das Suchfeld behält seine Höhe immer — es ist `shrink-0`.
+        expect(rail[1].h).toBe(platzhalter[1].h)
+        // Und die Fußzeile ebenfalls: sie wird verschoben, nie gestaucht.
+        expect(rail[3].h).toBe(platzhalter[3].h)
+
+        if (federt) {
+            // ERHALTUNG: was der Kopf gewinnt, gibt die Liste ab — und nichts leckt
+            // woandershin. (Hier stand zuerst „kein Block wird kleiner". Das war falsch
+            // und wurde von der eigenen Messung widerlegt: die Liste MUSS abgeben.)
+            expect(platzhalter[2].h - rail[2].h).toBeCloseTo(rail[0].h - platzhalter[0].h, 2)
+            expect(rail[3].y).toBe(platzhalter[3].y)
+        } else {
+            // Unter der Grenze steht die Liste auf ihrem Boden und kann nichts abgeben.
+            expect(rail[2].h).toBe(platzhalter[2].h)
+            expect(rail[3].y - platzhalter[3].y).toBeCloseTo(4.8, 2)
+        }
+    })
+}
 
 test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht', async ({ page, baseURL }) => {
     // Der zweite Sprung dieser Fläche, gemessen vor dem Fix: beim Eintreffen der Daten
@@ -448,10 +492,14 @@ test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht',
         if (!gitter) {
             throw new Error('Kein sichtbares Lade-Skelett — die Sonde misst nichts.')
         }
+        const nav = document.querySelector('[data-ortskarte]')?.closest('nav') as HTMLElement | null
+        if (!nav) {
+            throw new Error('Kein Ortskarten-nav als Anker — die Sonde misst nichts.')
+        }
 
         return {
             spalten: getComputedStyle(gitter).gridTemplateColumns,
-            y: Math.round(gitter.getBoundingClientRect().y * 10) / 10,
+            versatz: Math.round((gitter.getBoundingClientRect().y - nav.getBoundingClientRect().y) * 100) / 100,
         }
     })
 
@@ -462,19 +510,46 @@ test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht',
         if (!liste || liste.offsetParent === null) {
             throw new Error('Kein sichtbares Artikelraster — die Sonde misst nichts.')
         }
+        const nav = document.querySelector('[data-ortskarte]')?.closest('nav') as HTMLElement | null
+        if (!nav) {
+            throw new Error('Kein Ortskarten-nav als Anker — die Sonde misst nichts.')
+        }
 
         return {
             spalten: getComputedStyle(liste).gridTemplateColumns,
-            y: Math.round(liste.getBoundingClientRect().y * 10) / 10,
+            versatz: Math.round((liste.getBoundingClientRect().y - nav.getBoundingClientRect().y) * 100) / 100,
         }
     })
 
     // Drei Spuren, beide Male — als aufgelöste Pixelwerte, nicht als Klassenname.
     expect(lade.spalten.split(' ')).toHaveLength(3)
     expect(fertig.spalten).toBe(lade.spalten)
-    // Und die Liste beginnt an derselben Höhe, auf die der Filterkopf-Platz gerechnet
-    // ist. Ein Pixel Toleranz für die Rundung des Rasters, mehr nicht.
-    expect(Math.abs(fertig.y - lade.y)).toBeLessThanOrEqual(1)
+
+    // ── Warum hier ein ANKER-VERSATZ steht und keine Viewport-Höhe ──────────────────
+    //
+    // Gemessen wird der Abstand zur Ortskarten-Leiste, nicht `getBoundingClientRect().y`.
+    // Der Grund ist `.page-enter` (`theme.css`): die ganze Insel — Überschrift,
+    // Ortskarten, Liste — läuft beim Seitenaufbau durch
+    // `@keyframes page-in { from { transform: translateY(8px) } }` über 0,3 s. Eine
+    // Viewport-Höhe misst also mit, WO in dieser Animation der Messpunkt gerade liegt,
+    // und beide Messungen liegen zwangsläufig an verschiedenen Stellen: die erste kurz
+    // nach dem Boot, die zweite nach dem Eintreffen der Daten.
+    //
+    // Eigene Messreihe, 12 Läufe hintereinander in einer Sitzung (1440×900, Sonde am
+    // 2026-08-21, dieselbe Abfolge wie dieser Test):
+    //   Viewport-Höhe: 0,53 · 0,25 · 0,73 · 0,53 · 0,98 · 1,28 · 0,98 · 0,53 · 0,98 ·
+    //                  0,37 · 0,37 · 0,37  → Maximum 1,28 px
+    //   Anker-Versatz: 0 · 0 · 0 · 0 · 0 · 0 · 0 · 0 · 0 · 0 · 0 · 0  → Maximum 0,00 px
+    // Unter Last hat ein Prüfer auf der Viewport-Höhe bis 2,8 px gesehen; die alte
+    // 1-px-Grenze lag also UNTER der eigenen Unruhe und machte die Fläche zum
+    // Zufallsgenerator (isoliert 5 von 6 rot).
+    //
+    // Der Anker liegt IM selben transformierten Teilbaum wie die Liste — die Transform
+    // kürzt sich heraus, und was übrig bleibt, ist genau die Größe, die dieser Zweig
+    // reserviert: der Platz des Filterkopfs. Deshalb steht die Toleranz jetzt bei
+    // 0,05 px (Rundungsrauschen) statt bei einer runden Zahl nach Gefühl. Sie ist enger
+    // als vorher UND belastbar, weil sie eine andere Größe misst.
+    expect(Math.abs(fertig.versatz - lade.versatz)).toBeLessThanOrEqual(0.05)
 })
 
 test('unter xl gibt es weder Platzhalter noch Spur — die Ursache ist an das Grid gebunden', async ({ page }) => {
