@@ -41,6 +41,38 @@ function nak(args: readonly string[], attempts = 3): string {
 }
 
 /**
+ * Publiziert ein kind 0 (Profil) — genau so viel, wie die Autorenkarte der
+ * Vollansicht anzeigt.
+ *
+ * Steht hier und nicht in `rooms.ts`, weil es ausschließlich die Artikelfläche braucht:
+ * dort ist der Autor eine eigene Anzeigeeinheit (Name, NIP-05-Häkchen, Bio,
+ * Lightning-Einstieg), während er im Chat nur eine Zeile ist.
+ *
+ * **`nip05` macht diesen Helfer nicht zum Verifizierer.** welshman holt dafür zusätzlich
+ * die `.well-known/nostr.json` der Domain; das Häkchen entsteht erst bei bestätigtem
+ * Match. Wer hier ein `nip05` setzt, hat damit noch kein Häkchen — er hat die Vorbedingung
+ * gesetzt. Genau diese Trennung ist der Gegenstand des Reaktivitäts-Tests in
+ * `longform-reader.spec.ts`.
+ */
+export function publishProfile(
+    relayWs: string,
+    sec: string,
+    profil: { name?: string; nip05?: string; about?: string; lud16?: string; picture?: string },
+    createdAt?: number,
+): void {
+    const args = ['event', '--auth', '--sec', sec, '-k', '0']
+    if (createdAt !== undefined) {
+        // **Der Zeitstempel ist hier kein Detail, sondern die halbe Miete.** kind 0 ist
+        // ersetzbar: wer ein Testprofil setzt und danach den Ausgangszustand
+        // zurückschreiben will, braucht dafür einen JÜNGEREN Stempel, sonst gewinnt
+        // weiter das Testprofil. Dasselbe Muster wie in `room.spec.ts` (B4).
+        args.push('--ts', String(createdAt))
+    }
+    args.push('-c', JSON.stringify(profil), relayWs)
+    nak(args)
+}
+
+/**
  * Publiziert einen kind-30023-Artikel und gibt seine Event-id zurück (per Requery über
  * `#d`+Autor — derselbe „nak druckt zwar JSON beim Publish, aber requeryen ist der bewährte
  * Weg"-Grund wie in `quote-card.spec.ts`).

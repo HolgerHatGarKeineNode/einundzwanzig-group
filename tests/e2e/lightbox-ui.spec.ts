@@ -13,9 +13,16 @@ const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 const IMAGE = readFileSync('public/og.png')
 
 /**
- * Lightbox-Verdrahtung (js/lightbox.ts + ⚡room.blade.php): nur, was die reine Logic-
- * Spec (lightbox-logic.spec.ts) NICHT prüfen kann — echtes Alpine/DOM. Die Zoom-
+ * Lightbox-Verdrahtung (js/lightbox.ts + components/lightbox-overlay.blade.php): nur,
+ * was die reine Logic-Spec (lightbox-logic.spec.ts) NICHT prüfen kann — echtes
+ * Alpine/DOM. Die Zoom-
  * Mathematik selbst ist dort abgedeckt, hier nur Öffnen/Schließen + Verdrahtung.
+ *
+ * **Das Markup lag bis 2026-08-21 in `⚡room.blade.php`** und ist mit P3 des
+ * Longform-Plans in eine Komponente gewandert, weil die Artikel-Vollansicht dieselbe
+ * Fläche braucht. Diese Spec fährt weiterhin über den RAUM — sie prüft die Verdrahtung
+ * dort, wo sie zuerst gebraucht wurde; die Artikel-Hälfte steht in
+ * `longform-reader.spec.ts`.
  *
  * Bilder postet der ADMIN direkt per `nak` (wie IMG-Test in room.spec.ts) in den
  * bereits dedizierten C3-Schreib-Raum „edit" (Test-User ist dort schon Mitglied) —

@@ -22,7 +22,7 @@ import { naddrEncode } from 'nostr-tools/nip19'
 import { test, expect, type Page } from './support/board-fixtures'
 import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
-import { cleanupArticles, publishArticle } from './support/articles'
+import { cleanupArticles, publishArticle, publishProfile } from './support/articles'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
@@ -308,6 +308,348 @@ test('Reader: naddr-Kaltstart lädt den Artikel direkt und rendert Titel, Markdo
     // Themen (t-Tags) rendern als eigene Chips außerhalb von .article-content.
     await expect(page.getByText('#bitcoin', { exact: true })).toBeVisible()
     await expect(page.getByText('#freiheit', { exact: true })).toBeVisible()
+})
+
+// ── P3: DER KERNBEWEIS AM LAUFENDEN ALPINE ────────────────────────────────────────
+//
+// „Die Renderer-Ausgabe enthält kein einziges Attribut, das mit `x-`, `@` oder `:`
+// beginnt." Die Zusage steht vollständig und über den ganzen Formen-Satz als reiner Test
+// in `packages/einundzwanzig-group/js/articleRenderSicherheit.test.ts` — dort ist sie
+// billig, schnell und mutationsgeprüft.
+//
+// **Warum sie hier trotzdem ein zweites Mal steht:** der reine Test misst die
+// ZEICHENKETTE, die der Renderer liefert. Gefährlich wird sie erst, wenn Alpine sie über
+// `x-html` einsetzt und `initTree()` auf dem Teilbaum läuft. Diese Hälfte — echtes
+// Alpine, echtes `x-html`, echter Teilbaum — kann per Konstruktion kein Modul-Test
+// zeigen. Gemessen wird deshalb am DOM NACH dem Einsetzen, nicht an der Ausgabe davor.
+//
+// Der Artikeltext trägt bewusst mehrere Versuche, ein Alpine-Attribut zu erzeugen.
+
+test('KERNBEWEIS P3: nach dem x-html-Einsetzen traegt KEIN Element im Artikeltext ein x-/@/:-Attribut', async ({
+    page,
+    baseURL,
+}) => {
+    const ws = boardWs(baseURL as string)
+    const title = `LFSicher-${rnd()}`
+    const identifier = `lf-sicher-${rnd()}`
+    const marker = `Sichtbar${rnd()}`
+    // Rohes HTML, ein Bild mit Alpine-Attribut im Alt-Text, ein Link mit `x-init` im
+    // Query-String, eine Codezaun-Sprache und eine Überschrift — dieselben Formen wie im
+    // reinen Test, nur diesmal durch das echte `x-html`.
+    const content = [
+        `<div x-init="window.__gehackt = true">${marker}</div>`,
+        '<img src=x @click="window.__gehackt = true">',
+        '![:href="window.__gehackt = true"](https://example.com/b.png)',
+        '[k](https://example.com/s?x-init=window.__gehackt%3Dtrue)',
+        '# x-init="window.__gehackt = true"',
+        '```x-init="window.__gehackt = true"\ncode\n```',
+        // `wire:init` läuft ohne Nutzerhandlung (Begründung in der Sonde unten),
+        // Großschreibung wird vom Parser normalisiert, und die letzte Zeile ist die
+        // BLEND-Lage: ein rohes `<br>` im Alt-Text schiebt alles Folgende hinter ein `>`
+        // innerhalb eines Attributwerts — daran war der reine Scanner blind.
+        '<div wire:init="window.__gehackt = true">w</div>',
+        '<div X-INIT="window.__gehackt = true">g</div>',
+        '![a<br />b](https://example.com/c.png)',
+    ].join('\n\n')
+
+    publishArticle(ws, ADMIN, ADMIN_PUB, { identifier, title, content, publishedAt: 1_700_000_010 })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier, relays: [] })
+
+    await loginToBoard(page)
+    await page.goto(`/articles/${naddr}`)
+    await expect(page.locator('[data-artikel-text]')).toBeVisible({ timeout: 20_000 })
+    // Erst wenn der Text wirklich da ist, hat `initTree()` gelaufen. Ohne diese
+    // Bedingung prüfte der Test womöglich einen leeren Teilbaum und wäre fail-open.
+    await expect(page.locator('[data-artikel-text]')).toContainText(marker, { timeout: 20_000 })
+
+    const befund = await page.evaluate(() => {
+        const wurzel = document.querySelector('[data-artikel-text]')
+        if (!wurzel) {
+            throw new Error('Kein [data-artikel-text] im DOM — die Sonde misst nichts.')
+        }
+        // `wurzel` selbst ist AUSGENOMMEN: sie trägt `x-html` und `x-on:click` von uns,
+        // das ist ihr Zweck. Geprüft wird, was der Renderer HINEINgelegt hat.
+        //
+        // **`wire:` gehört dazu, obwohl es nach Serverkram klingt.** Diese Seite ist eine
+        // Livewire-Full-Page-Komponente, und Livewire hängt sich per
+        // `Alpine.interceptInit` in JEDE Element-Initialisierung ein
+        // (`vendor/livewire/livewire/dist/livewire.esm.js:13650`) — also auch in den
+        // Teilbaum, den `x-html` gerade eingesetzt hat. Dort mappt es `wire:*` auf
+        // `x-on:*` mit Ausdrucksauswertung (`:14960`) und `wire:intersect` auf
+        // `x-intersect` (`:14833`); `wire:init` läuft ohne jede Nutzerhandlung.
+        //
+        // Kleingeschrieben verglichen, weil der HTML-Parser Attributnamen normalisiert:
+        // ein `X-INIT` im Markup steht im DOM als `x-init` und ist live.
+        const gefaehrlich = (name: string): boolean => {
+            const klein = name.toLowerCase()
+            return klein.startsWith('x-') || klein.startsWith('wire:') || klein.startsWith('@') || klein.startsWith(':')
+        }
+        const treffer: string[] = []
+        for (const el of wurzel.querySelectorAll('*')) {
+            for (const attr of el.attributes) {
+                if (gefaehrlich(attr.name)) {
+                    treffer.push(`${el.tagName.toLowerCase()}[${attr.name}]`)
+                }
+            }
+        }
+        return { treffer, kinder: wurzel.querySelectorAll('*').length, gehackt: '__gehackt' in window }
+    })
+
+    // Die Schranke zuerst: ein leerer Teilbaum bestünde die Prüfung darunter mühelos.
+    expect(befund.kinder).toBeGreaterThan(3)
+    expect(befund.treffer).toEqual([])
+    // Und die Gegenprobe auf der Wirkung: kein Ausdruck ist gelaufen.
+    expect(befund.gehackt).toBe(false)
+})
+
+// ── P3: Lightbox, Lesefortschritt, Teilen ─────────────────────────────────────────
+//
+// **Die Überschrift stimmt seit 2026-08-21 wieder mit dem Inhalt überein.** Sie nannte
+// „Teilen", und einen Teilen-Test gab es nicht — die Zusage hielt in der Sache (live
+// belegt), der Text behauptete aber eine Deckung, die keine war. Statt die Überschrift zu
+// kürzen ist der Test nachgezogen: er ist billig, weil `navigator.clipboard.writeText`
+// im Browserkontext direkt lesbar ist.
+//
+// Das ASIDE steht bewusst NICHT in dieser Liste: seine `xl`-Anordnung ist bei den hier
+// gefahrenen 1279 px per Definition nicht sichtbar. Sie liegt in
+// `desktop-article.spec.ts`, das vom Playwright-Projekt `desktop` (1440×900) gegriffen
+// wird — der Dateiname ist dort die Bedingung, nicht eine Konvention.
+
+test('Reader: ein Klick auf ein Artikelbild oeffnet die Lightbox, Escape schliesst sie', async ({ page, baseURL }) => {
+    const ws = boardWs(baseURL as string)
+    const identifier = `lf-bild-${rnd()}`
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier,
+        title: `LFBild-${rnd()}`,
+        content: 'Ein Absatz.\n\n![Ein Bild](https://example.com/artikelbild.png)\n\nNoch ein Absatz.',
+        publishedAt: 1_700_000_011,
+    })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier, relays: [] })
+
+    await loginToBoard(page)
+    await page.goto(`/articles/${naddr}`)
+    const bild = page.locator('[data-artikel-text] img.article-image')
+    await expect(bild).toBeVisible({ timeout: 20_000 })
+    // Das Attribut, aus dem der Auslöser die Quelle liest — dieselbe Bauform wie im Chat.
+    await expect(bild).toHaveAttribute('data-full', /.+/)
+
+    // Über das aria-label und NICHT über `[role="dialog"][aria-modal="true"]`: das
+    // Login-Sheet trägt dieselbe Rollen-Kombination, und der Selektor bricht im Vollauf
+    // mit einer Strict-Mode-Mehrdeutigkeit (im Haus schon fünfmal passiert).
+    const lightbox = page.getByLabel('Bild in voller Größe')
+    await expect(lightbox).toBeHidden()
+    await bild.click()
+    await expect(lightbox).toBeVisible({ timeout: 5_000 })
+    await page.keyboard.press('Escape')
+    await expect(lightbox).toBeHidden({ timeout: 5_000 })
+})
+
+test('Reader: der Teilen-Knopf legt den KANONISCHEN naddr-Link in die Zwischenablage', async ({
+    page,
+    baseURL,
+    context,
+}) => {
+    const ws = boardWs(baseURL as string)
+    const identifier = `lf-teilen-${rnd()}`
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier,
+        title: `LFTeilen-${rnd()}`,
+        content: 'Ein Artikel, den man weitergeben können soll.',
+        publishedAt: 1_700_000_014,
+    })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier, relays: [] })
+
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await loginToBoard(page)
+    await page.goto(`/articles/${naddr}`)
+    await expect(page.locator('[data-artikel-text]')).toBeVisible({ timeout: 20_000 })
+
+    // Headless-Chromium hat KEIN `navigator.share` — der Knopf heißt dort „Link kopieren"
+    // und kopiert. Das ist kein Sonderfall des Tests, sondern der Normalfall auf jedem
+    // Desktop-Firefox und in jedem unsicheren Kontext. Die Beschriftung wird deshalb
+    // mitgeprüft: ein Knopf, der etwas anderes verspricht als er tut, wäre schlimmer als
+    // der fehlende Systemdialog.
+    const knopf = page.getByRole('button', { name: 'Link kopieren' })
+    await expect(knopf).toBeVisible({ timeout: 10_000 })
+    await expect(knopf).not.toHaveAttribute('aria-disabled', 'true')
+    await knopf.click()
+
+    const abgelegt = await page.evaluate(() => navigator.clipboard.readText())
+    // Der KANONISCHE `naddr` aus dem Event, nicht die Adresszeile des Browsers: beide
+    // zeigen auf denselben Artikel, aber nur der kanonische sagt einem fremden Client
+    // auch, WO er ihn findet. Auf `/articles/` geankert statt auf die volle Basis-URL —
+    // der Worker-Port wechselt je Lauf.
+    expect(abgelegt).toContain('/articles/naddr1')
+    expect(abgelegt.endsWith(`/articles/${naddr}`) || /\/articles\/naddr1[0-9a-z]+$/.test(abgelegt)).toBe(true)
+    // Und die Erfolgsmeldung — der Nutzer bekommt eine Rückmeldung, nicht nur einen
+    // stillen Klick (Sichtbarkeit des Systemstatus).
+    await expect(page.getByText('Link kopiert.', { exact: true })).toBeVisible({ timeout: 10_000 })
+})
+
+test('Reader: ein KURZER Artikel bekommt keine Leseleiste — und nirgends steht NaN', async ({ page, baseURL }) => {
+    const ws = boardWs(baseURL as string)
+    const identifier = `lf-kurz-${rnd()}`
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier,
+        title: `LFKurz-${rnd()}`,
+        // 57 der 104 echten Artikel haben nicht einmal eine Überschrift; viele passen
+        // ganz aufs Bild. Das ist der Normalfall dieser Fläche, nicht ihr Rand.
+        content: 'Ein einziger kurzer Absatz, der bequem ins Fenster passt.',
+        publishedAt: 1_700_000_012,
+    })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier, relays: [] })
+
+    await loginToBoard(page)
+    await page.goto(`/articles/${naddr}`)
+    await expect(page.locator('[data-artikel-text]')).toBeVisible({ timeout: 20_000 })
+
+    // Eine Leiste, die dauerhaft auf 100 % steht, ist kein Fortschritt, sondern Dekor —
+    // sie erscheint deshalb gar nicht erst.
+    await expect(page.locator('[data-leseleiste]')).toBeHidden()
+    // Und der eigentliche Punkt: keine kaputte Zahl irgendwo im Dokument.
+    await expect(page.locator('body')).not.toContainText('NaN')
+    await expect(page.locator('[data-leseleiste-fuellung]')).toHaveAttribute('style', /width:\s*0%/)
+})
+
+test('Reader: ein LANGER Artikel bekommt eine Leseleiste, und der Lesestand zaehlt herunter', async ({
+    page,
+    baseURL,
+}) => {
+    const ws = boardWs(baseURL as string)
+    const identifier = `lf-lang-${rnd()}`
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier,
+        title: `LFLang-${rnd()}`,
+        content: Array.from({ length: 120 }, (_, i) => `Absatz ${i} mit genug Text, um die Seite sicher über eine Fensterhöhe hinaus wachsen zu lassen.`).join('\n\n'),
+        publishedAt: 1_700_000_013,
+    })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier, relays: [] })
+
+    await loginToBoard(page)
+    await page.goto(`/articles/${naddr}`)
+    await expect(page.locator('[data-artikel-text]')).toBeVisible({ timeout: 20_000 })
+    // Der RAHMEN ist der Anker für „gibt es eine Leiste?". Die Füllung ist bei 0 % null
+    // Pixel breit und gilt jeder Sichtbarkeitsprüfung als unsichtbar — sie hier zu
+    // fragen, hieße die falsche Sache messen (beim Bauen dieses Tests passiert).
+    await expect(page.locator('[data-leseleiste]')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-leseleiste-fuellung]')).toHaveAttribute('style', /width:\s*0%/)
+    // Am Anfang die GESAMTzeit, nicht der Rest.
+    await expect(page.locator('[data-lesestand]')).toContainText('Lesezeit', { timeout: 10_000 })
+
+    // Bis ans Ende scrollen — WELCHER Behälter scrollt, hängt am Breakpoint: unterhalb
+    // `xl` das Dokument, ab `xl` die Bühne (`app-shell` setzt dort `xl:overflow-y-auto`).
+    // Das Projekt `chromium` fährt auf 1279 px, also das Dokument; die Weiche steht
+    // trotzdem hier, damit derselbe Test im Projekt `desktop` nicht still nichts täte.
+    await page.evaluate(() => {
+        const buehne = document.getElementById('buehne')
+        const el = buehne && buehne.scrollHeight > buehne.clientHeight ? buehne : document.scrollingElement!
+        el.scrollTop = el.scrollHeight
+    })
+
+    await expect(page.locator('[data-lesestand]')).toContainText('Ende erreicht', { timeout: 10_000 })
+    await expect(page.locator('[data-leseleiste-fuellung]')).toHaveAttribute('style', /width:\s*100%/, { timeout: 10_000 })
+})
+
+// ── P3: die REAKTIVITÄT der Autorenkarte ──────────────────────────────────────────
+//
+// **Der dritte Eingang von `deriveArticle` hält heute nichts fest, und das ist gemessen.**
+// Der `reviewer` hat `throttled(300, handlesByNip05)` durch eine LEERE Map desselben Typs
+// ersetzt — `typecheck` 0, `test:unit` 1265/1265 grün. Nichts merkte es, und ohne diesen
+// Eingang erschiene das NIP-05-Häkchen nie.
+//
+// **Warum dieser Test hier steht und nicht als Modultest.** `longformFeed.ts` ist unter
+// `node --test` nicht ladbar (endungslose Importe, `localStorage` beim Import von
+// `session.ts`) — dieselbe Grenze, die in P1 `toRow` ins reine Modul verschoben hat. Und
+// ein Test, der die `derived([…])`-Konstruktion NACHBAUT, kann per Konstruktion nicht
+// sehen, dass der echte Aufrufer ein Argument nie nachliefert: er wäre grün, während die
+// Fläche stumm bleibt. Das ist die Falle, die der Plan für P6 benennt; hier ist sie schon
+// da.
+//
+// **Warum ein VERZÖGERTES nostr.json der Kern ist.** Der Handle-Store füllt sich erst,
+// nachdem welshman die `.well-known/nostr.json` der Domain geholt hat — also
+// zwangsläufig NACH dem ersten Emit der Ableitung. Genau dieses zweite Emit ist die
+// Zusage. Die Antwort wird hier zusätzlich gebremst, damit der erste Zustand (Name da,
+// Häkchen nicht) sicher beobachtbar ist und der Test nicht am Rennen hängt.
+//
+// **Die Mutationsprobe gehört zu diesem Test**, und die Form ist entscheidend. Beide
+// Varianten am 2026-08-21 gefahren, `js/longformFeed.ts`:
+//
+//   A) Eingang ENTFERNT (so schrieb es der Plan vor):
+//      → `tsc` rot, zwei Fehler (TS2493 „Tuple … has no element at index '2'",
+//        TS2345 „Argument of type 'undefined'"). **Kein Test läuft dabei überhaupt.**
+//        Wer so probiert, sieht Rot und hält die Reaktivität für gedeckt.
+//   B) TYPGLEICHER Ersatz `throttled(300, handlesByNip05)` → `readable(new Map())`:
+//      → `tsc` **0 Fehler**, `test:unit` grün — und **dieser Test rot**.
+//
+// Nur B misst die Zusage. Danach zurückgebaut, `git diff --numstat` auf der Datei leer.
+
+test('KERNBEWEIS Reaktivitaet: ein NACH dem ersten Emit eintreffender Handle setzt das NIP-05-Haekchen', async ({
+    page,
+    baseURL,
+}) => {
+    const ws = boardWs(baseURL as string)
+    const identifier = `lf-nip05-${rnd()}`
+    // `.example` ist per RFC 2606 für Dokumentation reserviert und wird nie aufgelöst —
+    // dieselbe Domain-Wahl wie in `room.spec.ts` (B4). Griffe die Route unten nicht, ginge
+    // die Anfrage ins Leere statt an einen fremden Rechner.
+    const handle = `admin@lf-nip05-${rnd()}.example`
+    const ts = Math.floor(Date.now() / 1000)
+
+    // **Der Anzeigename bleibt `Relay Admin`, und das ist keine Bequemlichkeit.** Der
+    // zooid-Relay wird innerhalb eines Laufs von allen Specs geteilt, und kind 0 ist
+    // ersetzbar: ein Testprofil mit eigenem Namen überschreibt das des Admins für JEDE
+    // andere Spec. Beim Bauen dieses Tests genau so passiert — ein Lauf mit
+    // `name: 'LFAutor…'` riss vierzehn fremde Tests mit, die `Relay Admin` erwarten
+    // (directory, quote-card, room, verein-gate, command-palette). Geändert wird deshalb
+    // NUR das Feld, um das es hier geht.
+    publishProfile(ws, ADMIN, { name: 'Relay Admin', nip05: handle }, ts)
+    publishArticle(ws, ADMIN, ADMIN_PUB, {
+        identifier,
+        title: `LFNip05-${rnd()}`,
+        content: 'Ein Artikel, dessen Autor einen verifizierbaren Handle hat.',
+        publishedAt: 1_700_000_015,
+    })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier, relays: [] })
+
+    let nostrJsonGefragt = 0
+    await page.route('**/.well-known/nostr.json*', async (route) => {
+        nostrJsonGefragt += 1
+        // Die Bremse. Ohne sie könnte die Antwort noch vor dem ersten Emit da sein — der
+        // Test prüfte dann einen Zustand statt eines Übergangs und wäre trotzdem grün.
+        await new Promise((fertig) => setTimeout(fertig, 2_500))
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            headers: { 'Access-Control-Allow-Origin': '*' },
+            body: JSON.stringify({ names: { admin: ADMIN_PUB } }),
+        })
+    })
+
+    try {
+        await loginToBoard(page)
+        await page.goto(`/articles/${naddr}`)
+        await expect(page.locator('[data-artikel-text]')).toBeVisible({ timeout: 20_000 })
+
+        const karte = page.locator('aside')
+        // ERSTES Emit: der Autorname steht (kind 0 ist da), der Handle noch nicht.
+        await expect(karte.getByText('Relay Admin', { exact: true })).toBeVisible({ timeout: 20_000 })
+        await expect(karte.getByText(handle, { exact: true })).toBeHidden()
+
+        // ZWEITES Emit — **ohne Navigation, ohne Reload**: allein die Änderung des
+        // Handle-Stores muss die Ableitung neu rechnen lassen.
+        await expect(karte.getByText(handle, { exact: true })).toBeVisible({ timeout: 20_000 })
+        await expect(karte.getByTitle(`NIP-05 verifiziert: ${handle}`)).toBeVisible()
+
+        // Die Schranke: wäre die Verifizierung gar nicht erst angestoßen worden, stünde
+        // oben dasselbe Bild („kein Häkchen") — aus einem ganz anderen Grund.
+        expect(nostrJsonGefragt).toBeGreaterThan(0)
+    } finally {
+        // Zurückschreiben mit JÜNGEREM Stempel (Muster `room.spec.ts` B4). Bliebe der
+        // `nip05` am Admin kleben, führe jede spätere Spec dieses Workers beim Rendern
+        // seines Namens einen echten `.well-known`-Abruf aus — Netz-I/O, das die
+        // Testmaschine verlässt und dort nichts zu suchen hat.
+        publishProfile(ws, ADMIN, { name: 'Relay Admin' }, ts + 1)
+    }
 })
 
 // ── Ein kaputter naddr zeigt eine ehrliche Aussage, keine leere Bühne ───────────────
