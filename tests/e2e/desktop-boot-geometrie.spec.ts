@@ -407,9 +407,10 @@ testOhneWorkspace(
     },
 )
 
-for (const { hoehe, federt } of [
-    { hoehe: 900, federt: true },
-    { hoehe: 360, federt: false },
+for (const { hoehe, gibtDieListeAb } of [
+    { hoehe: 900, gibtDieListeAb: 'alles' },
+    { hoehe: 380, gibtDieListeAb: 'teilweise' },
+    { hoehe: 360, gibtDieListeAb: 'nichts' },
 ] as const) {
     test(`die Space-Beschreibung ist die eine Höhe, die der Server nicht kennt — 1440×${hoehe}`, async ({ page }) => {
         // `x-show="space?.description"` hängt an einem Relay-Datum. Kein
@@ -419,19 +420,41 @@ for (const { hoehe, federt } of [
         // eintrifft, aber nie schrumpfen.
         //
         // ── WOHIN die 4,8 px gehen, hängt an der Fensterhöhe ────────────────────────
-        // Hier stand „die Fußzeile hängt am unteren Rand einer `h-dvh`-Spalte, ihre
-        // y-Position ist von der Kopfhöhe unabhängig" — unbedingt, und damit falsch.
-        // Die Liste ist die einzige Fläche mit `flex-1`; sie federt, SOLANGE sie Spiel
-        // hat. Ihr Boden ist das eigene `pb-2` (8 px), erreicht bei einer Fensterhöhe
-        // von 60 + 36 + 264 + 8 = **368 px**. Darunter kann sie nichts mehr abgeben und
-        // die Fußzeile rückt selbst.
+        // Zwei Fassungen dieses Absatzes waren vorher falsch, und beide auf dieselbe
+        // Weise: sie behaupteten mehr, als gemessen war.
         //
-        // Am gerenderten Element gemessen (2026-08-21, Sonde über drei Höhen):
+        // Zuerst stand hier „die Fußzeile hängt am unteren Rand einer `h-dvh`-Spalte,
+        // ihre y-Position ist von der Kopfhöhe unabhängig" — unbedingt, und damit
+        // falsch. Dann eine Grenze von `60 + 36 + 264 + 8 = 368 px`, GERECHNET statt
+        // gemessen, und sie hält nicht: die Rechnung nimmt die Kopfhöhe VOR dem
+        // Wachsen und vergisst das `mb-2` des Suchfelds.
+        //
+        // Was wirklich gilt: die Liste ist die einzige Fläche mit `flex-1`, sie federt,
+        // SOLANGE sie Spiel hat, und ihr Boden ist das eigene `pb-2` (8 px). Der Platz,
+        // den die Spalte im gewachsenen Zustand braucht, ist
+        //
+        //     64,8 (Kopf MIT Beschreibung) + 36 (Suchfeld) + 8 (mb-2) + 264 (Fußzeile)
+        //   +  8 (pb-2 der Liste)                                       = **380,8 px**
+        //
+        // Darüber federt die Liste vollständig, darunter teilt sie sich die 4,8 px mit
+        // der Fußzeile, und sobald mehr als 4,8 px fehlen, wandert die Fußzeile ganz.
+        //
+        // Am gerenderten Element gemessen (2026-08-21, Sonde über sechs Höhen):
         //   1440×900  Kopf +4,80 · Liste −4,80 · Fußzeile-y ±0
         //   1440×500  Kopf +4,80 · Liste −4,80 · Fußzeile-y ±0
+        //   1440×380  Kopf +4,80 · Liste −4,00 · Fußzeile-y **+0,80**   ← 380,8 − 380
+        //   1440×370  Kopf +4,80 · Liste  ±0   · Fußzeile-y **+4,80**
         //   1440×360  Kopf +4,80 · Liste  ±0   · Fußzeile-y **+4,80**
-        // Beide Seiten der Grenze laufen hier als eigener Fall — eine Regel, die nur an
-        // einer Stelle geprüft ist, ist keine Regel, sondern ein Messpunkt.
+        //
+        // Die 0,80 bei 380 px sind kein Rauschen, sondern genau der fehlende Rest —
+        // das ist die Probe auf die Formel. Alle drei Lagen laufen hier als eigener
+        // Fall: eine Regel, die nur an einer Stelle geprüft ist, ist keine Regel,
+        // sondern ein Messpunkt, und zwei Stellen haben den Teilbereich dazwischen
+        // gerade übersehen.
+        //
+        // DIE ZUSAGE, die in ALLEN drei Lagen gilt und deshalb unten zuerst steht:
+        // was der Kopf gewinnt, geben Liste und Fußzeile zusammen ab. Nichts leckt
+        // woandershin, und keine Lage ist ein Sonderfall — nur die Aufteilung wandert.
         await page.setViewportSize({ width: BREITE, height: hoehe })
         await vorDemBoot(page)
         const { platzhalter, rail } = await vergleich(page)
@@ -447,24 +470,47 @@ for (const { hoehe, federt } of [
         // Und die Fußzeile ebenfalls: sie wird verschoben, nie gestaucht.
         expect(rail[3].h).toBe(platzhalter[3].h)
 
-        if (federt) {
-            // ERHALTUNG: was der Kopf gewinnt, gibt die Liste ab — und nichts leckt
-            // woandershin. (Hier stand zuerst „kein Block wird kleiner". Das war falsch
-            // und wurde von der eigenen Messung widerlegt: die Liste MUSS abgeben.)
-            expect(platzhalter[2].h - rail[2].h).toBeCloseTo(rail[0].h - platzhalter[0].h, 2)
-            expect(rail[3].y).toBe(platzhalter[3].y)
+        // ERHALTUNG, in allen drei Lagen dieselbe Zeile: was der Kopf gewinnt, geben
+        // Liste und Fußzeile ZUSAMMEN ab. Vorher standen hier zwei Zweige mit je einer
+        // eigenen Zusage — und genau zwischen ihnen lag der Teilbereich, den keiner
+        // abdeckte. (Noch früher stand „kein Block wird kleiner"; auch das war falsch
+        // und wurde von der eigenen Messung widerlegt: die Liste MUSS abgeben.)
+        const gewinnt = rail[0].h - platzhalter[0].h
+        const listeGibtAb = platzhalter[2].h - rail[2].h
+        const fussWandert = rail[3].y - platzhalter[3].y
+        expect(listeGibtAb + fussWandert).toBeCloseTo(gewinnt, 2)
+
+        // Und die Aufteilung je Lage — das ist der Teil, der von der Fensterhöhe
+        // abhängt. Jede Lage nennt ihre Erwartung als Literal, damit ein stilles
+        // Verschieben zwischen den Lagen auffällt.
+        if (gibtDieListeAb === 'alles') {
+            expect(listeGibtAb).toBeCloseTo(4.8, 2)
+            expect(fussWandert).toBe(0)
+        } else if (gibtDieListeAb === 'teilweise') {
+            // 380,8 − 380 = 0,8 px fehlen der Spalte, genau die wandern.
+            expect(fussWandert).toBeCloseTo(0.8, 2)
+            expect(listeGibtAb).toBeCloseTo(4, 2)
         } else {
-            // Unter der Grenze steht die Liste auf ihrem Boden und kann nichts abgeben.
+            // Mehr als 4,8 px fehlen: die Liste steht auf ihrem Boden, die Fußzeile
+            // nimmt alles.
             expect(rail[2].h).toBe(platzhalter[2].h)
-            expect(rail[3].y - platzhalter[3].y).toBeCloseTo(4.8, 2)
+            expect(fussWandert).toBeCloseTo(4.8, 2)
         }
     })
 }
 
 test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht', async ({ page, baseURL }) => {
     // Der zweite Sprung dieser Fläche, gemessen vor dem Fix: beim Eintreffen der Daten
-    // erschien der Filterkopf und schob die Liste von y = 166,4 auf y = 270 — 103,6 px
-    // — und das Raster wechselte von zwei auf drei Spuren (Karte 522 px → 344 px).
+    // erschien der Filterkopf und schob die Liste um **104,0 px** nach unten — und das
+    // Raster wechselte von zwei auf drei Spuren (Karte 522 px → 344 px).
+    //
+    // Die Zahl stand hier zuerst als 103,6 px, aus zwei viewport-relativen y-Werten
+    // (166,4 → 270). Die waren in verschiedenen Phasen von `.page-enter` abgelesen und
+    // trugen deren Streuung mit; transformfrei nachgemessen sind es 104,0 px — exakt
+    // `40 + 8 + 44 + 12` aus der Skala, ohne Nachkommastelle. Die 0,4 px waren
+    // Animationsrauschen. Die y-Werte selbst stehen deshalb nicht mehr da: absolute
+    // Höhen sind auf dieser Fläche keine belastbare Größe, und genau deshalb misst
+    // dieser Test gegen die Ortskarten-Leiste.
     //
     // Dieser Test braucht als einziger echte Artikel: ohne Bestand bleibt `isEmpty()`
     // wahr, der Filterkopf erscheint nie und der Vergleich hätte keinen zweiten Wert.

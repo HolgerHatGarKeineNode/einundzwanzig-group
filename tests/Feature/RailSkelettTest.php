@@ -235,9 +235,15 @@ test('der Platzhalter bleibt unter einem Kilobyte auf der Leitung', function () 
     // ausführen kann.
     //
     // Eine SCHRANKE und keine exakte Byte-Zahl: der genaue Wert bewegt sich mit jeder
-    // Klassenänderung, die Aussage „das ist billig" nicht. Gemessen am 2026-08-21:
-    // 13.076 Bytes roh, nach gzip 538 — die Schranke lässt knapp das Doppelte zu und
-    // schlägt an, bevor jemand die Liste auf dreißig Zeilen aufbläst.
+    // Klassenänderung, die Aussage „das ist billig" nicht. Die Größenordnung am
+    // 2026-08-21: gut 12 kB roh, nach gzip unter 600 Byte — die Schranke lässt knapp
+    // das Doppelte zu und schlägt an, bevor jemand die Liste auf dreißig Zeilen
+    // aufbläst.
+    //
+    // Bewusst als Größenordnung und nicht auf das Byte genau: hier stand „13.076 Bytes
+    // roh", und die Zahl war schon eine Runde später falsch (12.639), ohne dass sich an
+    // der Aussage etwas geändert hätte. Was den Wert festhält, ist die Schranke
+    // darunter, nicht der Kommentar.
     $mit = (string) alsMitgliedAufSeite($this, 'group.articles')->assertOk()->getContent();
     $ohne = str_replace(railSkelettHtmlAus($mit), '', $mit);
 
@@ -262,9 +268,11 @@ test('das Lade-Skelett der Artikelliste trägt die Spaltenzahl der fertigen List
     expect($html)->toContain('data-artikel-raster');
 
     // Und der Platz des Filterkopfs ist reserviert, solange geladen wird: 40 + 8 + 44
-    // plus `mb-3`. Ohne die Reservierung rutschte die Liste beim Eintreffen der Daten
-    // um 103,6 px nach unten — am gerenderten Element gemessen, 1440 px, 2026-08-21,
-    // VOR der Reparatur. Dass es heute nicht mehr passiert, hält
+    // plus `mb-3` = **104 px**. Ohne die Reservierung rutschte die Liste beim Eintreffen
+    // der Daten um genau diese 104,0 px nach unten — transformfrei gemessen, 1440 px,
+    // 2026-08-21, VOR der Reparatur. (Hier stand zuerst 103,6; das war eine
+    // viewport-relative Messung mitten in der `page-enter`-Animation, die 0,4 px waren
+    // deren Rauschen.) Dass es heute nicht mehr passiert, hält
     // `tests/e2e/desktop-boot-geometrie.spec.ts` fest; dieser Test hier prüft nur, dass
     // die Reservierung im ausgelieferten HTML überhaupt steht.
     expect($html)->toContain('<div x-show="loading" aria-hidden="true" class="mb-3 space-y-2">');
