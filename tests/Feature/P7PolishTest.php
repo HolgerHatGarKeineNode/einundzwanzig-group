@@ -25,8 +25,19 @@ test('Login-Sheet: Slide/Scale sind reduced-motion-gegated (Fade bleibt)', funct
     // Global im Layout gemountet → auf jeder Chrome-Seite im DOM.
     $res = authed($this)->get(route('group.spaces'))->assertOk();
 
-    $res->assertSee('motion-reduce:!translate-y-0', false);
-    $res->assertSee('motion-reduce:!scale-100', false);
+    // Tailwind v4 schreibt das Wichtig-Zeichen HINTER die Utility (`translate-y-0!`),
+    // v3 davor (`!translate-y-0`). Das Markup ist am 2026-08-19 umgestellt worden
+    // (Paket-Commit `71f1d30`, 14 Stellen), dieser Test nicht — er hat seitdem auf eine
+    // Schreibweise gewartet, die es nirgends mehr gibt, und lief als „bekannt rot" mit.
+    $res->assertSee('motion-reduce:translate-y-0!', false);
+    $res->assertSee('motion-reduce:scale-100!', false);
+
+    // Und der Rückweg ist zu: die v3-Form ist in v4 keine Klasse mehr, sondern ein
+    // Attributwert ohne Wirkung. Ein Rückfall bliebe im Browser stumm — die Animation
+    // liefe dann trotz `prefers-reduced-motion: reduce` weiter, und kein CSS-Fehler
+    // würde darauf zeigen.
+    $res->assertDontSee('motion-reduce:!translate-y-0', false);
+    $res->assertDontSee('motion-reduce:!scale-100', false);
 });
 
 test('Raum: Poll-Balken-Breite ist reduced-motion-gegated (Zwilling zu :235)', function () {
