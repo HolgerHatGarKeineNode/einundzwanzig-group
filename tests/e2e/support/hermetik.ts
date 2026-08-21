@@ -110,8 +110,8 @@
  * - **Die Reihenfolge der Regeln entscheidet.** Eine spezifische `MAP` NACH `MAP *`
  *   verliert; `MAP *` gewinnt als erste Übereinstimmung. Deshalb steht {@link SONDE_HOST}
  *   in {@link hostResolverRegel} vorn — stünde er hinten, bliebe der Gegenbeweis in
- *   `relay-praevention.spec.ts` grün, weil ihn schon das DNS erschlägt, und würde über die
- *   Route gar nichts aussagen.
+ *   `relay-praevention.spec.ts` grün, weil ihn schon das DNS erschlägt, und würde über
+ *   den WRAPPER gar nichts aussagen.
  * - **`EXCLUDE [::1]` wirkt NICHT, `EXCLUDE ::1` schon** (gemessen gegen einen auf `::1`
  *   lauschenden HTTP-Server: mit Klammern `ERR_NAME_NOT_RESOLVED`, ohne Klammern OK).
  *   In einer URL heißt derselbe Host `[::1]` — die beiden Schreibweisen sind deshalb
@@ -139,8 +139,8 @@
  *
  * **Warum genau diese drei und nicht „alles im 127er-Netz":** Die Liste wird an ZWEI
  * Stellen ausgewertet, und die zweite (Chromiums `EXCLUDE`) kennt keine Netzmasken. Eine
- * Definition, die hier weiter wäre als dort, ergäbe eine Herkunft, die die Route durchlässt
- * und das DNS erschlägt — ein Widerspruch, den niemand debuggen will. `127.0.0.2` ist im
+ * Definition, die hier weiter wäre als dort, ergäbe eine Herkunft, die der WRAPPER
+ * durchlässt und das DNS erschlägt — ein Widerspruch, den niemand debuggen will. `127.0.0.2` ist im
  * ganzen Repo nirgends in Gebrauch (gemessen: 0 Treffer), der Verzicht kostet also nichts.
  *
  * **`0.0.0.0` steht bewusst NICHT hier**, obwohl eine Verbindung dorthin auf Linux lokal
@@ -158,7 +158,7 @@ export const istLoopbackHost = (hostname: string): boolean =>
  * liefert): `localhost:3335` → ja, `nostr.einundzwanzig.space:443` → nein.
  *
  * Gebraucht von `relayWaechter.erlaube()`: eine Freigabe darf nie weiter reichen als die
- * Prävention, sonst gäbe es eine Herkunft, die der Wächter durchwinkt und die Route
+ * Prävention, sonst gäbe es eine Herkunft, die der Wächter durchwinkt und die PRÄVENTION
  * trotzdem sperrt — ein Test, der grün behauptet, was gar nicht stattgefunden hat.
  *
  * `lastIndexOf(':')` und nicht `split(':')`: bei `[::1]:3335` wären das fünf Teile.

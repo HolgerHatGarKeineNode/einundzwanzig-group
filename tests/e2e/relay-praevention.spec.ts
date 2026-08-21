@@ -178,7 +178,8 @@ test('Prävention: ein nicht gemappter Name löst gar nicht erst auf — die Sch
     // **Warum dieser Fall über HTTP läuft und nicht über einen WebSocket:** der Wrapper aus
     // `fixtures.ts` fängt JEDE fremde WS-Herkunft ab und käme der Resolver-Regel immer
     // zuvor — über einen WebSocket sind die beiden Schichten nicht auseinanderzuhalten.
-    // HTTP fasst die Route nicht an, die Resolver-Regel schon. Und genau diese Schicht
+    // HTTP fasst den WRAPPER nicht an (der sitzt an `window.WebSocket`), die
+    // Resolver-Regel schon. Und genau diese Schicht
     // ist die einzige, die auch für die drei Specs ohne unsere Fixtures greift
     // (`support/specImporte.nodetest.ts` führt sie namentlich).
     const sonde = await starteSonde()
