@@ -197,6 +197,29 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
                         // dort selbst auf den worker-eigenen zooid. Diese Zeile kann ihn
                         // nicht erreichen — verifiziert, nicht angenommen (siehe P0-Bericht).
                         NOSTR_BOARD_URL: '',
+                        // …und der WORKSPACE zeigt auf den WORKER-Relay, nicht auf das
+                        // Produktions-Buzz aus der lokalen `.env`.
+                        //
+                        // Dieselbe Mechanik wie zwei Riegel darüber, eine Variable weiter:
+                        // dieser `serve` erbt `...process.env`, und `playwright.config.ts`
+                        // lädt vorher die lokale `.env` hinein — dort steht das
+                        // Produktions-Buzz. Client-seitig fangen `useZooid()`/`useBuzz()`
+                        // das seit dem 2026-07-30 ab (`window.__nostrWorkspace = ''`, dort
+                        // mit 25 roten Tests bezahlt), der SERVER sah den Wert aber weiter.
+                        //
+                        // Bis P5 war das folgenlos: der Server benutzte
+                        // `config('group.workspace_url')` nur, um ihn ins `<head>` zu
+                        // schreiben, wo ihn die Stubs überschrieben. Seit P5 entscheidet er
+                        // über MARKUP — die Ortskarte „Forge", die Forge-Zeile der
+                        // Rail-Fußzeile und den vierten Tab auf `/forge`. Ohne diese Zeile
+                        // rendert dieselbe Spec auf einem Rechner mit `.env`-Eintrag anders
+                        // als auf einem ohne, und kein Test sagt einem das.
+                        //
+                        // NICHT leer, sondern der worker-eigene zooid: leer schaltete die
+                        // Forge-Fläche in jedem Lauf ab, und die Specs, die sie brauchen
+                        // (`workspaces.spec.ts`), hätten keinen Gegenstand mehr. Ein echter
+                        // LOKALER Relay hält beides — Markup vorhanden, Ziel harmlos.
+                        NOSTR_WORKSPACE_URL: `ws://localhost:${zooidPort}`,
                     },
                     stdio: 'ignore',
                 },

@@ -420,8 +420,9 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
         // Seed, kein Produktbefund.
         //
         // **Die Summe ist trotzdem eine echte Zusage**, weil `flat` und `claimed`
-        // einander per Konstruktion ausschließen (`railGroups.ts:456-457` nimmt die
-        // beanspruchten Kanäle aus der flachen Liste). Sie ist
+        // einander per Konstruktion ausschließen (`railGroups.ts`, `const claimed` /
+        // `afterClaimed` in `buildGroups` — nimmt die beanspruchten Kanäle aus der
+        // flachen Liste). Sie ist
         //   0 → die Raumliste ist noch nicht da (genau der Fall, den die Kontrolle
         //       abfangen soll — die Zusagen darunter wären dann vakuum-grün),
         //   2 → die Einmaligkeits-Regel ist gebrochen (ein Kanal steht im Baum UND
