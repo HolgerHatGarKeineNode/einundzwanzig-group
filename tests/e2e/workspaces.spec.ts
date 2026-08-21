@@ -1,4 +1,4 @@
-import { type Page } from '@playwright/test'
+import { type Locator, type Page } from '@playwright/test'
 import { test, expect } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { BUZZ_URL, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_USER_NSEC, BUZZ_USER_PUB } from './support/buzz'
@@ -35,9 +35,22 @@ const joinBuzzRelay = (): void => {
  * Der Hybrid-Kern: EIN Client, ZWEI Relays gleichzeitig.
  *
  * Der Tab „Workspaces" listet die Räume eines zweiten, fest konfigurierten Space
- * (ein Buzz-Relay), **während** der zooid-Space aktiv bleibt — Kopf-Branding und die
- * Tabs „Räume"/„Threads" gehören weiter zu zooid. Erst der Klick auf einen
+ * (ein Buzz-Relay), **während** der zooid-Space aktiv bleibt. Erst der Klick auf einen
  * Workspace-Raum stellt den aktiven Space um.
+ *
+ * ── Seit P5 steht der Tab auf `/forge`, nicht mehr auf `/spaces` ─────────────────
+ *
+ * Er war dort der dritte Eintrag der Segmented-Bar — also neben „Räume" und „Threads"
+ * des VEREINS-Space, und damit neben zwei Einträgen einer anderen Quelle. Auf `/forge`
+ * liest die ganze Seite dasselbe Relay. Für die Zusagen dieser Datei ändert das den WEG,
+ * nicht die AUSSAGE: der aktive Space bleibt zooid, der Raum-Klick stellt ihn ephemer um,
+ * ein Reload überlebt über `?space=workspace`.
+ *
+ * **Eine Zusage musste dabei neu formuliert werden.** „Der Tab wechselt den aktiven Space
+ * nicht" wurde vorher an `nostrSpaces._url` gemessen — diese Insel gibt es auf `/forge`
+ * nicht. Gemessen wird jetzt die WIRKUNG statt des Zustands: nach dem Listen führt ein
+ * unmarkierter Vereins-Raum weiterhin auf zooid. Hätte das Listen den Space umgestellt,
+ * hinge er am Buzz-Relay.
  *
  * Läuft im ZOOID-Modus (nicht `E2E_RELAY=buzz`): genau das ist der Punkt — der
  * zooid-Stack trägt die Sitzung, der Buzz-Stack liefert nur den zweiten Tab. Beide
@@ -62,16 +75,42 @@ const roomSpaceUrl = (page: Page): Promise<string> =>
         return data._url as string
     })
 
+/**
+ * Den Tab „Workspaces" auf `/forge` öffnen und seinen Panel liefern.
+ *
+ * Der Panel ist ein schlichtes `<div>` mit `x-show` und KEIN `flux:tab.panel` — die
+ * Forge-Bar fährt ohne `flux:tab.group`. Er trägt deshalb keine `tabpanel`-Rolle;
+ * `getByRole('tabpanel')` fände hier nichts (bzw. auf `/spaces` den falschen).
+ * Der Anker ist `[data-forge-workspaces]`.
+ */
+const oeffneWorkspaces = async (page: Page): Promise<Locator> => {
+    await page.goto('/forge')
+    const tab = page.getByRole('tab', { name: 'Workspaces' })
+    await expect(tab).toBeVisible({ timeout: 20_000 })
+    await tab.click()
+    const panel = page.locator('[data-forge-workspaces]')
+    await expect(panel).toBeVisible({ timeout: 20_000 })
+
+    return panel
+}
+
 test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
     test.skip(process.env.E2E_RELAY === 'buzz', 'braucht den zooid-Modus als Basis')
     test.skip(!buzzUp(), `kein Buzz-Test-Stack auf :${BUZZ_PORT} — bash tests/e2e/support/buzz-testserver.sh`)
 
-    test('ohne Config bleibt der Tab aus', async ({ page }) => {
+    test('die Segmented-Bar des Chats hat genau zwei Tabs — Workspaces steht dort nicht mehr', async ({ page }) => {
         await useZooid(page)
         await loginNsec(page, NSEC)
-        // Kein `__nostrWorkspace` gesetzt → der dritte Tab darf nicht existieren.
+
+        // Bis P5 hing hier ein dritter Tab hinter `x-if="hasWorkspace"`. Die Bar hatte
+        // damit ZWEI Formen — eine mit zwei, eine mit drei Einträgen —, je nach Config.
+        // Jetzt hat sie eine. Gemessen im LEBENDEN DOM: `role="tab"` setzt Flux erst im
+        // Browser, serverseitig steht die Rolle nirgends (das prüft
+        // `tests/Feature/OrtskartenTest.php` an seiner eigenen Marke).
         await expect(page.getByRole('tab', { name: 'Räume' })).toBeVisible({ timeout: 20_000 })
+        await expect(page.getByRole('tab', { name: 'Threads' })).toBeVisible({ timeout: 20_000 })
         await expect(page.getByRole('tab', { name: 'Workspaces' })).toHaveCount(0)
+        await expect(page.getByRole('tab')).toHaveCount(2)
     })
 
     test('mit Config listet er die Buzz-Räume, ohne den zooid-Space zu wechseln', async ({ page }) => {
@@ -83,19 +122,14 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
         }, BUZZ_URL)
         await loginNsec(page, NSEC)
 
-        // Der Tab ist da.
-        const tab = page.getByRole('tab', { name: 'Workspaces' })
-        await expect(tab).toBeVisible({ timeout: 20_000 })
-
-        // Vorbedingung: der zooid-Space trägt die Seite — sein Seed-Raum ist sichtbar.
+        // Vorbedingung: der zooid-Space trägt die Chat-Seite — sein Seed-Raum ist sichtbar.
         // Auf den Räume-Tab gescopt, weil „Willkommen" auch als Chat-Text vorkommt.
         await expect(page.getByRole('tabpanel').getByText('Willkommen', { exact: true })).toBeVisible({ timeout: 20_000 })
 
         // Im Workspaces-Tab stehen die BUZZ-Räume. Der Seed-Raum des buzz-test-Stacks
         // heißt „welcome" mit der festen UUIDv5 — hier zählt, dass überhaupt Räume aus
         // dem zweiten Relay ankommen, nicht ein bestimmter Name.
-        await tab.click()
-        const panel = page.getByRole('tabpanel')
+        const panel = await oeffneWorkspaces(page)
         await expect
             .poll(async () => (await panel.locator('button').count()) > 0, {
                 timeout: 30_000,
@@ -103,15 +137,14 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             })
             .toBe(true)
 
-        // Der EIGENTLICHE Hybrid-Beleg: der aktive Space ist immer noch zooid. Wäre der
-        // Tab ein Space-Umschalter, stünde hier die Buzz-URL — und der Kopf zeigte ein
-        // anderes Branding.
-        const active = await page.evaluate(() => {
-            const el = document.querySelector('[x-data="nostrSpaces"]')!
-            const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
-            return data._url as string
-        })
-        expect(active, 'der Workspaces-Tab darf den aktiven Space NICHT wechseln').toBe(ZOOID_WS + '/')
+        // Der EIGENTLICHE Hybrid-Beleg: das LISTEN allein stellt den aktiven Space nicht
+        // um. Gemessen an der WIRKUNG statt am Zustand — `nostrSpaces` gibt es auf
+        // `/forge` nicht: ein UNMARKIERTER Vereins-Raum muss weiter auf zooid hängen.
+        // Hätte das Listen den Space ephemer umgestellt, führte dieselbe Adresse ans
+        // Buzz-Relay, und der Beitritt ginge dorthin (`invalid: group not found`).
+        await page.goto('/rooms/welcome')
+        await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
+        expect(await roomSpaceUrl(page), 'das Listen darf den aktiven Space NICHT wechseln').toBe(ZOOID_WS + '/')
     })
 
     test('der Raum-Klick wechselt den Space ephemer — ein Reload landet wieder auf zooid', async ({ page }) => {
@@ -120,13 +153,16 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, NSEC)
-        await expect(page.getByRole('tab', { name: 'Workspaces' })).toBeVisible({ timeout: 20_000 })
+        await oeffneWorkspaces(page)
 
         // Space per Insel-Aufruf umstellen (der Klick-Pfad selbst ist Blade-Navigation).
+        // Die Insel heißt seit P5 `nostrWorkspaceRooms` und sitzt am Panel; die Methode
+        // heißt `openRoom` statt `openWorkspaceRoom` — in einer eigenen Insel ist das
+        // `workspace`-Präfix Lärm.
         await page.evaluate(() => {
-            const el = document.querySelector('[x-data="nostrSpaces"]')!
+            const el = document.querySelector('[data-forge-workspaces]')!
             const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
-            ;(data.openWorkspaceRoom as (r: unknown) => void)({ h: 'egal' })
+            ;(data.openRoom as (r: unknown) => void)({ h: 'egal' })
         })
         // OHNE Space-Markierung an der URL — genau so, wie ein Deep-Link in den
         // Vereins-Space aussieht.
@@ -164,8 +200,7 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, NSEC)
-        await page.getByRole('tab', { name: 'Workspaces' }).click()
-        const panel = page.getByRole('tabpanel')
+        const panel = await oeffneWorkspaces(page)
         await expect.poll(async () => (await panel.locator('button').count()) > 0, { timeout: 30_000 }).toBe(true)
         await panel.locator('button').first().click()
         await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
@@ -242,13 +277,11 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, NSEC)
-        await expect(page.getByRole('tab', { name: 'Workspaces' })).toBeVisible({ timeout: 20_000 })
 
         // Über den ECHTEN Klick-Pfad in den Raum: Tab „Workspaces" → Raum-Kachel.
-        // Der Abkürzungs-Weg der Nachbartests (`openWorkspaceRoom` + `goto`) genügt hier
-        // nicht — er stellt den Space um, aber der Raum-Feed bleibt leer.
-        await page.getByRole('tab', { name: 'Workspaces' }).click()
-        const panel = page.getByRole('tabpanel')
+        // Der Abkürzungs-Weg der Nachbartests (`openRoom` + `goto`) genügt hier nicht —
+        // er stellt den Space um, aber der Raum-Feed bleibt leer.
+        const panel = await oeffneWorkspaces(page)
         await expect.poll(async () => (await panel.locator('button').count()) > 0, { timeout: 30_000 }).toBe(true)
         await panel.locator('button').first().click()
         await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
@@ -292,13 +325,13 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, NSEC)
-        await expect(page.getByRole('tab', { name: 'Workspaces' })).toBeVisible({ timeout: 20_000 })
+        await oeffneWorkspaces(page)
 
         // In den Workspace wechseln (wie der Raum-Klick) …
         await page.evaluate(() => {
-            const el = document.querySelector('[x-data="nostrSpaces"]')!
+            const el = document.querySelector('[data-forge-workspaces]')!
             const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
-            ;(data.openWorkspaceRoom as (r: unknown) => void)({ h: 'egal' })
+            ;(data.openRoom as (r: unknown) => void)({ h: 'egal' })
         })
         await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
         await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })
@@ -346,9 +379,7 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             .toBe(0)
 
         // Jetzt in den Workspace-Raum, über den echten Weg (Tab → Kachel).
-        await page.goto('/spaces')
-        await page.getByRole('tab', { name: 'Workspaces' }).click()
-        const panel = page.getByRole('tabpanel')
+        const panel = await oeffneWorkspaces(page)
         await expect.poll(async () => (await panel.locator('button').count()) > 0, { timeout: 30_000 }).toBe(true)
         await panel.locator('button').first().click()
         await expect(page.locator('[x-data^="nostrRoomChat"]')).toBeVisible({ timeout: 20_000 })

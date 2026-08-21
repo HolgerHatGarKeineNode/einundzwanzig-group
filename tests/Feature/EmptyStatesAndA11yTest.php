@@ -355,10 +355,27 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // (`packages/einundzwanzig-group/js/articleReaderMarkup.test.ts` prüft, dass beide
     // Aufrufer sie einbinden und keiner mehr eine eigene Kopie trägt) — und
     // `tests/Feature/SafeAreaGateTest.php` zeigt seit demselben Tag auf sie.
+    // P5 des Longform-Plans (2026-08-21, Navigation): NACHGEMESSEN, Ergebnis
+    // 'spaces' 11 → 9. Wieder KEIN verschwundener Träger, sondern zwei UMGEZOGENE: der
+    // Tab „Workspaces" ist aus `⚡spaces.blade.php` nach `⚡forge.blade.php` gewandert
+    // (vierter Tab), und mit ihm die beiden `aria-hidden="true"` an den Zeilen-Icons der
+    // Workspace-Raumliste (Nadel für „angeheftet", durchgestrichene Glocke für „stumm").
+    //
+    // Multiset-Diff der sortierten Träger-Listen vor/nach dem Verschieben ist EINSEITIG:
+    // es fielen genau zweimal `aria-hidden="true"` weg, NICHTS kam hinzu. Gegenprobe an
+    // der Zieldatei: `grep -c 'aria-hidden="true"' ⚡forge.blade.php` liefert 6 gegen
+    // vorher 4 — dieselben zwei, eine Datei weiter.
+    //
+    // **Die neue Ortskarten-Leiste steht bewusst NICHT in dieser Zahl.** Sie ist eine
+    // Komponente (`components/ortskarten.blade.php`) und wird von drei Views eingebunden;
+    // ihre Träger wären in drei Zeilen dreifach zu führen — dieselbe Begründung wie beim
+    // Lightbox-Overlay aus P3. Der Riegel für sie liegt bei ihren eigenen Zusagen
+    // (`tests/Feature/OrtskartenTest.php`: kein `role="tab"`, genau eine Karte mit
+    // `aria-current="page"`).
     $expected = [
         'room' => 38,
         'directory' => 3,
-        'spaces' => 11,
+        'spaces' => 9,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)

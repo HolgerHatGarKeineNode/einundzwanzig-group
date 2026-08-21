@@ -347,17 +347,61 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
         await page.waitForURL('**/forge/naddr1*', { timeout: 20_000 })
     })
 
-    test('Die Übersichtsseite bleibt erreichbar — Sektionsname und Icon führen dorthin', async ({ page }) => {
+    /**
+     * ── REGEL 1 IST IN P5 BEGRÜNDET ERSETZT, NICHT UMGANGEN ──────────────────────
+     *
+     * Hier stand bis zum 2026-08-21:
+     *
+     *     // Der alte „Forge"-Eintrag am Fuß der Rail ist weg — das ist Regel 1.
+     *     await expect(rail(page).getByRole('link', { name: 'Forge', exact: true })).toHaveCount(0)
+     *
+     * **Was die Regel ursprünglich schützte.** In P1 wurde ein eigener „Forge"-Eintrag am
+     * Fuß des Scrollers entfernt, weil er den Workspace ein ZWEITES Mal beschrieb: die
+     * Repos liegen auf demselben Relay wie die Kanäle in der Sektion darüber, und der
+     * Repo-Kanal stand flach daneben, obwohl das 30617 per `buzz-channel` sagt, wohin er
+     * gehört. Die Regel hielt fest, dass diese Doppelung nicht zurückkehrt.
+     *
+     * **Was sich in P5 geändert hat — die Voraussetzung, nicht die Bequemlichkeit.**
+     * Zwei Dinge zugleich:
+     *   1. Die Sektion heißt jetzt selbst „Forge" (nicht mehr „Workspace") und führt an
+     *      dieselbe Übersichtsseite. Ein Fuß-Eintrag desselben Namens beschreibt damit
+     *      nicht mehr eine ZWEITE Sache, sondern ist ein zweiter Weg zur ersten — so wie
+     *      die Artikel-Zeile daneben auch in der Befehlspalette steht.
+     *   2. Der Client hat mit der Ortskarten-Leiste eine Ebene bekommen, auf der Chat,
+     *      Artikel und Forge gleichrangig nebeneinander stehen. Die Rail-Fußzeile ist die
+     *      Desktop-Entsprechung dieser Ebene, und dort fehlte von den dreien genau einer.
+     *
+     * **Warum das keine Umgehung ist.** Die Regel wäre umgangen, wenn der Eintrag unter
+     * anderem Namen zurückkäme oder wenn dieser Test gelockert würde, ohne die Sache zu
+     * ändern. Beides ist nicht der Fall: der Eintrag heißt „Forge", er steht in der
+     * Fußzeile statt im Scroller, und die Zusage wird nicht schwächer, sondern PRÄZISER —
+     * geprüft wird jetzt, dass es genau ZWEI Wege gibt und wohin jeder führt.
+     *
+     * Was unverändert gilt und hier weiter geprüft wird: im SCROLLER steht kein flacher
+     * Forge-Eintrag neben den Gruppen. Das war der Kern der Regel.
+     */
+    test('Die Übersichtsseite bleibt erreichbar — Sektionsname, Icon und die Fußzeile führen dorthin', async ({ page }) => {
         await openRail(page)
 
-        // Der alte „Forge"-Eintrag am Fuß der Rail ist weg — das ist Regel 1.
-        await expect(rail(page).getByRole('link', { name: 'Forge', exact: true })).toHaveCount(0)
+        // Genau ZWEI Links heißen „Forge": der Sektionskopf und die Fußzeilen-Zeile.
+        // Ein dritter wäre die Doppelung, gegen die Regel 1 geschrieben wurde.
+        await expect(rail(page).getByRole('link', { name: 'Forge', exact: true })).toHaveCount(2)
 
         // Weg 1: das `</>`-Icon, mit Namen (sonst wäre es ein Rätsel).
         await expect(rail(page).getByRole('link', { name: 'Forge-Übersicht öffnen' })).toBeVisible()
 
-        // Weg 2: der Sektionsname selbst.
-        await rail(page).getByRole('link', { name: /WORKSPACE/i }).first().click()
+        // Weg 2: die Fußzeilen-Zeile. Sie ist der P5-Neuzugang und trägt einen eigenen
+        // Anker, weil „Forge" in dieser Spalte mehrfach als Text vorkommt.
+        const fuss = rail(page).locator('[data-rail-fuss="forge"]')
+        await expect(fuss).toBeVisible()
+        // Und sie steht NICHT im Scroller, sondern in der Fußzeile — der eigentliche
+        // Inhalt von Regel 1. Der Scroller ist die Raumliste; ein Artikel oder eine
+        // Forge sind keine Räume.
+        await expect(rail(page).locator('[data-rail-scroller] [data-rail-fuss="forge"]')).toHaveCount(0)
+
+        // Weg 3: der Sektionsname selbst. Er heißt seit P5 „Forge" statt „Workspace" —
+        // `.first()` ist in DOM-Reihenfolge der Kopf, die Fußzeile kommt danach.
+        await rail(page).getByRole('link', { name: 'Forge', exact: true }).first().click()
         await page.waitForURL('**/forge', { timeout: 20_000 })
     })
 

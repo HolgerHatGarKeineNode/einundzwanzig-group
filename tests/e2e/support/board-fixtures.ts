@@ -91,6 +91,25 @@ export const test = base.extend<object, { boardServer: string }>({
                         // echte Quelle sieht.
                         NOSTR_SPACE_URL: boardUrl,
                         NOSTR_BOARD_URL: boardUrl,
+                        // …und der WORKSPACE ebenso, aus demselben Grund eine Variable
+                        // weiter. Dieser `serve` erbt `...process.env`, und
+                        // `playwright.config.ts` lädt vorher die lokale `.env` hinein — die
+                        // trägt dort das PRODUKTIONS-Buzz. Client-seitig fängt `useZooid()`
+                        // das ab (`window.__nostrWorkspace = ''`), aber der SERVER sieht
+                        // den Wert trotzdem: seit P5 entscheidet er darüber, ob die
+                        // Ortskarte „Forge", die Forge-Zeile der Rail-Fußzeile und der
+                        // vierte Forge-Tab überhaupt gerendert werden.
+                        //
+                        // Zwei Dinge auf einmal: der Produktions-Host verlässt die
+                        // Server-ENV (dieselbe Klasse wie der `NOSTR_BOARD_URL`-Riegel in
+                        // `fixtures.ts`), und das Markup wird von der `.env` des jeweiligen
+                        // Rechners unabhängig — ohne diese Zeile rendert dieselbe Spec auf
+                        // Rechner A mit und auf Rechner B ohne Forge-Karte.
+                        //
+                        // Der worker-eigene zooid als Wert: er ist ein echter, LOKALER
+                        // Relay. Ein `wss://…`-Platzhalter wäre auch nicht-leer, zeigte aber
+                        // nach außen, sobald jemand die Client-Stubs entfernt.
+                        NOSTR_WORKSPACE_URL: boardUrl,
                     },
                     stdio: 'ignore',
                 },
