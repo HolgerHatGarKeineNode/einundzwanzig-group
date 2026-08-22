@@ -181,6 +181,37 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     const profile = page.locator('button[aria-haspopup="true"]').first()
     await profile.click()
     await page.waitForTimeout(400)
+    // Auf das ENDE jeder chip-in-Transition warten, bevor gemessen wird — dasselbe
+    // Muster wie bei Zustand B unten (und der Login-Sheet-/Umfrage-Kontextzeile),
+    // hier verallgemeinert auf ALLE sichtbaren chip-in-Träger dieser ersten Messung:
+    // die Zähler-Pillen (`unread-badge`) sind Async-Nachzügler (laden NACH dem First
+    // Paint, siehe theme.css chip-in-Kommentar) und ohne diesen Wait ist ihre Deckkraft
+    // ein Zufallswert aus dem Fenster der festen 400-ms-Pause — unter Last (paralleler
+    // Vollauf) reicht das Fenster nicht, `opacity` liegt dann zwischen 0 und 1 und die
+    // Guard-Schleife (Zeile ~823) hat recht, sie abzulehnen. `getClientRects` schließt
+    // dauerhaft ausgeblendete Chips (z.B. der NIP-05-Chip ohne verifizierten Namen,
+    // `x-show="false"`) aus — die würden nie auf 1 kommen und der Poll liefe sonst in
+    // den Timeout, obwohl nichts kaputt ist.
+    await expect
+        .poll(
+            () =>
+                page.evaluate(() => {
+                    let min = 1
+                    for (const el of Array.from(document.querySelectorAll('.chip-in'))) {
+                        if ((el as HTMLElement).getClientRects().length === 0) continue
+                        let o = 1
+                        let n: Element | null = el
+                        while (n) {
+                            o *= Number(getComputedStyle(n).opacity)
+                            n = n.parentElement
+                        }
+                        min = Math.min(min, o)
+                    }
+                    return Math.round(min * 1000) / 1000
+                }),
+            { timeout: 10_000 },
+        )
+        .toBe(1)
     const phase1 = await measure(page)
     await page.keyboard.press('Escape')
 
