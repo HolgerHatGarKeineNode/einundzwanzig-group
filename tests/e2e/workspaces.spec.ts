@@ -451,9 +451,17 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
             .poll(() => nip11Hits, { timeout: 10_000, message: 'page.route muss das NIP-11-Dokument tatsächlich festhalten' })
             .toBeGreaterThan(0)
         // Vakuitätsriegel 2 — der Zustand VOR der Korrektur ist die URL-Form
-        // (`displayRelayUrl('ws://localhost:3001/')` → `localhost:3001`). Ohne diesen
+        // (`displayRelayUrl(BUZZ_URL)` → `localhost:<BUZZ_PORT>`). Ohne diesen
         // Anker wäre der Test grün, bevor der Fehler überhaupt eintreten KANN.
-        await expect(hint).toHaveText('localhost:3001')
+        //
+        // **Der Port kommt aus `BUZZ_PORT`, nicht als Literal.** Bis zum 2026-08-23 stand
+        // hier `'localhost:3001'` fest verdrahtet — das ist der Port für `E2E_SLOT_OFFSET=0`.
+        // Bei jedem anderen Slot war dieser Test rot (gemessen: `Expected localhost:3001,
+        // Received localhost:3021`), und zwar ohne dass an ihm oder am Code etwas falsch
+        // gewesen wäre. Parallele Läufe sind hier der dokumentierte Weg — zwei gleichzeitige
+        // Playwright-Läufe killen einander sonst die Relays —, also muss jeder Port, den ein
+        // Test behauptet, aus derselben Quelle kommen wie der, den der Stack bekommt.
+        await expect(hint).toHaveText(`localhost:${BUZZ_PORT}`)
 
         // Übergangspunkt abwarten, dann erst asserten: Freigabe liefert das Doc, das
         // korrigierende Abo muss den Hinweis auf den Space-Namen ziehen. Der rekonstruierte
