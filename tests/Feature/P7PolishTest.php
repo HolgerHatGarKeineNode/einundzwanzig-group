@@ -46,6 +46,17 @@ test('Raum: Poll-Balken-Breite ist reduced-motion-gegated (Zwilling zu :235)', f
     $res->assertSee('transition-[width] duration-300 motion-reduce:transition-none', false);
 });
 
+test('Chat-Composer: Emoji-Knopf trägt die v4-Wichtig-Form (Zwilling zu :24)', function () {
+    // a11y-contrast.spec.ts:611 hat gegen die v3-Form (`!text-brand-700`) geprüft und
+    // ist deshalb rot geworden — das Markup steht seit dem Paket-Commit `71f1d30`
+    // (2026-08-19) auf v4 (`text-brand-700!`). Derselbe Rückfall wie P7PolishTest:24,
+    // hier auf der niedrigsten Ebene abgesichert, die ihn fängt (Pest statt E2E).
+    $res = authed($this)->get(route('group.room', ['h' => 'welcome']))->assertOk();
+
+    $res->assertSee('text-brand-700! dark:text-brand-400!', false);
+    $res->assertDontSee('!text-brand-700 dark:!text-brand-400', false);
+});
+
 test('Wallet-Hero: Count-Up + grüner Farb-Flash bei Zuwachs', function () {
     $res = authed($this)->get(route('group.wallet'))->assertOk();
 
