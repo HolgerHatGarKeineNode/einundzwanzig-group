@@ -73,7 +73,9 @@ export const openedUrls = (page: Page): Promise<string[]> =>
 /**
  * Zwingt den aktiven Space auf eine TOT-URL (Verbindung wird nie beantwortet) —
  * für den Lesefehler-Zweig des Wartezustands. `DEFAULT_SPACE_URL`
- * (`packages/einundzwanzig-group/js/groups.ts:405`) liest `window.__nostrSpace`
+ * (Symbol in `packages/einundzwanzig-group/js/groups.ts` — auf den Namen geankert,
+ * nicht auf eine Zeile: der frühere Verweis auf Zeile 405 war schon vor dem
+ * 2026-08-22 falsch, ohne dass ein Test rot wurde) liest `window.__nostrSpace`
  * EINMALIG beim Modul-Load; ein `page.goto()` (volle Navigation, kein
  * `wire:navigate`) wertet die addInitScripts danach neu aus. Muss NACH
  * `useZooid()` registriert werden (addInitScripts laufen in Reihenfolge, wer
