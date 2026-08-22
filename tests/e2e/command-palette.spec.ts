@@ -147,19 +147,66 @@ test('Klick außerhalb der Karte schließt die Palette', async ({ page }) => {
 
 // ── Pfeil + Enter wählt (DoD Test-Strategie) ────────────────────────────────
 
-test('Pfeil runter + Enter wählt die erste Zeile und navigiert dorthin', async ({ page }) => {
+test('Pfeil runter + Enter öffnet die markierte Raumzeile und navigiert dorthin', async ({ page }) => {
     await openApp(page)
     await openPaletteViaKeyboard(page)
 
+    /*
+     * VORBEDINGUNG, kein Zeitpolster.
+     *
+     * Flux markiert beim Öffnen bereits die ERSTE Option (`data-active`) — `ArrowDown`
+     * rückt also auf die ZWEITE. Die Überschrift „Räume" erscheint aber schon, sobald
+     * EINE Raumzeile steht (`_syncHeadings` leitet sie aus Flux' `[data-hidden]` ab),
+     * und die Raumliste kommt asynchron vom Relay. Steht in diesem Moment erst eine
+     * einzige Raumzeile, ist die zweite Option die erste AKTION („Alle Räume &
+     * Entdecken" → `/spaces`): die Palette schließt, ein Raum wird nie geöffnet, und
+     * der Composer, auf den unten gewartet wird, kann gar nicht erscheinen.
+     *
+     * Genau daran fiel dieser Test unter Parallel-Last. Gemessen (12 Läufe, 6 Worker,
+     * 2026-08-23): die Überschrift steht nach ~370–880 ms mit 1 bis 5 Zeilen, die volle
+     * Liste erst 15–200 ms später — in 2 von 12 Fällen mit genau EINER Zeile zum
+     * Zeitpunkt der Überschrift.
+     *
+     * `recentRooms()` kappt den Ruhezustand bei fünf und der Seed hat zehn beigetretene
+     * Räume: fünf sichtbare Zeilen sind damit der VOLLE Endzustand, nicht eine
+     * willkürliche Schwelle — mehr kann nicht nachkommen (in denselben 12 Läufen stand
+     * die Liste 3 s später unverändert auf 5).
+     */
     await expect(heading(page, 'rooms')).toBeVisible({ timeout: 10_000 })
+    await expect(visibleSection(page, 'rooms')).toHaveCount(5, { timeout: 15_000 })
+
     await page.keyboard.press('ArrowDown')
+
+    /*
+     * Die Markierung steht nach ↓ auf einer RAUMZEILE — das ist der Zustand, den der
+     * Test fangen soll, und er wird hier direkt geprüft statt erst 15 s später am
+     * ausbleibenden Composer. Sprang die Markierung in die Aktionen-Sektion (der
+     * Fehler oben), fällt es hier in gut einer Sekunde auf, mit dem richtigen Namen.
+     *
+     * Auf WELCHEM Raum sie steht, wird bewusst NICHT festgeschrieben: der Ruhezustand
+     * ist nach jüngster Aktivität sortiert, und `lastMessageAt` trifft nach der
+     * Raumliste ein — die Reihenfolge kann sich also noch einmal umsortieren, wobei
+     * Flux' (positionsbasierte) Markierung auf die erste Option zurückfällt. Genau das
+     * ist beim Bau dieses Fixes einmal in 12 Parallel-Läufen passiert (markiert war
+     * `edit`, geöffnet wurde `general`). Sicher ist dabei nur, was der Vertrag auch
+     * hergibt: mit fünf Raumzeilen an der Spitze führt jede Rückstellung wieder auf
+     * eine Raumzeile, nie in die Aktionen. Ein Test auf den konkreten Raum wäre ein
+     * Test auf die Sortier-Laufzeit, nicht auf die Tastaturauswahl.
+     */
+    const markiert = page.locator('[data-palette-section="rooms"][data-active]')
+    await expect(markiert, 'nach ↓ muss die Markierung auf einer Raumzeile stehen').toHaveCount(1)
+
     await page.keyboard.press('Enter')
 
-    // Palette schließt sich, und die Navigation griff (irgendein Raum wurde geöffnet —
-    // erkennbar am Chat-Composer, der nur in einem Raum existiert).
+    // Palette schließt sich, und die Navigation griff (ein Raum wurde geöffnet —
+    // erkennbar am Chat-Composer, den es nur in einem Raum gibt).
     await expect(paletteDialog(page)).toBeHidden({ timeout: 10_000 })
     await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 15_000 })
-    expect(page.url()).toMatch(/\/rooms\//)
+    // `^/rooms/.+` statt `/\/rooms\//`: der Pfad muss AUF einen Raum zeigen, nicht ihn
+    // nur irgendwo enthalten — `/spaces` (das Ziel der ersten Aktion, in das dieser
+    // Test fiel) hätte einen Teilstring-Test nie ausgelöst, eine künftige
+    // Zwischenseite wie `/x?next=/rooms/y` aber sehr wohl.
+    expect(new URL(page.url()).pathname).toMatch(/^\/rooms\/.+/)
 })
 
 // ── Treffer über die Sektionen; nie leer (DoD 4) ────────────────────────────
