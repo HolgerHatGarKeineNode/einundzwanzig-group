@@ -724,7 +724,7 @@ for (const theme of ['light', 'dark'] as const) {
         for (const [signatur, wo] of [
             ['<span size-10 text-brand-700>', '⚡spaces — Icon-Chip der Einstiegszeilen'],
             ['<svg size-4 text-brand-700>', '⚡spaces — Häkchen der Länder-Auswahl'],
-            ['!text-brand-700>', 'chat-composer — Emoji-Knopf (nur bei offenem Panel)'],
+            ['text-brand-700!>', 'chat-composer — Emoji-Knopf (nur bei offenem Panel)'],
         ] as const) {
             expect(
                 measured.some((m) => m.kind === 'icon' && m.label.includes(signatur)),
