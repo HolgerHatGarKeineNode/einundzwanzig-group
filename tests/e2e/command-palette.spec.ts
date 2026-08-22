@@ -171,9 +171,35 @@ test('Pfeil runter + Enter öffnet die markierte Raumzeile und navigiert dorthin
      * Räume: fünf sichtbare Zeilen sind damit der VOLLE Endzustand, nicht eine
      * willkürliche Schwelle — mehr kann nicht nachkommen (in denselben 12 Läufen stand
      * die Liste 3 s später unverändert auf 5).
+     *
+     * ZWEITE HÄLFTE derselben Vorbedingung, und sie ist NICHT dieselbe Zahl: gewartet
+     * wird auf fünf BEIGETRETENE Zeilen, nicht auf fünf Zeilen.
+     *
+     * `recentRooms()` stellt Beigetretene nach vorn und füllt danach mit ENTDECKBAREN
+     * auf — eine halbleere Liste wäre schlechter als eine, die etwas anbietet. Solange
+     * die Mitgliedschaften (39002) unterwegs sind, ist aber KEIN Raum als beigetreten
+     * bekannt, und die Liste besteht dann rein aus der Aktivitätsreihenfolge aller
+     * Räume. Der Seed hält fünf Räume, denen der Testnutzer NIE beitritt (`dev`, `vip`
+     * und die drei Meetup-Räume, siehe `zooid-testserver.sh`: 9021 nur für die anderen
+     * zehn). Landet einer davon auf Platz zwei, öffnet ↵ ihn korrekt — und dort steht
+     * das Beitritts-Gate statt des Composers (`⚡room.blade.php`:
+     * `x-show="membershipReady && joined && !isForum"`). Genau diese Signatur — Palette
+     * zu, Navigation greift, Composer kommt nie — riss den Test nach dem ersten Fix
+     * weiter.
+     *
+     * Gemessen in einem vollen Lauf mit 12 eingestreuten Proben (2026-08-23): in 9 von
+     * 12 standen NICHT beigetretene Räume in den Top-5, darunter `dev` und drei
+     * Meetup-Räume; zweimal auf Platz drei, also einen Platz neben der Markierung.
+     *
+     * Mit fünf beigetretenen Zeilen ist die Kappung erreicht und jede der fünf Zeilen
+     * beigetreten — ↓ kann dann gar nicht mehr in einem Gate landen.
      */
     await expect(heading(page, 'rooms')).toBeVisible({ timeout: 10_000 })
     await expect(visibleSection(page, 'rooms')).toHaveCount(5, { timeout: 15_000 })
+    await expect(
+        page.locator('[data-palette-section="rooms"]:not([data-hidden])[data-palette-joined="true"]'),
+        'die Ruheliste muss die BEIGETRETENEN Räume zeigen, nicht die Aktivitätsreihenfolge aller',
+    ).toHaveCount(5, { timeout: 15_000 })
 
     await page.keyboard.press('ArrowDown')
 
@@ -195,6 +221,14 @@ test('Pfeil runter + Enter öffnet die markierte Raumzeile und navigiert dorthin
      */
     const markiert = page.locator('[data-palette-section="rooms"][data-active]')
     await expect(markiert, 'nach ↓ muss die Markierung auf einer Raumzeile stehen').toHaveCount(1)
+    // …und auf einer BEIGETRETENEN. Sonst führt ↵ in einen Raum, der statt des
+    // Composers das Beitritts-Gate zeigt — das fiele sonst erst 15 s später auf,
+    // und zwar mit einer Fehlermeldung („Composer nicht sichtbar"), die auf den
+    // Composer zeigt statt auf die Mitgliedschaft.
+    await expect(markiert, 'die markierte Raumzeile muss beigetreten sein').toHaveAttribute(
+        'data-palette-joined',
+        'true',
+    )
 
     await page.keyboard.press('Enter')
 
