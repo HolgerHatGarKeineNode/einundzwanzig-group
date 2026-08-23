@@ -307,22 +307,38 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
     })
 
     /**
-     * Punkt 5: der Leerzustand ist eine AUSSAGE, keine leere Fläche. Geprüft am
-     * Tab „Projekte" — es liegt bewusst kein einziges kind 30621 am Relay, so
-     * wie am Produktions-Relay auch.
+     * Punkt 5, seit dem 2026-08-23 in umgekehrter Richtung: der Projekte-Tab ist
+     * GESTRICHEN, und das muss messbar sein statt bloss behauptet.
+     *
+     * Vorher stand hier die Zusage „ohne Projekte steht eine Leermeldung" — geprüft am
+     * Tab „Projekte", weil bewusst kein einziges kind 30621 am Relay liegt. Die Fläche
+     * gibt es nicht mehr; die Projekte leben ab `xl` in der Rail weiter. Was bleibt, ist
+     * die Frage, ob der Wegfall VOLLSTÄNDIG ist: ein zurückgebliebener Tab ohne Panel
+     * oder eine Kachel ohne Ziel wäre schlimmer als der alte Zustand.
+     *
+     * Die gerettete Auskunft (Repositories eines Projekts, die nicht auf dem Relay
+     * liegen) steht jetzt im Repositories-Tab und erscheint hier korrekt NICHT — ohne
+     * 30621 gibt es keine fehlenden Projekt-Repos. Auch das wird geprüft, sonst wäre die
+     * Zeile eine, die immer steht.
      */
-    test('ohne Projekte steht eine Leermeldung, keine leere Fläche', async ({ page }) => {
+    test('der Projekte-Tab ist vollständig fort — Tab, Kachel und Panel', async ({ page }) => {
         await useWorkspace(page)
         await page.goto('/forge')
-        await expect(page.locator('[data-forge-tile="projects"]')).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-tile="repos"]')).toBeVisible({ timeout: 30_000 })
 
-        await page.getByRole('tab', { name: 'Projekte' }).click()
-        const empty = page.locator('[data-forge-empty="projects"]')
-        await expect(empty).toBeVisible()
-        await expect(empty).toContainText('Noch keine Projekte')
-        // Und der Ausweg daneben ist echt: er schaltet auf die Repo-Liste.
-        await page.getByRole('button', { name: 'Zu den Repositories' }).click()
+        // Drei Tabs, und keiner davon heisst „Projekte".
+        await expect(page.getByRole('tab')).toHaveCount(3)
+        await expect(page.getByRole('tab', { name: 'Projekte', exact: true })).toHaveCount(0)
+
+        // Kachel und Panel ebenso — eine Kachel ohne Ziel wäre eine Zahl ins Leere.
+        await expect(page.locator('[data-forge-tile="projects"]')).toHaveCount(0)
+        await expect(page.locator('[data-forge-empty="projects"]')).toHaveCount(0)
+        await expect(page.locator('[data-forge-project]')).toHaveCount(0)
+
+        // Der Repositories-Tab trägt die gerettete Auskunft — hier ohne 30621 also nicht.
+        await page.getByRole('tab', { name: 'Repositories' }).click()
         await expect(page.locator('[data-forge-repo]').first()).toBeVisible()
+        await expect(page.locator('[data-forge-fehlende-projekt-repos]')).toHaveCount(0)
     })
 
     /**

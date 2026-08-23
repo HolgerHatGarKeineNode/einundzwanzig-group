@@ -39,15 +39,14 @@ test('der Forge-Tab wird in ?tab= gespiegelt — und der Startwert steht NICHT d
     // Startwert: saubere Adresse, kein Parameter. Genau die Zusage aus `forgeTab.ts`.
     await expect(page).toHaveURL(/\/forge$/)
 
-    // Jeder andere Tab landet in der Adresse.
-    await tab('Workspaces').click()
+    // Jeder andere Tab landet in der Adresse. Die Beschriftung ist seit dem
+    // 2026-08-23 „Kanäle" — der BEZEICHNER in der Adresse bleibt `workspaces`,
+    // und genau diese Trennung prüft die Zeile darunter mit.
+    await tab('Kanäle').click()
     await expect(page).toHaveURL(/[?&]tab=workspaces/, { timeout: 10_000 })
 
     await tab('Repositories').click()
     await expect(page).toHaveURL(/[?&]tab=repos/, { timeout: 10_000 })
-
-    await tab('Projekte').click()
-    await expect(page).toHaveURL(/[?&]tab=projects/, { timeout: 10_000 })
 
     // …und zurück auf den Startwert räumt ihn wieder WEG, statt `tab=activity`
     // stehen zu lassen. Ohne diesen Zweig wäre die saubere Adresse oben eine
@@ -56,7 +55,7 @@ test('der Forge-Tab wird in ?tab= gespiegelt — und der Startwert steht NICHT d
     await expect(page).toHaveURL(/\/forge$/, { timeout: 10_000 })
 })
 
-test('die weitergeleitete Adresse kommt an: /forge?tab=workspaces öffnet den vierten Tab', async ({ page }) => {
+test('die weitergeleitete Adresse kommt an: /forge?tab=workspaces öffnet den dritten Tab', async ({ page }) => {
     await useZooid(page)
     await loginNsec(page, NSEC)
 
@@ -64,7 +63,7 @@ test('die weitergeleitete Adresse kommt an: /forge?tab=workspaces öffnet den vi
     // Redirect + Leser + Rückschreiben ist damit über alle drei Hälften geschlossen.
     await page.goto('/forge?tab=workspaces')
     await expect(page.locator('[data-forge-workspaces]')).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByRole('tab', { name: 'Workspaces', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tab', { name: 'Kanäle', exact: true })).toHaveAttribute('aria-selected', 'true')
 
     // Und die Adresse bleibt, was sie war — das Zurückschreiben beim Mount darf einen
     // GÜLTIGEN Parameter nicht wegräumen.
@@ -81,4 +80,22 @@ test('ein ungültiger Tab-Parameter wird aus der Adresse GERÄUMT, nicht steheng
     await page.goto('/forge?tab=quatsch')
     await expect(page.getByRole('tab', { name: 'Aktivität', exact: true })).toBeVisible({ timeout: 20_000 })
     await expect(page).toHaveURL(/\/forge$/, { timeout: 10_000 })
+})
+
+test('der gestrichene Projekte-Tab wird aus der Adresse GERÄUMT — nicht nur ignoriert', async ({ page }) => {
+    await useZooid(page)
+    await loginNsec(page, NSEC)
+
+    // `?tab=projects` war bis zum 2026-08-23 GÜLTIG und steht damit in Bookmarks und in
+    // geteilten Links. Das unterscheidet ihn von `?tab=quatsch` darüber: ein Nutzer, der
+    // ihn öffnet, hat nichts falsch gemacht. Er muss auf der Aktivität landen, und die
+    // Adresse muss nachziehen — sonst behauptet sie weiter einen Tab, den es nicht gibt,
+    // und wird in dieser Form erneut geteilt.
+    await page.goto('/forge?tab=projects')
+    await expect(page.getByRole('tab', { name: 'Aktivität', exact: true })).toBeVisible({ timeout: 20_000 })
+    await expect(page).toHaveURL(/\/forge$/, { timeout: 10_000 })
+
+    // Und der Tab ist wirklich fort, nicht nur unbeschriftet.
+    await expect(page.getByRole('tab', { name: 'Projekte', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('tab')).toHaveCount(3)
 })

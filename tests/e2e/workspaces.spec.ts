@@ -34,7 +34,7 @@ const joinBuzzRelay = (): void => {
 /**
  * Der Hybrid-Kern: EIN Client, ZWEI Relays gleichzeitig.
  *
- * Der Tab „Workspaces" listet die Räume eines zweiten, fest konfigurierten Space
+ * Der Tab „Kanäle" (bis 2026-08-23 „Workspaces") listet die Räume eines zweiten, fest konfigurierten Space
  * (ein Buzz-Relay), **während** der zooid-Space aktiv bleibt. Erst der Klick auf einen
  * Workspace-Raum stellt den aktiven Space um.
  *
@@ -76,7 +76,7 @@ const roomSpaceUrl = (page: Page): Promise<string> =>
     })
 
 /**
- * Den Tab „Workspaces" auf `/forge` öffnen und seinen Panel liefern.
+ * Den Tab „Kanäle" auf `/forge` öffnen und seinen Panel liefern.
  *
  * Der Panel ist ein schlichtes `<div>` mit `x-show` und KEIN `flux:tab.panel` — die
  * Forge-Bar fährt ohne `flux:tab.group`. Er trägt deshalb keine `tabpanel`-Rolle;
@@ -85,7 +85,7 @@ const roomSpaceUrl = (page: Page): Promise<string> =>
  */
 const oeffneWorkspaces = async (page: Page): Promise<Locator> => {
     await page.goto('/forge')
-    const tab = page.getByRole('tab', { name: 'Workspaces' })
+    const tab = page.getByRole('tab', { name: 'Kanäle' })
     await expect(tab).toBeVisible({ timeout: 20_000 })
     await tab.click()
     const panel = page.locator('[data-forge-workspaces]')
@@ -109,7 +109,11 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
         // `tests/Feature/OrtskartenTest.php` an seiner eigenen Marke).
         await expect(page.getByRole('tab', { name: 'Räume' })).toBeVisible({ timeout: 20_000 })
         await expect(page.getByRole('tab', { name: 'Threads' })).toBeVisible({ timeout: 20_000 })
+        // Beide Beschriftungen: „Workspaces" hiess der Tab bis zum 2026-08-23, „Kanäle"
+        // heisst er seither. Die Zusage ist, dass er in DIESER Bar gar nicht steht — sie
+        // darf nicht dadurch grün werden, dass nur der alte Name verschwunden ist.
         await expect(page.getByRole('tab', { name: 'Workspaces' })).toHaveCount(0)
+        await expect(page.getByRole('tab', { name: 'Kanäle' })).toHaveCount(0)
         await expect(page.getByRole('tab')).toHaveCount(2)
     })
 
