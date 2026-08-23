@@ -200,18 +200,28 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
     let frei: Agent
     /** Bedient einen anderen Kanal und antwortet nur dem Owner — nie weckbar für uns. */
     let fremd: Agent
-    /** Weckbar nach Client-Regeln, aber sein Kanal existiert am Relay nicht. */
-    let phantom: Agent
+    /** Weckbar nach Client-Regeln; sein Kanal ist ARCHIVIERT und lehnt jede Nachricht ab. */
+    let archiv: Agent
+    /** Weckbar nach Client-Regeln; sein Kanal gehoert NICHT zu den Raeumen des Nutzers. */
+    let fremdkanal: Agent
     /** Sein Profil entsteht ERST, während der Vorschlag schon offen ist. */
     let spaet: Agent
 
     const REPO_KANAL = `e2e-p9-kanal-${randomUUID().slice(0, 8)}`
     const REPO_OHNE = `e2e-p9-ohnekanal-${randomUUID().slice(0, 8)}`
     const REPO_FREMD = `e2e-p9-fremd-${randomUUID().slice(0, 8)}`
-    const REPO_PHANTOM = `e2e-p9-phantom-${randomUUID().slice(0, 8)}`
-    /** Existiert am Relay NICHT — genau das ist der Fall, den Test 4 braucht. */
-    const KANAL_PHANTOM = randomUUID()
-    const KANAL_FREMD = randomUUID()
+    const REPO_ARCHIV = `e2e-p9-archiv-${randomUUID().slice(0, 8)}`
+    const REPO_AUSSEN = `e2e-p9-aussen-${randomUUID().slice(0, 8)}`
+    /**
+     * Ein ECHTER Kanal, der archiviert wird: er steht damit in der Raumliste des
+     * Nutzers (sein 39000 bleibt lesbar), nimmt aber keine Nachricht mehr an —
+     * `invalid: channel is archived` (`ingest.rs:2468`, am Teststack gemessen).
+     * Genau die Kombination, die Fall (c) braucht: der Kanal-Riegel laesst die
+     * Meldung zu, der Relay lehnt sie ab.
+     */
+    const KANAL_ARCHIV = randomUUID()
+    /** Existiert am Relay NICHT und steht in keiner Raumliste — der F2-Angriff. */
+    const KANAL_AUSSEN = randomUUID()
 
     test.beforeAll(() => {
         owner = ownerPubkey()
@@ -219,20 +229,29 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
 
         frei = neuerAgent('frei')
         fremd = neuerAgent('fremd')
-        phantom = neuerAgent('phantom')
+        archiv = neuerAgent('archiv')
+        fremdkanal = neuerAgent('aussen')
         spaet = neuerAgent('spaet')
         // Nur die Mitgliedschaft — sein 10100 kommt mitten im Test.
         expect(publish(BUZZ_OWNER_SEC_HEX, ['-k', '9030', '-t', `p=${spaet.pub}`, '-t', 'role=member'])).toContain('success')
 
         seedAgent(frei, [BUZZ_ROOM_GENERAL], 'anyone', [])
-        // Beide Hälften der Eignung fallen: falscher Kanal UND Allowlist ohne uns.
-        seedAgent(fremd, [KANAL_FREMD], 'allowlist', [owner])
-        seedAgent(phantom, [KANAL_PHANTOM], 'anyone', [])
+        // Bedient denselben Kanal wie `frei`, antwortet aber nur dem Owner —
+        // die zweite Haelfte der Eignung faellt, die erste nicht. So misst der
+        // Fall wirklich den Betrachter-Riegel und nicht den Kanal.
+        seedAgent(fremd, [BUZZ_ROOM_GENERAL], 'allowlist', [owner])
+
+        // Ein echter Kanal, der anschliessend archiviert wird.
+        expect(publish(BUZZ_OWNER_SEC_HEX, ['-k', '9007', '-t', `h=${KANAL_ARCHIV}`, '-t', 'name=E2E-P9-Archiv'])).toContain('success')
+        expect(publish(BUZZ_OWNER_SEC_HEX, ['-k', '9002', '-t', `h=${KANAL_ARCHIV}`, '-t', 'archived=true'])).toContain('success')
+        seedAgent(archiv, [KANAL_ARCHIV], 'anyone', [])
+        seedAgent(fremdkanal, [KANAL_AUSSEN], 'anyone', [])
 
         seedRepo(REPO_KANAL, BUZZ_ROOM_GENERAL)
         seedRepo(REPO_OHNE, '')
-        seedRepo(REPO_FREMD, KANAL_FREMD)
-        seedRepo(REPO_PHANTOM, KANAL_PHANTOM)
+        seedRepo(REPO_FREMD, BUZZ_ROOM_GENERAL)
+        seedRepo(REPO_ARCHIV, KANAL_ARCHIV)
+        seedRepo(REPO_AUSSEN, KANAL_AUSSEN)
     })
 
     /**
@@ -241,7 +260,7 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
      * nachträglich rot machen.
      */
     test.afterAll(() => {
-        for (const d of [REPO_KANAL, REPO_OHNE, REPO_FREMD, REPO_PHANTOM]) {
+        for (const d of [REPO_KANAL, REPO_OHNE, REPO_FREMD, REPO_ARCHIV, REPO_AUSSEN]) {
             publish(BUZZ_OWNER_SEC_HEX, ['-k', '5', '-t', `a=30617:${owner}:${d}`])
         }
     })
@@ -297,8 +316,11 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
         expect(weck[0].pubkey).toBe(BUZZ_USER_PUB)
         expect(tagValues(weck[0].tags, 'h')).toEqual([BUZZ_ROOM_GENERAL])
         expect(tagValues(weck[0].tags, 'p')).toEqual([frei.pub])
-        // Der Verweis: Titel, Repo und der kanonische Deep-Link auf das ISSUE.
-        expect(weck[0].content).toContain(marke)
+        // Der Verweis: Repo-Bezeichner und der kanonische Deep-Link auf das
+        // ISSUE. **Der Titel steht bewusst NICHT darin** — er ist fremdsignierter
+        // Text und wurde beim Agenten zum Prompt (Sicherheitsbefund F1, Regeln
+        // in `forgeWakeModels.test.ts`). Genau das wird hier mitgeprueft.
+        expect(weck[0].content).not.toContain(marke)
         expect(weck[0].content).toContain(REPO_KANAL)
         expect(weck[0].content).toContain(`buzz://issue?id=${issues[0].id}&owner=${owner}&d=${REPO_KANAL}`)
     })
@@ -400,11 +422,13 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
         const rumpf = formular.getByLabel('Beschreibung')
 
         await vorschlagGehtAuf(page, rumpf)
-        // Weder der Agent dieses Kanals (Allowlist ohne uns) noch der aus dem
-        // General-Kanal (falsches Repo) darf hier stehen.
-        await expect(agentZeilen(page)).toHaveCount(0)
+        // **Differenzmessung im SELBEN Popover, im SELBEN Kanal**: `frei` und
+        // `fremd` bedienen beide diesen Kanal, nur die Allowlist unterscheidet
+        // sie. Damit misst der Fall den Betrachter-Riegel und nichts sonst.
+        await sucheAgent(page, rumpf, frei.name)
+        await expect(agentZeilen(page).filter({ hasText: frei.name })).toHaveCount(1, { timeout: 30_000 })
         await sucheAgent(page, rumpf, fremd.name)
-        await expect(agentZeilen(page)).toHaveCount(0)
+        await expect(agentZeilen(page).filter({ hasText: fremd.name })).toHaveCount(0)
 
         await rumpf.fill(`Bitte schau drauf, nostr:${fremd.npub} `)
         await page.getByRole('button', { name: 'Issue anlegen' }).click()
@@ -427,24 +451,25 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
     /**
      * NEGATIVBEWEIS (c) — **die Weckmeldung scheitert, der Beitrag bleibt gültig.**
      *
-     * Hergestellt an einem Kanal, den der Relay nicht kennt: er antwortet auf die
-     * kind-9 mit `restricted: not a channel member` (am Teststack gemessen),
-     * während das 1621 durchgeht. Zwei Vorgänge, zwei Ergebnisse — der Beitrag
-     * steht in der Liste, das Formular ist zu, und es steht KEINE
-     * Fehlschlag-Zeile am Issue.
+     * Hergestellt an einem ARCHIVIERTEN Kanal: sein 39000 bleibt lesbar, er
+     * steht also in der Raumliste und kommt am Kanal-Riegel vorbei — der Relay
+     * lehnt die kind-9 aber mit `invalid: channel is archived` ab
+     * (`ingest.rs:2468`, am Teststack gemessen), waehrend das 1621 durchgeht.
+     * Zwei Vorgaenge, zwei Ergebnisse — der Beitrag steht in der Liste, das
+     * Formular ist zu, und es steht KEINE Fehlschlag-Zeile am Issue.
      */
     test('scheitert die Weckmeldung, bleibt das Issue gültig und als gelungen dargestellt', async ({ page }) => {
-        const marke = `P9 Phantom ${randomUUID().slice(0, 8)}`
+        const marke = `P9 Archiv ${randomUUID().slice(0, 8)}`
 
         await useWorkspace(page)
-        await openRepo(page, REPO_PHANTOM)
+        await openRepo(page, REPO_ARCHIV)
         const formular = await issueFormular(page, marke)
         const rumpf = formular.getByLabel('Beschreibung')
 
         // Nach den Client-Regeln ist dieser Agent weckbar — der Vorschlag steht.
         await vorschlagGehtAuf(page, rumpf)
-        await sucheAgent(page, rumpf, phantom.name)
-        const zeile = agentZeilen(page).filter({ hasText: phantom.name })
+        await sucheAgent(page, rumpf, archiv.name)
+        const zeile = agentZeilen(page).filter({ hasText: archiv.name })
         await expect(zeile).toHaveCount(1, { timeout: 30_000 })
         await zeile.click()
 
@@ -464,11 +489,11 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
         const hinweis = page.locator('[data-forge-wake-notice="issue"]')
         await expect(hinweis).toBeVisible({ timeout: 30_000 })
         await expect(hinweis).toHaveAttribute('data-tone', 'warn')
-        await expect(hinweis).toContainText(phantom.name)
+        await expect(hinweis).toContainText(archiv.name)
         // Und die Begründung ist die des RELAYS, nicht unsere Vermutung — nur so
         // ist dieser Fall von „war gar nicht weckbar" zu unterscheiden.
         await expect(hinweis).toContainText('ging nicht raus')
-        await expect(hinweis).toContainText('not a channel member')
+        await expect(hinweis).toContainText('channel is archived')
 
         // ── Und JETZT: der Beitrag ist immer noch gelungen ──────────────────
         await expect(issueZeile).toHaveAttribute('data-status', 'open')
@@ -477,10 +502,54 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
         await expect(page.locator('[data-forge-issue-error]')).toHaveCount(0)
 
         // Am Relay: das Issue liegt da, die Weckmeldung nicht.
-        const adresse = `30617:${owner}:${REPO_PHANTOM}`
+        const adresse = `30617:${owner}:${REPO_ARCHIV}`
         expect(
             events(['-k', '1621', '-t', `a=${adresse}`]).filter((e) => tagValues(e.tags, 'subject')[0] === marke),
         ).toHaveLength(1)
-        expect(events(['-k', '9', '-p', phantom.pub])).toHaveLength(0)
+        expect(events(['-k', '9', '-p', archiv.pub])).toHaveLength(0)
+    })
+
+    /**
+     * ANGRIFF (Sicherheitsbefund F2) — **das Opfer soll in einen fremden Kanal
+     * signieren.**
+     *
+     * `buzz-channel` steht in einem 30617, und ein 30617 darf jedes
+     * Relay-Mitglied ankuendigen; der Relay nennt das Tag ausdruecklich „a
+     * metadata reference, not a routing directive"
+     * (`buzz-relay/src/handlers/ingest.rs:5018`). Ohne den Riegel signierte der
+     * Nutzer hier eine Kanalnachricht in einen Kanal, den er nie gewaehlt hat.
+     *
+     * Der Angreifer hat alles beisammen: ein Repo mit fremder Kanal-UUID und ein
+     * dazu passendes 10100 (`respond_to: anyone`), das den Agenten nach den
+     * Client-Regeln weckbar macht. Es fehlt nur, dass der Kanal zu den Raeumen
+     * dieses Nutzers gehoert.
+     */
+    test('ANGRIFF: ein Kanal ausserhalb der eigenen Raeume bekommt keine Weckmeldung', async ({ page }) => {
+        const marke = `P9 Aussen ${randomUUID().slice(0, 8)}`
+
+        await useWorkspace(page)
+        await openRepo(page, REPO_AUSSEN)
+        const formular = await issueFormular(page, marke)
+        const rumpf = formular.getByLabel('Beschreibung')
+
+        // Kein Vorschlag: der Kanal ist keiner von uns, also ist dort niemand
+        // weckbar. Positivkontrolle davor, damit die Null etwas heisst.
+        await vorschlagGehtAuf(page, rumpf)
+        await sucheAgent(page, rumpf, fremdkanal.name)
+        await expect(agentZeilen(page).filter({ hasText: fremdkanal.name })).toHaveCount(0)
+
+        // Von Hand erwaehnen — der Weg, den ein Angreifer dem Opfer nahelegt.
+        await rumpf.fill(`Bitte schau drauf, nostr:${fremdkanal.npub} `)
+        await page.getByRole('button', { name: 'Issue anlegen' }).click()
+
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: marke }).first()).toBeVisible({ timeout: 30_000 })
+        const hinweis = page.locator('[data-forge-wake-notice="issue"]')
+        await expect(hinweis).toBeVisible({ timeout: 30_000 })
+        await expect(hinweis).toHaveAttribute('data-tone', 'warn')
+        await expect(hinweis).toContainText('nicht zu deinen Räumen')
+
+        // **Der Kernbeweis**: in diesem Kanal liegt nichts von uns.
+        expect(events(['-k', '9', '-t', `h=${KANAL_AUSSEN}`])).toHaveLength(0)
+        expect(events(['-k', '9', '-p', fremdkanal.pub])).toHaveLength(0)
     })
 })
