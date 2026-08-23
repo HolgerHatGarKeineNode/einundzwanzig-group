@@ -439,6 +439,14 @@ test('Alt+↑/↓ wechselt weiterhin den Raum über die Rail (unverändert von P
     await page.goto('/rooms/welcome')
     await expect(page.getByRole('heading', { name: /Willkommen/ })).toBeVisible({ timeout: 15_000 })
 
+    // **Behälter statt Inhalt — dieselbe Falle wie oben (Zeile 150 ff.).** `[data-rail]`
+    // ist sofort da; die Raumliste, aus der `railTargets` das Sprungziel von Alt+↓
+    // berechnet, kommt asynchron vom Relay nach. Drückt der Test in dieses Fenster,
+    // ist „welcome" der einzige bekannte Raum und Alt+↓ hat kein zweites Ziel. Gewartet
+    // wird deshalb auf eine ZWEITE, tatsächlich gerenderte Raumzeile (der Seed hat
+    // „Allgemein" fest unter den zehn beigetretenen Räumen, siehe zooid-testserver.sh).
+    await expect(page.getByRole('button', { name: 'Allgemein' })).toBeVisible({ timeout: 15_000 })
+
     await page.keyboard.press('Alt+ArrowDown')
     await expect(page).toHaveURL(/\/rooms\/(?!welcome$)/, { timeout: 10_000 })
 })
