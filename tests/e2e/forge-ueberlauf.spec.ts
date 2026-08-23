@@ -14,31 +14,40 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
  * an `flux:tabs` ist die Reparatur — dieser Wächter hält ihre Wirkung fest, nach
  * der vorhandenen, mutationsgeprüften Vorlage `room.spec.ts:2976-3009`.
  *
- * ── Zwei Ebenen, weil eine nicht reicht (dieselbe Begründung wie dort) ────────
+ * ── Zwei Ebenen, mit UNTERSCHIEDLICHER Bedeutung ───────────────────────────────
  * `flux:tabs scrollable` rendert `<ui-tabs-scroll-area class="overflow-auto">` um
- * die eigentliche Tab-Leiste. Ein zu breites KIND darin (ein Tab-Label, das durch
- * eine neue Sprache wächst; ein Bug in `scrollable:fade`) erzeugt eine EIGENE
- * horizontale Scrollbar innerhalb dieses Containers — das Dokument bleibt dabei
- * sauber, ein reiner `documentElement`-Wächter meldet grün. Umgekehrt fängt eine
- * Container-Messung allein keinen Überlauf, der AUSSERHALB der Tab-Leiste
- * entsteht. Deshalb werden BEIDE gemessen.
+ * die eigentliche Tab-Leiste — ein bewusst gebauter Scroll-CONTAINER, kein Zufall.
  *
- * ── BEFUND, kein Testfehler: die Tab-Leiste ist bei 320 px/DE derzeit NICHT
- *    überlauffrei ────────────────────────────────────────────────────────────
- * Gemessen (2026-08-23, live gegen diese Fläche): die Tab-Leiste („Aktivität",
- * „Repositories", „Kanäle") misst 293 px Inhalt in einem 288-px-Kasten — 5 px
- * Überlauf, absorbiert vom `overflow-auto`-Container, DOKUMENT bleibt bei
- * 320/320 sauber. Ursache: die Beschriftung „Kanäle" (P1, „Namenskollision beim
- * Workspace-Tab") ist 7 px breiter als „Räume", mit dem die Messungen in
- * `docs/plans/…/messung-b.json` (`scrollable.3-de`: 286/288, KEIN Überlauf)
- * durchgeführt wurden — die Umbenennung wurde nie gegen die 288-px-Passform
- * nachgemessen. Betrifft 7 von 8 Sprachen (nur `pl` passt exakt): en +12, es
- * +12, pt +5, nl +19, hu +33, lv +12 (`docs/plans/…/dbg-forge-ueberlauf-
- * sprachen.json`, in derselben Messung erhoben). Dieser Test bleibt deshalb bei
- * der Tab-Leisten-Assertion ROT — bewusst: er behauptet nicht mehr, als
- * gemessen wurde, und die Alternative (Schwelle aufweichen) würde den Fund
- * verdecken statt ihn zu melden. Siehe Abgabebericht für Einordnung und
- * Fix-Kandidat.
+ * DOKUMENT darf NIEMALS waagerecht scrollen (WCAG 1.4.10) — das ist der
+ * eigentlich gemeldete Fehler, hart geprüft unten.
+ *
+ * Die TAB-LEISTE selbst darf sehr wohl breiter sein als ihr eigener sichtbarer
+ * Ausschnitt — genau DAS ist der Zweck von `overflow-auto` plus
+ * `scrollable:fade`. Belegt in der Messung, die zur Auswahl des Attributs
+ * geführt hat: `docs/plans/…/messung-b.json`, `scrollable.4-de` zeigt
+ * `traegerUeberlauf: 121` als AKZEPTIERTEN Ausgangszustand — ausgewählt, weil
+ * `dokumentUeberlauf: 0` war, nicht weil der Container selbst überlauffrei ist.
+ * Eine Assertion `container.scrollWidth <= container.clientWidth` auf einem
+ * `overflow-auto`-Element verlangt, dass die Scroll-Fläche nie scrollt, und
+ * schlägt genau dann fehl, wenn das Attribut wirkt — sie prüft keinen Fehler,
+ * sondern die Funktionsweise der Reparatur. Deshalb steht hier KEINE solche
+ * Assertion (frühere Fassung hatte eine, per `test.fail()` markiert — ersetzt,
+ * s. u.).
+ *
+ * Was die Tab-Leiste stattdessen schuldet: JEDER Tab bleibt ERREICHBAR — beim
+ * Fokussieren holt die Scroll-Area ihn vollständig in den sichtbaren Bereich.
+ * Das ist die Zusage, die tatsächlich gilt (und die bislang niemand bewacht
+ * hat), geprüft im zweiten Test unten.
+ *
+ * ── Messprotokoll, kein Testfall ────────────────────────────────────────────────
+ * Die Umbenennung „Räume" → „Kanäle" (P1) macht die Beschriftung in den meisten
+ * Sprachen breiter und damit die Container-Scrollstrecke länger als in der
+ * Messung, die zur Auswahl von `scrollable` führte (dort noch „Räume", 67 px).
+ * Das ist ein reales Verschiebe-Protokoll — festgehalten in
+ * `docs/plans/2026-08-23T1745-forge-mobil-desktop-amethyst/messung-p3-tabs-
+ * kanaele-sprachen.json` (App-Repo, gitignored), NICHT als Assertion hier: der
+ * Container DARF scrollen, also ist „er scrollt mehr als vorher" kein
+ * Fehlschlag, den ein Test einfordern sollte.
  *
  * ── Kein Buzz-Stack nötig ──────────────────────────────────────────────────────
  * Die Tab-Leiste rendert der SERVER, sobald `config('group.workspace_url')`
@@ -62,15 +71,31 @@ async function openForgeAt320(page: Page): Promise<void> {
 }
 
 /**
+ * Rand-Abstand des LETZTEN Tabs zum rechten Rand seiner Scroll-Area, gemessen
+ * komplett im Browser-Kontext (kein Round-Trip pro Rect, keine Locator-Handles
+ * ueber die Bridge) — negativ/0 heisst „liegt innerhalb", positiv heisst „ragt
+ * ueber den sichtbaren Ausschnitt hinaus".
+ */
+async function letzterTabUeberstand(page: Page): Promise<number> {
+    return page.evaluate(() => {
+        const area = document.querySelector('ui-tabs-scroll-area')
+        const tabs = Array.from(document.querySelectorAll('[data-flux-tab]'))
+        const letzter = tabs.at(-1)
+        if (!area || !letzter) return Number.NaN
+        return Math.round(letzter.getBoundingClientRect().right - area.getBoundingClientRect().right)
+    })
+}
+
+/**
  * NEGATIVKONTROLLE — beide Richtungen.
  *
  * Ein Prüfstand ohne bestandene Kontrolle ist wertlos: ohne sie wüsste niemand,
  * ob ein grüner Lauf bedeutet „es gibt keinen Überlauf" oder „die Messung
  * greift gar nicht". Die Kontrolle setzt bewusst NICHT voraus, dass die reale
- * Tab-Leiste sauber startet (das ist die eigenständige Frage des Tests
- * darunter, und sie ist derzeit NICHT sauber, s.o.) — sie beweist nur, dass ein
- * GROSSER, eindeutig künstlicher Ausschlag erkannt wird und dass die
- * Container-Ebene ihren eigenen Überlauf nicht ins Dokument durchreicht.
+ * Tab-Leiste in ihrem CONTAINER überlauffrei startet (das darf sie nicht sein,
+ * s. Dateikopf) — sie beweist nur, dass ein GROSSER, eindeutig künstlicher
+ * Ausschlag erkannt wird und dass die Container-Ebene ihren eigenen Überlauf
+ * nicht ins Dokument durchreicht.
  *
  *   - bekannt-schlecht „container": ein 900 px breiter Spacer ALS KIND der
  *     Tab-Leiste selbst (innerhalb `[data-flux-tabs]`, also innerhalb des
@@ -156,31 +181,66 @@ test('/forge laeuft bei 320 px nicht waagerecht ueber — Dokument (WCAG 1.4.10)
 })
 
 /**
- * DER WÄCHTER SELBST, TABLIST-EBENE — bekannter, offener Befund (s. Dateikopf):
- * die „Kanäle"-Umbenennung (P1) wurde nie gegen die 288-px-Passform der
- * Tab-Leiste nachgemessen und überschreitet sie in 7 von 8 Sprachen (DE +5 px).
- * `test.fail()` MARKIERT das bewusst, statt es zu verschweigen oder die
- * Schwelle aufzuweichen: die Assertion bleibt scharf (`<= clientWidth`, keine
- * Toleranz), der Lauf zählt den derzeitigen Fehlschlag als ERWARTET und bricht
- * das Verkettungs-Tor deshalb nicht ab. Sobald das Layout nachgezogen ist (oder
- * die Toleranz bewusst akzeptiert und die DoD entsprechend korrigiert wird),
- * wird dieser Test unerwartet GRÜN — Playwright meldet das dann als eigenen
- * Fehler, und `test.fail()` fliegt hier raus.
+ * DER WÄCHTER SELBST, ERREICHBARKEIT — die Zusage, die die Tab-Leiste bei 320 px
+ * WIRKLICH schuldet: nicht „nie scrollen" (das ist ihre Funktion), sondern
+ * „jeder Tab ist per Tastatur erreichbar". `Activatable.activate()`
+ * (flux-pro `js/mixins/activatable.js`, kompiliert in `dist/flux.module.js`)
+ * ruft beim Fokussieren `this.el.scrollIntoView({ block: "nearest" })` — dieser
+ * Test hält fest, dass das für den LETZTEN, potenziell ausgescrollten Tab
+ * tatsächlich passiert. Ohne diesen Mechanismus (oder bei einem Regressions-Bug
+ * darin) bliebe ein Tab hinter dem sichtbaren Rand stehen — ERREICHBAR über
+ * Tastatur, aber ohne dass irgendjemand ihn SEHEN kann.
+ *
+ * Negativkontrolle: `Element.prototype.scrollIntoView` wird vor dem Fokus zu
+ * einem No-op — das MUSS die Erreichbarkeits-Prüfung rot machen, sonst prüft
+ * sie nicht den Scroll-Mechanismus, sondern nur, dass der letzte Tab zufällig
+ * schon im sichtbaren Bereich lag.
  */
-test.fail(
-    '/forge laeuft bei 320 px nicht waagerecht ueber — Tab-Leiste (WCAG 1.4.10) — BEKANNTER BEFUND, s. Dateikopf',
-    async ({ page }) => {
-        await openForgeAt320(page)
-        const tablist = page.locator('ui-tabs-scroll-area')
-        await expect(tablist).toBeVisible({ timeout: 20_000 })
-        await expect(page.getByRole('tab', { name: 'Aktivität', exact: true })).toBeVisible({ timeout: 20_000 })
-        await expect(page.getByRole('tab')).toHaveCount(3)
+test('der letzte Tab wird beim Fokussieren vollstaendig sichtbar (Tastatur-Erreichbarkeit, 320px)', async ({ page }) => {
+    await openForgeAt320(page)
+    const tablist = page.locator('ui-tabs-scroll-area')
+    await expect(tablist).toBeVisible({ timeout: 20_000 })
+    const tabs = page.getByRole('tab')
+    await expect(tabs).toHaveCount(3)
+    const letzter = tabs.last()
 
-        const container = await tablist.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
-        console.log(`[forge-ueberlauf] Tablist @320px: scrollWidth=${container.scrollWidth} clientWidth=${container.clientWidth}`)
-        expect(
-            container.scrollWidth,
-            `Die Tab-Leiste von /forge scrollt bei 320 px horizontal — scrollWidth=${container.scrollWidth} clientWidth=${container.clientWidth}`,
-        ).toBeLessThanOrEqual(container.clientWidth)
-    },
-)
+    // Vorbedingung: der letzte Tab ist überhaupt AUSGESCROLLT, sonst prüft der Test
+    // nichts (ein Tab, der schon sichtbar ist, kann nicht unsichtbar werden).
+    const vorUeberstand = await letzterTabUeberstand(page)
+    expect(vorUeberstand, `Der letzte Tab liegt schon vor dem Fokus (Rand-Abstand ${vorUeberstand}px) im sichtbaren Bereich — der Test kann die Erreichbarkeits-Zusage so nicht prüfen.`)
+        .toBeGreaterThan(0)
+
+    await letzter.focus()
+    // scrollIntoView läuft über den Fokus-Handler, nicht synchron mit .focus() —
+    // 1px Toleranz gegen Rundung (Sub-Pixel-Layout, deviceScaleFactor).
+    await expect.poll(() => letzterTabUeberstand(page), { timeout: 5_000, message: 'Der letzte Tab wurde beim Fokussieren nicht vollstaendig sichtbar' })
+        .toBeLessThanOrEqual(1)
+})
+
+/**
+ * KONTROLLGRUPPE zum Erreichbarkeits-Test: OHNE `scrollIntoView` bleibt der
+ * letzte Tab nach dem Fokus ausserhalb des sichtbaren Bereichs — der Test oben
+ * prueft also wirklich den Scroll-Mechanismus, nicht einen Zufallstreffer.
+ */
+test('KONTROLLE: ohne scrollIntoView bleibt der letzte Tab nach Fokus UNSICHTBAR', async ({ page }) => {
+    await openForgeAt320(page)
+    const tablist = page.locator('ui-tabs-scroll-area')
+    await expect(tablist).toBeVisible({ timeout: 20_000 })
+    const tabs = page.getByRole('tab')
+    await expect(tabs).toHaveCount(3)
+    const letzter = tabs.last()
+
+    const vorUeberstand = await letzterTabUeberstand(page)
+    expect(vorUeberstand, `Der letzte Tab liegt schon vor dem Fokus (Rand-Abstand ${vorUeberstand}px) im sichtbaren Bereich — die Kontrolle kann so nichts beweisen.`)
+        .toBeGreaterThan(0)
+
+    await page.evaluate(() => {
+        Element.prototype.scrollIntoView = () => undefined
+    })
+
+    await letzter.focus()
+    await page.waitForTimeout(500)
+    const nachUeberstand = await letzterTabUeberstand(page)
+    expect(nachUeberstand, 'Mit deaktiviertem scrollIntoView wurde der letzte Tab dennoch vollstaendig sichtbar — die Kontrolle beweist nichts, weil ein anderer Mechanismus denselben Effekt erzeugt.')
+        .toBeGreaterThan(0)
+})
