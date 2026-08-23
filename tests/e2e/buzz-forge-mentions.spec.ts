@@ -218,10 +218,17 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
      * `invalid: channel is archived` (`ingest.rs:2468`, am Teststack gemessen).
      * Genau die Kombination, die Fall (c) braucht: der Kanal-Riegel laesst die
      * Meldung zu, der Relay lehnt sie ab.
+     *
+     * **`let`, nicht `const`, und gewuerfelt wird in `beforeAll`.** Bei
+     * `fullyParallel` kann derselbe Worker den `beforeAll`-Block ein zweites Mal
+     * fahren, ohne das Modul neu zu laden — mit einer festen UUID lief das
+     * Anlegen dann gegen den bereits ARCHIVIERTEN Kanal seines ersten Laufs und
+     * scheiterte. Genau so im Vollauf aufgeschlagen (Port 3044), waehrend die
+     * Datei allein grün war.
      */
-    const KANAL_ARCHIV = randomUUID()
+    let KANAL_ARCHIV = randomUUID()
     /** Existiert am Relay NICHT und steht in keiner Raumliste — der F2-Angriff. */
-    const KANAL_AUSSEN = randomUUID()
+    let KANAL_AUSSEN = randomUUID()
 
     test.beforeAll(() => {
         owner = ownerPubkey()
@@ -242,8 +249,28 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
         seedAgent(fremd, [BUZZ_ROOM_GENERAL], 'allowlist', [owner])
 
         // Ein echter Kanal, der anschliessend archiviert wird.
-        expect(publish(BUZZ_OWNER_SEC_HEX, ['-k', '9007', '-t', `h=${KANAL_ARCHIV}`, '-t', 'name=E2E-P9-Archiv'])).toContain('success')
-        expect(publish(BUZZ_OWNER_SEC_HEX, ['-k', '9002', '-t', `h=${KANAL_ARCHIV}`, '-t', 'archived=true'])).toContain('success')
+        //
+        // Geprueft wird der ZUSTAND, nicht die Quittung: `nak` druckt auch bei
+        // Ablehnung, und ein zweiter `beforeAll`-Durchlauf im selben Worker
+        // faende den Kanal bereits vor. Beide Sendungen duerfen deshalb
+        // fehlschlagen — was zaehlt, ist, dass der Kanal am Ende existiert UND
+        // archiviert ist.
+        KANAL_ARCHIV = randomUUID()
+        KANAL_AUSSEN = randomUUID()
+        publish(BUZZ_OWNER_SEC_HEX, ['-k', '9007', '-t', `h=${KANAL_ARCHIV}`, '-t', 'name=E2E-P9-Archiv'])
+        publish(BUZZ_OWNER_SEC_HEX, ['-k', '9002', '-t', `h=${KANAL_ARCHIV}`, '-t', 'archived=true'])
+        // Zustand 1: sein 39000 ist lesbar — sonst stuende er in keiner
+        // Raumliste und der Kanal-Riegel (F2) verwuerfe die Meldung, bevor der
+        // Relay sie ueberhaupt sieht. Der Fall (c) maesse dann etwas anderes.
+        expect(
+            events(['-k', '39000', '-d', KANAL_ARCHIV]).length,
+            'der archivierte Kanal muss in der Raumliste stehen',
+        ).toBe(1)
+        // Zustand 2: er lehnt wirklich ab.
+        expect(
+            publish(BUZZ_OWNER_SEC_HEX, ['-k', '9', '-t', `h=${KANAL_ARCHIV}`, '-c', 'Sonde']),
+            'der Kanal muss archiviert sein, sonst gaebe es keinen Fehlschlag zu messen',
+        ).toContain('channel is archived')
         seedAgent(archiv, [KANAL_ARCHIV], 'anyone', [])
         seedAgent(fremdkanal, [KANAL_AUSSEN], 'anyone', [])
 
