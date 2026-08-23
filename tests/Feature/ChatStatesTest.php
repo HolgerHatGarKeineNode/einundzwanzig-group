@@ -90,9 +90,35 @@ test('Raum-Menü (C4): Mention-Popover + Kopier-/Info-Einträge + Info-Modal —
     $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.room', ['h' => 'welcome']))->assertOk();
 
     // @-Mention-Autocomplete: Popover hinter mentionOpen, Auswahl ruft pickMention.
-    $res->assertSee('x-if="mentionOpen"', false);
+    //
+    // Die Bedingung trägt seit dem Design-Pass (2026-08-23) ZUSÄTZLICH den
+    // Kontext. `mentionOpen` ist EIN Zustand für Raum- und Thread-Composer;
+    // vorher stand bei offenem Popover deshalb immer ein zweiter, wortgleicher
+    // Block im DOM. Solange die Liste nur ein `div` war, war das ein
+    // Test-Ärgernis (`.first()` traf den unsichtbaren). Mit `role="listbox"`
+    // wäre es ein zweites, identisches Listenfeld im Barrierefreiheitsbaum.
+    $res->assertSee('x-if="mentionOpen && _mentionTarget === \'main\'"', false);
     $res->assertSee('pickMention(item)', false);
     $res->assertSee('onComposerInput($event.target,', false);
+
+    // Die Vorschlagsliste ist als Listenfeld ausgezeichnet, und die Ansage steht
+    // AUSSERHALB des x-if — eine Live-Region, die gemeinsam mit ihrem Inhalt in
+    // den Baum kommt, wird von mehreren Screenreadern nicht vorgelesen. Die
+    // Rolle des Feldes selbst bleibt `textbox`: „ARIA in HTML" erlaubt an einer
+    // `<textarea>` kein `role="combobox"`, damit ist die APG-Editable-Combobox
+    // hier verschlossen und die Ansage der einzige Weg.
+    $res->assertSee('role="listbox"', false);
+    $res->assertSee('data-mention-ansage="room"', false);
+
+    // Agenten-Vorschlag (kind 10100): die Zeile trägt ihr eigenes Merkmal.
+    // Ohne `data-agent` liesse sich „auf zooid erscheint KEIN Agent" im Browser
+    // nicht prüfen — man könnte einen Agentenvorschlag dort nicht von einem
+    // Mitgliedervorschlag unterscheiden, und der Negativbeweis wäre eine
+    // Behauptung. `null` statt `'false'`: Alpine entfernt das Attribut dann ganz,
+    // sonst stünde an JEDER Zeile ein `data-agent` und der Locator träfe alle.
+    $res->assertSee(":data-agent=\"item.isAgent ? 'true' : null\"", false);
+    $res->assertSee('x-if="item.isAgent"', false);
+    $res->assertSee('data-mention-popover="room"', false);
 
     // Web-Popover: Kopier-/Info-Einträge (nur lesen).
     $res->assertSee('copyNevent(m)', false);
