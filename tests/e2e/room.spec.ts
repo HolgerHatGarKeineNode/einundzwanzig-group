@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Locator } from './support/fixtures'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { useZooid, ZOOID_WS, ZOOID_PORT } from './support/zooid'
 import { loginNsec } from './support/login'
@@ -18,10 +18,28 @@ type RelayEvent = { id: string; pubkey: string; kind: number; content: string; t
  * Fragt das Test-zooid (member-only → mit AUTH) nach dem ersten passenden Event des
  * Kinds. `h=null` lässt den `#h`-Filter weg (für Events ohne Group-Tag, z.B. kind-1984 Report).
  */
+/*
+ * **Eine leere Antwort heißt „gerade nichts bekommen", nicht „liegt nicht".** Gemessen am
+ * Test-zooid (2026-08-23): dieselbe Abfrage lieferte in einer Schleife ab dem vierten
+ * Aufruf zwölfmal hintereinander NULL Zeilen, während unmittelbar davor und danach
+ * dieselben drei Events kamen — die AUTH-Runde der wiederholten Verbindungen kommt unter
+ * Last nicht immer zum Abschluss. Deshalb gilt für jeden Aufrufer: eine einzelne leere
+ * Antwort ist kein Befund. Fast alle Stellen wickeln das schon in `expect.poll`; wer das
+ * nicht tut, muss selbst wiederholen (siehe `seedMessage`).
+ *
+ * `timeout` + `catch`: hängt die AUTH-Runde ganz, blockierte `execFileSync` sonst bis zum
+ * Test-Timeout und der Fehler zeigte auf den Test statt auf die Abfrage. Ein Abbruch wird
+ * wie „nichts gefunden" behandelt — genau das, was jeder Aufrufer ohnehin erwartet.
+ */
 function queryRelayEvent(pred: (e: RelayEvent) => boolean, h: string | null = 'welcome', kind = 9): RelayEvent | undefined {
     const args = ['req', '-k', String(kind), ...(h ? ['-t', `h=${h}`] : []), '--auth', '--sec', NSEC, ZOOID_WS]
-    return execFileSync(NAK, args)
-        .toString()
+    let roh: string
+    try {
+        roh = execFileSync(NAK, args, { timeout: 20_000 }).toString()
+    } catch {
+        return undefined
+    }
+    return roh
         .trim()
         .split('\n')
         .filter(Boolean)
@@ -2670,9 +2688,69 @@ function seedAuthor(sec: string, h: string): string {
     return pub
 }
 
-/** Publiziert eine kind-9-Nachricht als `sec` im Raum `h`; gibt den Marker-Text. */
-function seedMessage(sec: string, h: string, marker: string): void {
-    execFileSync(NAK, ['event', '--auth', '--sec', sec, '-k', '9', '-t', `h=${h}`, '-c', marker, ZOOID_WS])
+/**
+ * Publiziert eine kind-9-Nachricht als `sec` im Raum `h` — und kehrt erst zurück, wenn
+ * sie am Relay LIEGT.
+ *
+ * **`nak event` beweist nichts über die Annahme.** Es beendet sich mit Exit 0 und druckt
+ * das volle Event-JSON, auch wenn der Relay ablehnt; die Quittung steht nur im Klartext
+ * der letzten Zeile (`… success.` gegen `… failed: msg: <grund>`). Ein `execFileSync`,
+ * das nicht wirft, hieß hier also lediglich „gesendet", nicht „liegt". Genau daran fiel
+ * `P1: 9005 von Nicht-Admin wird abgelehnt` im Gesamtlauf mit „Seed-Nachricht muss am
+ * Relay liegen" — isoliert grün, weil dort niemand dazwischenfunkt.
+ *
+ * Zwei Stufen, weil eine nicht reicht:
+ *  1. **Quittung lesen.** Fehlt `success`, ist es eine Ablehnung. Die kann transient
+ *     sein: die Mitgliedschaft entsteht relay-seitig erst in `OnEventSaved`
+ *     (`zooid/instance.go:421` → `Groups.AddMember`), also NACH dem Speichern des
+ *     9021 aus `seedAuthor()` — ein sofort folgendes kind 9 kann in
+ *     „restricted: you are not a member of that group" laufen. Deshalb wird der
+ *     Publish wiederholt, nicht sofort aufgegeben. Bleibt es dabei, wirft dieser
+ *     Helfer MIT dem Grund des Relays, statt den Fehlschlag an den nächsten `expect`
+ *     weiterzureichen, wo er wie ein Produktfehler aussieht.
+ *  2. **Sichtbarkeit abwarten.** Angenommen heißt nicht sofort abfragbar; die Rückfrage
+ *     läuft deshalb gegen dieselbe Query, die die Tests danach benutzen.
+ *
+ * Der Rückgabewert ist das gefundene Event — wer es braucht, spart sich die zweite
+ * Abfrage und damit ein zweites Rennen.
+ */
+function seedMessage(sec: string, h: string, marker: string): RelayEvent {
+    let letzteQuittung = ''
+    for (let versuch = 1; versuch <= 3; versuch++) {
+        // `spawnSync`, nicht `execFileSync`: die Quittung steht auf STDERR („publishing to
+        // … success." / „… failed: msg: <grund>"), und `execFileSync` gibt nur stdout
+        // zurück — dort liegt bloß das Event-JSON, das der Relay nie gesehen haben muss.
+        const lauf = spawnSync(NAK, ['event', '--auth', '--sec', sec, '-k', '9', '-t', `h=${h}`, '-c', marker, ZOOID_WS], {
+            encoding: 'utf8',
+        })
+        letzteQuittung = `${lauf.stdout ?? ''}${lauf.stderr ?? ''}`
+
+        if (letzteQuittung.includes('success')) {
+            // Sichtbarkeit: bis zu ~5 s, in kurzen Schritten. Der Normalfall trifft beim
+            // ersten Versuch — die Schleife kostet dann nichts.
+            for (let sicht = 1; sicht <= 15; sicht++) {
+                const treffer = queryRelayEvent((e) => e.content === marker, h)
+                if (treffer) {
+                    // Nur wenn tatsächlich nachgefasst werden musste — sonst schweigt der
+                    // Helfer. Diese Zeile ist der einzige Ort, an dem sichtbar wird, wie
+                    // oft der Relay unter Last nachhinkt; ohne sie verschwiegen die
+                    // Wiederholungen genau das Problem, gegen das sie eingebaut sind.
+                    if (versuch > 1 || sicht > 1) {
+                        console.log(`[seed] h=${h} kam erst nach ${versuch} Publish- und ${sicht} Abfrage-Versuchen an`)
+                    }
+
+                    return treffer
+                }
+                sleepSync(200)
+            }
+        } else {
+            console.log(`[seed] h=${h} Versuch ${versuch} abgelehnt: ${letzteQuittung.trim().split('\n').pop() ?? ''}`)
+        }
+        sleepSync(300 * versuch)
+    }
+    throw new Error(
+        `Seed-Nachricht kam nicht am Relay an (h=${h}, marker=${marker}) — letzte Quittung: ${letzteQuittung.trim().split('\n').pop()}`,
+    )
 }
 
 /** Loggt mit beliebigem Secret ein und öffnet einen Raum (Admin-Login = ADMIN). */
@@ -2790,9 +2868,10 @@ test('P1: Admin-Löschung propagiert live an offene Zweit-Clients (9005, ohne Re
 test('P1: 9005 von Nicht-Admin wird abgelehnt — Ziel-Nachricht überlebt', async () => {
     const author = seedAuthor(MOD_AUTHOR, 'mod')
     const marker = `Mod-Gate9005-${Math.floor(Math.random() * 1e9)}`
-    seedMessage(MOD_AUTHOR, 'mod', marker)
-    const target = queryRelayEvent((e) => e.content === marker, 'mod')
-    expect(target, 'Seed-Nachricht muss am Relay liegen').toBeTruthy()
+    // Kein zweites `queryRelayEvent` mehr: `seedMessage` gibt das Event zurück, das es
+    // selbst am Relay bestätigt hat. Die frühere zweite Abfrage war ein eigenes Rennen —
+    // und genau sie riss im Gesamtlauf.
+    const target = seedMessage(MOD_AUTHOR, 'mod', marker)
 
     // MOD_AUTHOR ist Relay-Member (allowpubkey oben), aber KEIN can_manage-Admin.
     // Sein 9005 muss vom Relay verworfen werden — nak-Fehler ignorieren, entscheidend
@@ -2817,9 +2896,8 @@ test('P1: 9005 von Nicht-Admin wird abgelehnt — Ziel-Nachricht überlebt', asy
 test('P1: Kaltstart holt verpasste Admin-Löschung nach (loadRoomDeletes, ohne Reload-Klick)', async ({ page }) => {
     seedAuthor(MOD_AUTHOR, 'mod')
     const marker = `Mod-Repair-${Math.floor(Math.random() * 1e9)}`
-    seedMessage(MOD_AUTHOR, 'mod', marker)
-    const target = queryRelayEvent((e) => e.content === marker, 'mod')
-    expect(target).toBeTruthy()
+    // Zwilling der Stelle oben, dieselbe Bauform, derselbe Grund — siehe `seedMessage`.
+    const target = seedMessage(MOD_AUTHOR, 'mod', marker)
 
     // 1) Viewer öffnet den Raum, SIEHT die Nachricht → sie landet im Warm-Cache (IDB).
     await openRoom(page, 'mod')
