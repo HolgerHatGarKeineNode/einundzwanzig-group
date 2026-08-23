@@ -102,6 +102,7 @@ test('Raum-Menü (C4): Mention-Popover + Kopier-/Info-Einträge + Info-Modal —
     // sonst stünde an JEDER Zeile ein `data-agent` und der Locator träfe alle.
     $res->assertSee(":data-agent=\"item.isAgent ? 'true' : null\"", false);
     $res->assertSee('x-if="item.isAgent"', false);
+    $res->assertSee('data-mention-popover="room"', false);
 
     // Web-Popover: Kopier-/Info-Einträge (nur lesen).
     $res->assertSee('copyNevent(m)', false);
