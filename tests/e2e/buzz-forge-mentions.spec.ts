@@ -470,7 +470,14 @@ test.describe('Buzz-Workspace: Erwähnung in der Forge weckt über den Projektka
         // Zeile darunter bliebe grün, weil ein abgelehntes Ereignis ebenfalls
         // nirgends liegt. Genau so gemessen (Mutation „planWake meldet immer
         // ready"): ohne diese Zeile war der Fall grün.
-        await expect(hinweis).toContainText('Hier reagiert niemand auf dich')
+        //
+        // Seit dem Design-Pass (2026-08-23) beginnt JEDE Nullfall-Meldung mit
+        // „Niemand geweckt:" — die gemeinsame Hälfte trennt die Fälle also nicht
+        // mehr. Geprüft wird deshalb die unterscheidende Hälfte, und ausdrücklich
+        // gegen die des Fehlschlags: „ging nicht raus" hiesse, dass eine Meldung
+        // sehr wohl unterwegs war.
+        await expect(hinweis).toContainText('antwortet in diesem Kanal nicht auf dich')
+        await expect(hinweis).not.toContainText('ging nicht raus')
 
         expect(events(['-k', '9', '-p', fremd.pub])).toHaveLength(0)
     })

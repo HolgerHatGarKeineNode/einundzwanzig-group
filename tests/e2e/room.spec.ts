@@ -1523,7 +1523,14 @@ test('C4: @-Mention fügt nostr:npub ein, trägt p-Tag, rendert beide Erwähnung
     // Fließtext hätte er ohnehin nicht geholfen. Der Container ist die belastbare
     // Grenze: er gehört dem Composer und kann nie Nachrichteninhalt enthalten.
     const mentionPopover = page.locator('.surface-card.absolute.bottom-full.left-0')
-    const suggestion = mentionPopover.getByRole('button', { name: /Relay Admin/ })
+    // `option` und nicht mehr `button`: die Vorschlagsliste ist seit dem
+    // Design-Pass (2026-08-23) ein `role="listbox"` mit `role="option"`-Zeilen.
+    // Die Elemente sind weiterhin `<button>` — der Klickpfad unten ist unberührt
+    // —, aber ihre ROLLE ist die einer Auswahl in einer Liste, und danach fragt
+    // `getByRole`. Der Name kommt jetzt aus einem `aria-label`, das Name, „Agent"
+    // und npub-Kurzform zusammensetzt; für einen Menschen ohne Kurzform ist er
+    // unverändert der blosse Anzeigename.
+    const suggestion = mentionPopover.getByRole('option', { name: /Relay Admin/ })
     // Text zuerst, dann `@Rel` → der Vorschlag ersetzt das @-Token an Ort und
     // Stelle (Directory lädt async → tippen wiederholen, bis der Vorschlag steht).
     // Der KOMPLETTE Draft — beide Autocompletes samt Zwischenprüfungen — steht in
@@ -1590,7 +1597,8 @@ test('C4: Senden bei offenem @-Popover schließt das Popover', async ({ page }) 
     // auf „Profil anzeigen: …" trennte den Vorschlag von den Chip-Buttons — die
     // gibt es seit dem 2026-08-16 nicht mehr (Stage-A-Befund p8-c4-umbau.md).
     const mentionPopover = page.locator('.surface-card.absolute.bottom-full.left-0')
-    const suggestion = mentionPopover.getByRole('button', { name: /Relay Admin/ })
+    // `option` statt `button` — siehe die Begründung am ersten C4-Fall.
+    const suggestion = mentionPopover.getByRole('option', { name: /Relay Admin/ })
     await expect(async () => {
         await composer.fill('')
         await composer.pressSequentially('@Relay')
