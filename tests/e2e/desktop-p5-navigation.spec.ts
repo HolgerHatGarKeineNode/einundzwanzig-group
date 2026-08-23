@@ -16,6 +16,13 @@
  * wäre der Feature-Test grün und die Rolle stünde trotzdem im fertigen DOM. Erst hier,
  * nach dem Alpine-Boot, ist die Aussage vollständig.
  *
+ * ── Seit P4: auf `/forge` trägt der NAVIGATOR die Ortsangabe ───────────────────────
+ *
+ * Die Ortskarten-Leiste endet dort ab `xl` (Begründung und Messwerte in
+ * `⚡forge.blade.php`). Der Kernbeweis unten klickt deshalb weiter durch alle drei Orte,
+ * prüft die Auszeichnung auf `/forge` aber an der Rail-Zeile — und zusätzlich, dass es
+ * wirklich nur EINE sichtbare gibt. Genau das war vorher nicht der Fall.
+ *
  * Artikel kommen roh über `nak`, `test`/`expect` aus `support/board-fixtures.ts` —
  * dieselbe Begründung wie in `desktop-article.spec.ts`: `/articles` braucht einen `serve`
  * mit gesetzter `NOSTR_BOARD_URL`.
@@ -116,13 +123,34 @@ test('KERNBEWEIS: kein role="tab" im LEBENDEN DOM, genau ein aria-current — un
     await expect(page.locator('[data-ortskarte="artikel"]')).toBeVisible({ timeout: 20_000 })
     expect((await leiste(page)).aktiv).toEqual(['artikel'])
 
+    // ── Ab `/forge` wechselt die Zusage den TRÄGER (P4) ─────────────────────────────
+    // Bis P4 trug die Ortskarte „Forge" hier `aria-current` — und die Rail-Zeile
+    // gleichzeitig auch. Auf `/forge` @1920 waren das ZWEI sichtbare Elemente mit
+    // demselben `href=/forge`; bei 1279 px eines. Zwei „du bist hier"-Markierungen auf
+    // dasselbe Ziel sind keine Redundanz, sondern eine Zweideutigkeit.
+    //
+    // Deshalb endet die Leiste auf dieser Fläche ab `xl`. Die Frage „wo bin ich"
+    // beantwortet dort der Navigator — geprüft wird sie also weiter, nur an dem
+    // Element, das sie jetzt trägt. Der Durchklick bleibt vollständig.
     await page.locator('[data-ortskarte="forge"]').click()
     await page.waitForURL('**/forge', { timeout: 20_000 })
-    await expect(page.locator('[data-ortskarte="forge"]')).toBeVisible({ timeout: 20_000 })
-    expect((await leiste(page)).aktiv).toEqual(['forge'])
+    await expect(page.locator('[data-rail-fuss="forge"]')).toBeVisible({ timeout: 20_000 })
+    await expect(
+        page.locator('[data-ortskarte="forge"]'),
+        'Die Ortsleiste steht auf /forge ab xl noch im Bild — dann trägt die Seite zwei aria-current.',
+    ).toBeHidden()
+
+    const aufForge = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('[aria-current="page"]')]
+            .filter((el) => el.checkVisibility?.() !== false && el.getBoundingClientRect().width > 0)
+            .map((el) => ({ inRail: !!el.closest('[data-rail]'), href: (el.getAttribute('href') ?? '').replace(/^https?:\/\/[^/]+/, '') })),
+    )
+    expect(aufForge, `Auf /forge tragen ${aufForge.length} sichtbare Elemente aria-current: ${JSON.stringify(aufForge)}`).toHaveLength(1)
+    expect(aufForge[0]).toEqual({ inRail: true, href: '/forge' })
 
     // Und zurück — der Weg funktioniert in beide Richtungen, nicht nur vom Chat weg.
-    await page.locator('[data-ortskarte="chat"]').click()
+    // Von `/forge` aus führt ihn der Navigator, weil die Leiste dort nicht mehr steht.
+    await page.locator('[data-rail]').getByRole('link', { name: 'Chat', exact: true }).click()
     await page.waitForURL('**/spaces', { timeout: 20_000 })
     await expect(page.locator('[data-ortskarte="chat"]')).toBeVisible({ timeout: 20_000 })
     expect((await leiste(page)).aktiv).toEqual(['chat'])
