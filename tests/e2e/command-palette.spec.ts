@@ -439,6 +439,28 @@ test('Alt+↑/↓ wechselt weiterhin den Raum über die Rail (unverändert von P
     await page.goto('/rooms/welcome')
     await expect(page.getByRole('heading', { name: /Willkommen/ })).toBeVisible({ timeout: 15_000 })
 
+    // **Behälter statt Inhalt — dieselbe Falle wie oben (Zeile 150 ff.), und in einer
+    // zweiten, schärferen Form.** `[data-rail]` ist sofort da; die Raumliste, aus der
+    // `railTargets` das Sprungziel von Alt+↓ berechnet, kommt asynchron vom Relay nach.
+    //
+    // Die erste Fassung wartete nur auf eine ZWEITE Raumzeile („Allgemein") und blieb
+    // im Vollauf trotzdem stehen (2026-08-23: 14 Polls über 10 s, URL unverändert
+    // „welcome"). Grund: die Rail aggregiert ALLE Mitgliedschaften (39002) über eine
+    // eigene, von der Raumseite UNABHÄNGIGE Subscription — dass die Seite selbst schon
+    // „Willkommen" zeigt und „Allgemein" schon als Rail-Zeile steht, sagt nichts darüber,
+    // ob AUSGERECHNET „welcome"s eigene 39002 in der Rail schon angekommen ist. Fehlt
+    // sie, findet `step()` `activeTargetId` nicht in seiner Zielliste
+    // (`list.findIndex(...) === -1`), springt auf Index 0 — und wenn „welcome" (die
+    // aktivste Testfläche überhaupt) dort durch Aktivitäts-Sortierung selbst steht,
+    // navigiert Alt+↓ scheinbar folgenlos auf sich selbst.
+    //
+    // Gewartet wird deshalb auf BEIDE Zeilen: „welcome"s EIGENE Rail-Zeile (nicht die
+    // Seiten-Überschrift von oben — die kommt aus einer anderen Quelle) UND eine zweite.
+    // Erst dann ist `activeTargetId` sicher in `targets` auffindbar und `next` zeigt
+    // wirklich auf einen ANDEREN Raum.
+    await expect(page.getByRole('button', { name: 'Willkommen' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Allgemein' })).toBeVisible({ timeout: 15_000 })
+
     await page.keyboard.press('Alt+ArrowDown')
     await expect(page).toHaveURL(/\/rooms\/(?!welcome$)/, { timeout: 10_000 })
 })

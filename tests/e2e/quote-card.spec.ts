@@ -4,6 +4,7 @@ import { neventEncode, npubEncode } from 'nostr-tools/nip19'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 import { cleanupRooms, trackRoom } from './support/rooms'
+import { publishVerified } from './support/publishVerified'
 
 /**
  * P5 — Nostr-Zitatkarten im Chat (`js/nostrEventLink.ts` + `js/feeds.ts`
@@ -77,17 +78,16 @@ function findEvent(h: string, kind: number, pred: (e: RelayEvent) => boolean): R
 
 /**
  * Publiziert eine kind-9-Raumnachricht mit vollständiger Tag-/Zeit-Kontrolle und gibt
- * ihre Event-id zurück (per Requery — nak druckt beim Publish ebenfalls JSON, aber
- * `findEvent` ist der bereits an diesem Relay bewährte Weg, siehe updates.spec.ts).
+ * ihre Event-id zurück — erst wenn sie am Relay LIEGT (`publishVerified`, siehe dort:
+ * `nak event` beweist mit Exit 0 nichts über Annahme, eine einzelne Requery kann leer
+ * antworten, obwohl die Daten da sind).
  */
 function publishRaw(h: string, sec: string, content: string, extraTags: string[] = [], ts?: number): string {
     const args = ['event', '--auth', '--sec', sec, '-k', '9', '-t', `h=${h}`, ...extraTags, '-c', content]
     if (ts !== undefined) {
         args.push('--ts', String(ts))
     }
-    args.push(ZOOID_WS)
-    nak(args)
-    return (findEvent(h, 9, (e) => e.content === content) as RelayEvent).id
+    return publishVerified(NAK, args, ZOOID_WS, () => findEvent(h, 9, (e) => e.content === content), `Raumnachricht in ${h}`).id
 }
 
 /** NIP-22-Kommentar (kind 1111) auf `rootId` — Tag-Form wie die App sie schreibt (room.spec.ts C6b). */

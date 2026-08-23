@@ -39,6 +39,7 @@ import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
 import { testKeys } from './support/keys'
 import { artikelAdresse, cleanupArticles, publishArticle } from './support/articles'
+import { publishVerified } from './support/publishVerified'
 
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const NSEC = process.env.NOSTR_TEST_NSEC as string
@@ -384,11 +385,18 @@ test.describe('Die Ablehnung des Relays', () => {
         expect(requery(ws, ['-k', '1111', '--tag', `A=${adresse}`])).toHaveLength(0)
         // Und die Positivkontrolle zur Gegenprobe selbst: derselbe Filter FINDET etwas,
         // wenn etwas da ist. Ohne sie belegte die Null oben auch einen kaputten Filter.
-        execFileSync(NAK, ['event', '--auth', '--sec', NSEC, '-k', '1111', '-t', `A=${adresse}`, '-c', 'Positivkontrolle', ws], {
-            encoding: 'utf8',
-            stdio: ['ignore', 'ignore', 'ignore'],
-            timeout: 20_000,
-        })
+        //
+        // `publishVerified` statt einer einmaligen `execFileSync` + sofortiger
+        // `toHaveLength(1)`: `nak event` beweist mit Exit 0 nichts über die Annahme, und
+        // eine einzelne Requery direkt danach kann leer antworten, obwohl das Ereignis
+        // liegt (siehe `support/publishVerified.ts`).
+        publishVerified(
+            NAK,
+            ['event', '--auth', '--sec', NSEC, '-k', '1111', '-t', `A=${adresse}`, '-c', 'Positivkontrolle'],
+            ws,
+            () => requery(ws, ['-k', '1111', '--tag', `A=${adresse}`]).find((e) => e.content === 'Positivkontrolle'),
+            'Positivkontrolle-Kommentar',
+        )
         expect(requery(ws, ['-k', '1111', '--tag', `A=${adresse}`])).toHaveLength(1)
 
         raeumeSignale(ws, adresse)

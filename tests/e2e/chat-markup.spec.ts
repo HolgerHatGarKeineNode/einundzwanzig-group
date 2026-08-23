@@ -4,6 +4,7 @@ import { npubEncode } from 'nostr-tools/nip19'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 import { cleanupRooms, trackRoom } from './support/rooms'
+import { publishVerified } from './support/publishVerified'
 
 /**
  * Die schmale Auszeichnungs-Schicht des Chats (`js/chatMarkup.ts` + der Code-Zweig in
@@ -55,22 +56,23 @@ function createRoomNak(h: string, name: string): void {
 }
 
 /**
- * Publiziert eine kind-9-Nachricht und gibt ihre Event-id zurück.
+ * Publiziert eine kind-9-Nachricht und gibt ihre Event-id zurück — erst wenn sie am
+ * Relay LIEGT (`publishVerified`: `nak event` beweist mit Exit 0 nichts über Annahme).
  *
  * Der Inhalt geht als ARGUMENT an `nak` (kein Shell-String): Backticks, Sterne und
  * spitze Klammern müssen den Weg unverändert überstehen — genau sie sind der
  * Prüfgegenstand, eine Shell-Interpretation würde den Test lautlos entwerten.
  */
 function publishRaw(h: string, content: string, extraTags: string[] = []): string {
-    nak(['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, ...extraTags, '-c', content, ZOOID_WS])
-    return (
+    const args = ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${h}`, ...extraTags, '-c', content]
+    const finde = (): RelayEvent | undefined =>
         nak(['req', '-k', '9', '-t', `h=${h}`, '--auth', '--sec', ADMIN, ZOOID_WS])
             .trim()
             .split('\n')
             .filter(Boolean)
             .map((l) => JSON.parse(l) as RelayEvent)
-            .find((e) => e.content === content) as RelayEvent
-    ).id
+            .find((e) => e.content === content)
+    return publishVerified(NAK, args, ZOOID_WS, finde, `Raumnachricht in ${h}`).id
 }
 
 async function openRoom(page: Page, h: string): Promise<void> {

@@ -6,6 +6,7 @@ import { useZooid, ZOOID_WS } from './support/zooid'
 import { useBuzz, BUZZ_WS, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_OWNER_NSEC, BUZZ_USER_NSEC } from './support/buzz'
 import { loginNsec } from './support/login'
 import { cleanupRooms, trackRoom } from './support/rooms'
+import { publishVerified } from './support/publishVerified'
 import {
     isZooidPinList,
     mayPin,
@@ -247,9 +248,13 @@ function findZooidEvent(h: string, kind: number, pred: (e: RelayEvent) => boolea
         .find(pred)
 }
 
+/**
+ * Publiziert eine kind-9-Raumnachricht und liefert ihre Event-id — erst wenn sie am
+ * Relay LIEGT (`publishVerified`: `nak event` beweist mit Exit 0 nichts über Annahme).
+ */
 function publishZooidRaw(h: string, sec: string, content: string): string {
-    nak(['event', '--auth', '--sec', sec, '-k', '9', '-t', `h=${h}`, '-c', content, ZOOID_WS])
-    return (findZooidEvent(h, 9, (e) => e.content === content) as RelayEvent).id
+    const args = ['event', '--auth', '--sec', sec, '-k', '9', '-t', `h=${h}`, '-c', content]
+    return publishVerified(NAK, args, ZOOID_WS, () => findZooidEvent(h, 9, (e) => e.content === content), `Raumnachricht in ${h}`).id
 }
 
 async function openZooidRoomAs(page: Page, h: string, nsec: string): Promise<void> {
