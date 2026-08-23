@@ -94,6 +94,15 @@ test('Raum-Menü (C4): Mention-Popover + Kopier-/Info-Einträge + Info-Modal —
     $res->assertSee('pickMention(item)', false);
     $res->assertSee('onComposerInput($event.target,', false);
 
+    // Agenten-Vorschlag (kind 10100): die Zeile trägt ihr eigenes Merkmal.
+    // Ohne `data-agent` liesse sich „auf zooid erscheint KEIN Agent" im Browser
+    // nicht prüfen — man könnte einen Agentenvorschlag dort nicht von einem
+    // Mitgliedervorschlag unterscheiden, und der Negativbeweis wäre eine
+    // Behauptung. `null` statt `'false'`: Alpine entfernt das Attribut dann ganz,
+    // sonst stünde an JEDER Zeile ein `data-agent` und der Locator träfe alle.
+    $res->assertSee(":data-agent=\"item.isAgent ? 'true' : null\"", false);
+    $res->assertSee('x-if="item.isAgent"', false);
+
     // Web-Popover: Kopier-/Info-Einträge (nur lesen).
     $res->assertSee('copyNevent(m)', false);
     $res->assertSee('copyNpub(m)', false);
