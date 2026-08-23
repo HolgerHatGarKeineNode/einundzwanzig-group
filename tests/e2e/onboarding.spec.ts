@@ -6,6 +6,7 @@ import { neventEncode, nsecEncode } from 'nostr-tools/nip19'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 import { cleanupRooms, trackRoom } from './support/rooms'
+import { publishVerified } from './support/publishVerified'
 
 /**
  * Gast auf einem Raum-Link (P4, vorher P3.2/P3.3) — Playwright, weil hier echtes
@@ -72,22 +73,34 @@ function createRoomNak(h: string, name: string): void {
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, ZOOID_WS])
 }
 
+type RelayEvent = { id: string; pubkey: string; kind: number; content: string; tags: string[][]; created_at: number }
+
 /**
- * Schreibt eine ECHTE Nachricht (kind 9) in den Raum und gibt ihre Id zurück.
+ * Schreibt eine ECHTE Nachricht (kind 9) in den Raum und gibt ihre Id zurück — erst wenn
+ * sie am Relay LIEGT (`publishVerified`).
  *
  * Ohne sie ist „Bühne leer" nicht von „Relay verweigert" zu unterscheiden: ein
  * frischer Raum ist für JEDEN leer. Erst die Positivkontrolle (Mitglied sieht die
  * Nachricht, Gast nicht) trägt die Aussage — und der Thread-Deep-Link braucht
  * ohnehin eine Wurzel.
+ *
+ * **Zweiter, unabhängiger Fund (2026-08-22):** die alte Fassung nahm ungefiltert
+ * `[0].id` aus der Requery — bei einem wiederverwendeten Raum mit mehreren
+ * kind-9-Zeilen war das die id IRGENDEINER Nachricht, nicht der gerade
+ * geschriebenen. Kein Timing-Problem, eine falsche Antwort. Gefiltert wird jetzt
+ * ausdrücklich auf `content === content`.
  */
 function postRootMessage(h: string, content: string): string {
-    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9', '-t', `h=${h}`, '-c', content, ZOOID_WS])
-
-    return execFileSync(NAK, ['req', '-k', '9', '-t', `h=${h}`, '--auth', '--sec', NSEC, ZOOID_WS])
-        .toString()
-        .trim()
-        .split('\n')
-        .map((l) => JSON.parse(l))[0].id as string
+    const args = ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9', '-t', `h=${h}`, '-c', content]
+    const finde = (): RelayEvent | undefined =>
+        execFileSync(NAK, ['req', '-k', '9', '-t', `h=${h}`, '--auth', '--sec', NSEC, ZOOID_WS])
+            .toString()
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map((l) => JSON.parse(l) as RelayEvent)
+            .find((e) => e.content === content)
+    return publishVerified(NAK, args, ZOOID_WS, finde, `Wurzelnachricht in ${h}`).id
 }
 
 type SavedSigner = { pubkey: string | null; sessions: string | null }

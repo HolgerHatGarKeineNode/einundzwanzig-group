@@ -6,6 +6,7 @@ import { useZooid, ZOOID_WS } from './support/zooid'
 import { BUZZ_URL, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_USER_NSEC } from './support/buzz'
 import { loginNsec } from './support/login'
 import { cleanupRooms, trackRoom } from './support/rooms'
+import { publishVerified } from './support/publishVerified'
 
 /**
  * P6a — Suche im geladenen Verlauf (`js/search.ts` + `js/roomSearch.ts`).
@@ -59,10 +60,14 @@ function findEvent(h: string, kind: number, pred: (e: RelayEvent) => boolean): R
         .find(pred)
 }
 
-/** Publiziert eine kind-9-Raumnachricht auf zooid und liefert ihre Event-id (per Requery). */
+/**
+ * Publiziert eine kind-9-Raumnachricht auf zooid und liefert ihre Event-id — erst wenn
+ * sie am Relay LIEGT (`publishVerified`: `nak event` beweist mit Exit 0 nichts über
+ * Annahme).
+ */
 function publishRaw(h: string, sec: string, content: string): string {
-    nak(['event', '--auth', '--sec', sec, '-k', '9', '-t', `h=${h}`, '-c', content, ZOOID_WS])
-    return (findEvent(h, 9, (e) => e.content === content) as RelayEvent).id
+    const args = ['event', '--auth', '--sec', sec, '-k', '9', '-t', `h=${h}`, '-c', content]
+    return publishVerified(NAK, args, ZOOID_WS, () => findEvent(h, 9, (e) => e.content === content), `Raumnachricht in ${h}`).id
 }
 
 async function openRoom(page: Page, h: string): Promise<void> {
