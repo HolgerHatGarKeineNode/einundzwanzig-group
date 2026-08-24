@@ -39,16 +39,26 @@ import { randomUUID } from 'node:crypto'
  *
  * ── Was hier NICHT geprüft wird, und warum nicht ────────────────────────────
  *
- * Der Riegel vor dem ZUWEISEN hat auf dieser Fläche keinen erreichbaren
- * Negativfall: angeboten wird die Selbstbedienung, und die darf laut
- * `assignGate` jedes angemeldete Mitglied (`builders.rs:1163-1167` — „a
- * self-assignment whose sole assignee is the signer"). Sein `not-actor`-Zweig
- * greift erst, wenn die Fläche eines Tages FREMDE zuweisen lässt; sein
- * `anonymous`-Zweig ist hier so unerreichbar wie überall auf dieser Seite (die
- * Route liegt hinter `nostr.auth`, und ohne Signer käme wegen
- * `auth_required: true` kein einziges Repo herein). Beide Zweige hält
- * `forgeWriteModels.test.ts` fest. Geprüft wird hier deshalb die WIRKUNG des
- * Zuweisens — sie ist die Positivkontrolle für den Schreibpfad.
+ * Der Riegel vor dem ZUWEISEN hat in DIESEM Prüfstand keinen Negativfall:
+ * angeboten wird die Selbstbedienung, und die darf laut `assignGate` jedes
+ * angemeldete Mitglied (`builders.rs:1163-1167` — „a self-assignment whose sole
+ * assignee is the signer"). Sein `not-actor`-Zweig greift erst, wenn die Fläche
+ * eines Tages FREMDE zuweisen lässt.
+ *
+ * **Hier stand, der `anonymous`-Zweig sei unerreichbar, weil die Route hinter
+ * `nostr.auth` liegt. Das war falsch** (2026-08-24): `EnsureNostrAuth` lässt den
+ * Mobile-Pfad ungeprüft durch (`config('nativephp-internal.running')` →
+ * `return $next()`), und `viewer` kommt ohnehin aus der INSEL, nicht aus der
+ * Laravel-Sitzung. Auf dem App-Host und im Web in dem Fenster, bevor der Signer
+ * aufgelöst ist, gilt `viewer === ''` — Knopf inert, Hinweis sichtbar. Der Fall
+ * existiert also; er ist nur in diesem Prüfstand nicht herstellbar, weil
+ * `useWorkspace` sich anmeldet, bevor die Fläche steht. Abgedeckt ist er in
+ * `forgeWriteModels.test.ts` (beide Gates liefern `anonymous`) und in
+ * `forge.test.ts` (beide Riegel liefern dafür einen nicht-leeren Satz, den die
+ * Fläche zeigen kann).
+ *
+ * Geprüft wird hier deshalb die WIRKUNG des Zuweisens — sie ist die
+ * Positivkontrolle für den Schreibpfad.
  */
 
 const NAK = process.env.NAK_BIN ?? 'nak'
@@ -83,10 +93,21 @@ const events = (args: string[]): { id: string; kind: number; pubkey: string; tag
 const tagValue = (tags: string[][], name: string): string => tags.find((tag) => tag[0] === name)?.[1] ?? ''
 const ownerPubkey = (): string => nak(['key', 'public', BUZZ_OWNER_SEC_HEX]).trim().split('\n')[0].trim()
 
-/** Die Vorgangsnotizen EINER Wurzel mit einem bestimmten `t`-Label. */
+/**
+ * Die Vorgangsnotizen EINER Wurzel mit einem bestimmten `t`-Label.
+ *
+ * **`some()` und nicht `find()` über die `e`-Tags** — der Unterschied entscheidet
+ * in einer Abwesenheitsmessung. Eine Notiz mit vorangestelltem fremdem `e`
+ * (NIP-10 erlaubt mehrere) würde über das ERSTE Tag nicht gefunden, und dieser
+ * Prüfstand läse das als „nichts am Relay". Dieselbe Klasse wie P1/F5, wo die
+ * Aktivitätsleiste ebenfalls nur das erste auflösbare `e` nahm; dort war es ein
+ * Anzeigefehler, hier wäre es ein falsches GRÜN.
+ */
 const notizen = (address: string, rootId: string, label: string): { pubkey: string; tags: string[][] }[] =>
     events(['-k', '1', '-t', `a=${address}`]).filter(
-        (e) => tagValue(e.tags, 'e') === rootId && e.tags.some((t) => t[0] === 't' && t[1] === label),
+        (e) =>
+            e.tags.some((t) => (t[0] === 'e' || t[0] === 'E') && t[1] === rootId) &&
+            e.tags.some((t) => t[0] === 't' && t[1] === label),
     )
 
 async function useWorkspace(page: Page): Promise<void> {
