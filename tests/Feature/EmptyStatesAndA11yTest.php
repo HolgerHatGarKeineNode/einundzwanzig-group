@@ -232,6 +232,13 @@ $ariaFiles = [
     'room' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡room.blade.php',
     'directory' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡directory.blade.php',
     'spaces' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡spaces.blade.php',
+    // Schritt 5, Plan `2026-08-24T1810-forge-navigation-buzz-vorbild.md` (P1) — VOR jeder
+    // Layout-Phase (Kachelraster, Segment-Umschalter, Steckbrief-Spur, FAB, Bottom-Sheet,
+    // Sticky-Tabs) angelegt, damit diese Umbauten nicht ohne strukturellen a11y-Schutz
+    // laufen. `⚡forge-repo.blade.php` steht unter dem Schlüssel `forge-repo`, nicht `repo`:
+    // der Name spiegelt die Datei, nicht die Route (die heißt `group.forge.repo`).
+    'forge' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡forge.blade.php',
+    'forge-repo' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡forge-repo.blade.php',
 ];
 
 test('REGRESSION: role="log" aria-live="polite" aria-relevant="additions" am Chat-Verlauf bleibt exakt erhalten', function () {
@@ -372,10 +379,34 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // Lightbox-Overlay aus P3. Der Riegel für sie liegt bei ihren eigenen Zusagen
     // (`tests/Feature/OrtskartenTest.php`: kein `role="tab"`, genau eine Karte mit
     // `aria-current="page"`).
+    //
+    // **`forge` und `forge-repo` — ERSTKALIBRIERUNG (2026-08-24, Schritt 5 des Plans
+    // `2026-08-24T1810-forge-navigation-buzz-vorbild.md`, P1).** Kein Diff gegen einen
+    // Vorzustand — dieser Riegel existierte für diese beiden Dateien bisher gar nicht.
+    // Beide Zahlen mit demselben `php -r`-Einzeiler wie oben ermittelt (Pfade angepasst)
+    // und gegen `$countInRendered` unten verifiziert (siehe die Gegenprobe-Schleife
+    // direkt darunter). 'forge': 18 Träger — 15× `aria-hidden="true"` (Interpunktion in
+    // der Aktivitätszeile plus dekorative Icons), 1× `:aria-busy="loading"` (Zustandszeile
+    // während des Ladens), 1× `aria-live="polite"` (sr-only-Ladeansage), 1×
+    // `role="status"`. 'forge-repo': 31 Träger — 9× `aria-hidden="true"`, 7× `role="alert"`
+    // (Fehler-Callouts je Bereich: README, Code, Issues, Patches, PRs, Klon-Fortschritt,
+    // Kommentarformular), 5× `role="status"`, 1× `aria-live="polite"`, 1×
+    // `role="progressbar"` mit `aria-valuemin="0"`/`aria-valuemax="100"`/
+    // `:aria-valuenow="…"` (Klon-Fortschritt), 5× `:aria-expanded="…"` (Issue-Formular,
+    // Issue-/Patch-/PR-Akkordeons, Speicherauskunft-Aufklapper).
+    //
+    // **Diese Zahl ist zum Schreiben dieses Kommentars ausdrücklich VOR jeder
+    // Layout-Phase des Plans festgehalten** (P3–P6: Kachelraster, Segment-Umschalter,
+    // Steckbrief-Spur, FAB, Bottom-Sheet, Sticky-Tabs). Sie hält fest, was HEUTE da ist —
+    // nicht, was der Umbau daraus machen soll. Steigt oder sinkt sie in einer späteren
+    // Phase, ist das an dieser Stelle zu NACHMESSEN und zu BEGRÜNDEN (Multiset-Diff,
+    // wie oben bei 'room'/'spaces' vorgemacht), nicht stillschweigend anzupassen.
     $expected = [
         'room' => 38,
         'directory' => 3,
         'spaces' => 9,
+        'forge' => 18,
+        'forge-repo' => 31,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
@@ -393,6 +424,16 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     $spaces = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.spaces'))->assertOk());
 
+    // `forge`/`forge-repo` rendern ihre Werkbank nur MIT konfiguriertem Workspace (sonst
+    // der Leerzustand aus `OrtskartenTest.php`, ohne die gezählten Träger) — Config nach
+    // den drei Aufrufen oben gesetzt, damit 'room'/'directory'/'spaces' unverändert gegen
+    // die Umgebung laufen, gegen die sie kalibriert wurden.
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+    $forge = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
+        ->get(route('group.forge'))->assertOk());
+    $forgeRepo = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
+        ->get(route('group.forge.repo', ['naddr' => 'naddr1beispiel']))->assertOk());
+
     $countInRendered = function (string $html, array $carriers): int {
         $n = 0;
         foreach ($carriers as $c) {
@@ -407,6 +448,8 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     expect($countInRendered($room, ariaCarriersFromSource($ariaFiles['room'])))->toBe($expected['room']);
     expect($countInRendered($directory, ariaCarriersFromSource($ariaFiles['directory'])))->toBe($expected['directory']);
     expect($countInRendered($spaces, ariaCarriersFromSource($ariaFiles['spaces'])))->toBe($expected['spaces']);
+    expect($countInRendered($forge, ariaCarriersFromSource($ariaFiles['forge'])))->toBe($expected['forge']);
+    expect($countInRendered($forgeRepo, ariaCarriersFromSource($ariaFiles['forge-repo'])))->toBe($expected['forge-repo']);
 });
 
 // ─── Gast-Markup (P4, vorher P3.2/P3.3): mobile Bypass, kein Server-Login ────
