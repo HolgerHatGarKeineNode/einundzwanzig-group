@@ -157,6 +157,7 @@ const eventIdAus = (ausgabe: string): string => {
 }
 
 let besitzerSec = ''
+let besitzerPub = ''
 let repoEventId = ''
 let patchEventId = ''
 
@@ -170,15 +171,31 @@ let patchEventId = ''
  * Relay und **null** kind 5. Mit `--auth` quittiert derselbe Relay `success`,
  * und das Ziel ist danach nicht mehr abfragbar.
  *
- * (Dieselbe Lücke steht in `desktop-forge.spec.ts`. Dort fällt sie nicht auf,
- * weil ein 30617 ERSETZBAR ist und ein zweiter Lauf denselben Platz überschreibt
- * — ein 1617 ist es nicht und häuft sich.)
+ * (Dieselbe Lücke stand bis 2026-08-25 auch in `desktop-forge.spec.ts` — dort
+ * fiel sie lange nicht auf, weil ein 30617 ERSETZBAR ist und ein zweiter Lauf
+ * denselben Platz überschreibt, statt einen zweiten Eintrag anzuhäufen; ein
+ * 1617 ist es nicht und häuft sich. Behoben dort ebenfalls per `--auth`.)
  */
 const loesche = (id: string): void => {
     if (!id || !besitzerSec) {
         return
     }
     nak(['event', '--auth', '--sec', besitzerSec, '-k', '5', '-e', id, ZOOID_WS])
+}
+
+/**
+ * Ein adressierbares 30617 zusätzlich über die a/k-Form löschen (NIP-09).
+ *
+ * `loesche()` per `-e <id>` reicht am aktuellen zooid-Stand mit `--auth` bereits
+ * aus (am 2026-08-25 direkt gemessen: Requery nach `-e`+`--auth` liefert 0 Treffer)
+ * — diese Form ist redundante Absicherung nach demselben Muster wie in
+ * `desktop-forge-feinschliff.spec.ts`, falls sich das Verhalten je ändert.
+ */
+const loescheRepo = (dtag: string): void => {
+    if (!besitzerSec || !besitzerPub) {
+        return
+    }
+    nak(['event', '--auth', '--sec', besitzerSec, '-k', '5', '-t', `a=30617:${besitzerPub}:${dtag}`, '-t', 'k=30617', ZOOID_WS])
 }
 
 /** Alle 1617 dieses Testrepos, die noch von früheren Läufen herumliegen. */
@@ -267,15 +284,15 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
         repoEventId = eventIdAus(repo)
         expect(repoEventId).toHaveLength(64)
 
-        const owner = nak(['key', 'public', besitzerSec]).trim().split('\n')[0]?.trim() ?? ''
-        expect(owner).toHaveLength(64)
+        besitzerPub = nak(['key', 'public', besitzerSec]).trim().split('\n')[0]?.trim() ?? ''
+        expect(besitzerPub).toHaveLength(64)
 
         // ── Den Bestand reinigen, BEVOR gesät wird ─────────────────────────
         // Der worker-eigene zooid überlebt den Lauf (RUNMARK-Wiederverwendung),
         // und ein 1617 ist NICHT ersetzbar: ohne diese Reinigung liegt nach dem
         // n-ten Lauf der n-te Patch da, und jede Zählzusage misst etwas anderes
         // als sie behauptet.
-        const adresse = `30617:${owner}:${REPO_D}`
+        const adresse = `30617:${besitzerPub}:${REPO_D}`
         for (const alt of alte1617(adresse)) {
             loesche(alt)
         }
@@ -283,7 +300,7 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
         const patch = nak([
             'event', '--auth', '--sec', besitzerSec,
             '-k', '1617',
-            '-t', `a=30617:${owner}:${REPO_D}`,
+            '-t', `a=30617:${besitzerPub}:${REPO_D}`,
             '-t', 'commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
             '-t', 't=root',
             '-c', PATCH_TEXT,
@@ -313,6 +330,7 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
         for (const id of [patchEventId, repoEventId]) {
             loesche(id)
         }
+        loescheRepo(REPO_D)
     })
 
     // ── Vorbedingung ────────────────────────────────────────────────────────
