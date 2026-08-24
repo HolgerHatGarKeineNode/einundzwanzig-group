@@ -232,6 +232,13 @@ $ariaFiles = [
     'room' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡room.blade.php',
     'directory' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡directory.blade.php',
     'spaces' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡spaces.blade.php',
+    // Schritt 5, Plan `2026-08-24T1810-forge-navigation-buzz-vorbild.md` (P1) — VOR jeder
+    // Layout-Phase (Kachelraster, Segment-Umschalter, Steckbrief-Spur, FAB, Bottom-Sheet,
+    // Sticky-Tabs) angelegt, damit diese Umbauten nicht ohne strukturellen a11y-Schutz
+    // laufen. `⚡forge-repo.blade.php` steht unter dem Schlüssel `forge-repo`, nicht `repo`:
+    // der Name spiegelt die Datei, nicht die Route (die heißt `group.forge.repo`).
+    'forge' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡forge.blade.php',
+    'forge-repo' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡forge-repo.blade.php',
 ];
 
 test('REGRESSION: role="log" aria-live="polite" aria-relevant="additions" am Chat-Verlauf bleibt exakt erhalten', function () {
@@ -372,10 +379,93 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // Lightbox-Overlay aus P3. Der Riegel für sie liegt bei ihren eigenen Zusagen
     // (`tests/Feature/OrtskartenTest.php`: kein `role="tab"`, genau eine Karte mit
     // `aria-current="page"`).
+    //
+    // **`forge` und `forge-repo` — ERSTKALIBRIERUNG (2026-08-24, Schritt 5 des Plans
+    // `2026-08-24T1810-forge-navigation-buzz-vorbild.md`, P1).** Kein Diff gegen einen
+    // Vorzustand — dieser Riegel existierte für diese beiden Dateien bisher gar nicht.
+    // Beide Zahlen mit demselben `php -r`-Einzeiler wie oben ermittelt (Pfade angepasst)
+    // und gegen `$countInRendered` unten verifiziert (siehe die Gegenprobe-Schleife
+    // direkt darunter). 'forge': 18 Träger — 15× `aria-hidden="true"` (Interpunktion in
+    // der Aktivitätszeile plus dekorative Icons), 1× `:aria-busy="loading"` (Zustandszeile
+    // während des Ladens), 1× `aria-live="polite"` (sr-only-Ladeansage), 1×
+    // `role="status"`. 'forge-repo': 31 Träger — 9× `aria-hidden="true"`, 7× `role="alert"`
+    // (Fehler-Callouts je Bereich: README, Code, Issues, Patches, PRs, Klon-Fortschritt,
+    // Kommentarformular), 5× `role="status"`, 1× `aria-live="polite"`, 1×
+    // `role="progressbar"` mit `aria-valuemin="0"`/`aria-valuemax="100"`/
+    // `:aria-valuenow="…"` (Klon-Fortschritt), 5× `:aria-expanded="…"` (Issue-Formular,
+    // Issue-/Patch-/PR-Akkordeons, Speicherauskunft-Aufklapper).
+    //
+    // **Diese Zahl ist zum Schreiben dieses Kommentars ausdrücklich VOR jeder
+    // Layout-Phase des Plans festgehalten** (P3–P6: Kachelraster, Segment-Umschalter,
+    // Steckbrief-Spur, FAB, Bottom-Sheet, Sticky-Tabs). Sie hält fest, was HEUTE da ist —
+    // nicht, was der Umbau daraus machen soll. Steigt oder sinkt sie in einer späteren
+    // Phase, ist das an dieser Stelle zu NACHMESSEN und zu BEGRÜNDEN (Multiset-Diff,
+    // wie oben bei 'room'/'spaces' vorgemacht), nicht stillschweigend anzupassen.
+    //
+    // **P4 desselben Plans (2026-08-24, Steckbrief-Spur, Sticky-Reiter, Handlungsknopf):
+    // NACHGEMESSEN, Ergebnis 'forge-repo' 31 → 34.** Multiset-Diff
+    // (`array_count_values`, `git show HEAD:…⚡forge-repo.blade.php` gegen den
+    // Arbeitsbaum) ist EINSEITIG: es fiel KEIN Träger weg — nicht einer der 31 —, es
+    // kamen genau drei dazu, alle am neuen Blatt für „Neues Issue":
+    //   +1 `role="dialog"`        — das Blatt IST ein Dialog; bis P4 war das
+    //                               Issue-Formular ein Aufklapper in der Liste und
+    //                               brauchte keine Dialogrolle.
+    //   +1 `aria-modal="true"`    — es fängt den Fokus (`x-trap.noscroll`), also muss
+    //                               der Rest der Seite für die Sprachausgabe
+    //                               verschwinden. Ohne dieses Paar wäre die Falle für
+    //                               die Tastatur da und für den Screenreader nicht.
+    //   +1 `aria-haspopup="dialog"` — am Handlungsknopf, der es öffnet.
+    // `:aria-expanded="…"` bleibt bei 5: der Handlungsknopf hat den Träger vom alten
+    // „Neues Issue"-Knopf übernommen, es ist derselbe Zustand an einem anderen Ort.
+    // Der Steckbrief-Aufklapper trägt KEIN eigenes `aria-expanded` — er ist ein echtes
+    // `<details>` und bekommt es vom Browser; genau deshalb ist er eines.
+    //
+    // **P6 desselben Plans (2026-08-24, Aktivitätsbalken und Maintainer-Stapel):
+    // NACHGEMESSEN, Ergebnis 'forge' 18 → 20.** Der Multiset-Diff (`array_count_values`,
+    // `git show HEAD:…⚡forge.blade.php` gegen den Arbeitsbaum) zeigt genau EINE
+    // veränderte Zeichenkette: `aria-hidden="true"` von 15 auf 17.
+    //
+    // **Er ist NICHT einseitig, und das gehört gesagt:** dahinter stehen drei
+    // Additions und eine Deletion, die sich auf derselben Zeichenkette
+    // gegenseitig verrechnen —
+    //   +1 an der Balken-Schiene (Schritt 25): ein Grafikobjekt, dessen Aussage
+    //      als Satz daneben steht (`sr-only`, „:count Ereignisse in den letzten
+    //      30 Tagen"). Ohne `aria-hidden` läse die Sprachausgabe zweimal.
+    //   +1 an der Balken-ZAHL: dieselbe Begründung — sie ist die sichtbare
+    //      Fassung desselben Satzes.
+    //   +1 am Maintainer-Stapel (Schritt 24): drei Avatare plus „+9" sind für
+    //      die Sprachausgabe eine einzige Auskunft („3 Maintainer"), nicht vier
+    //      Elemente.
+    //   −1 an der alten Maintainer-ZIFFER, die der Stapel ersetzt hat.
+    //
+    // **Die Live-Region der neuen Ansichts-Steuerung („12 von 47",
+    // `role="status" aria-live="polite"`) steht bewusst NICHT in dieser Zahl.**
+    // Sie liegt in `partials/forge-ansicht.blade.php`, und Partials führt diese
+    // Liste grundsätzlich nicht (dieselbe Regel wie beim Lightbox-Overlay und
+    // den Ortskarten oben). Ihr Riegel ist eine Verhaltenszusage im E2E-Arm, nicht
+    // diese Zählung — wer sie hier sucht, sucht am falschen Ort.
     $expected = [
         'room' => 38,
         'directory' => 3,
         'spaces' => 9,
+        'forge' => 20,
+        // **34 → 39 mit P5 (2026-08-24).** Nachgerechnet, nicht nachgezogen: die
+        // Schreibriegel vor Zuweisen und Freigeben bringen genau fünf Träger mit —
+        // drei `::aria-disabled` (Zuweisung, Freigabe, Änderungswunsch; drei
+        // verschiedene Ausdrücke, also drei verschiedene Treffer) und zwei
+        // `role="status"` für die beiden „Wird gesendet …"-Anzeigen. Die zählen
+        // doppelt, weil der Extraktor Vorkommen sammelt und nicht Werte.
+        // `aria-disabled` statt `disabled` ist dabei die Zusage selbst: der Knopf
+        // behält seinen Fokus, sonst käme eine Tastatur nie an die Begründung.
+        //
+        // **P6, Schritt 27 (Krümelspur): 39 → 41.** Multiset-Diff EINSEITIG —
+        // keine Deletion, zwei Additions, beide in der neuen `nav` im Kopf:
+        //   +1 `aria-current="page"` am letzten Krümel (dem Ort, an dem man
+        //      steht — er ist bewusst kein Link).
+        //   +1 `aria-hidden="true"` am Schrägstrich dazwischen: er ist
+        //      Interpunktion, kein Wort, und die Sprachausgabe soll ihn nicht
+        //      als „Schrägstrich" zwischen die Krümel lesen.
+        'forge-repo' => 41,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
@@ -393,6 +483,16 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     $spaces = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.spaces'))->assertOk());
 
+    // `forge`/`forge-repo` rendern ihre Werkbank nur MIT konfiguriertem Workspace (sonst
+    // der Leerzustand aus `OrtskartenTest.php`, ohne die gezählten Träger) — Config nach
+    // den drei Aufrufen oben gesetzt, damit 'room'/'directory'/'spaces' unverändert gegen
+    // die Umgebung laufen, gegen die sie kalibriert wurden.
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+    $forge = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
+        ->get(route('group.forge'))->assertOk());
+    $forgeRepo = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
+        ->get(route('group.forge.repo', ['naddr' => 'naddr1beispiel']))->assertOk());
+
     $countInRendered = function (string $html, array $carriers): int {
         $n = 0;
         foreach ($carriers as $c) {
@@ -407,6 +507,8 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     expect($countInRendered($room, ariaCarriersFromSource($ariaFiles['room'])))->toBe($expected['room']);
     expect($countInRendered($directory, ariaCarriersFromSource($ariaFiles['directory'])))->toBe($expected['directory']);
     expect($countInRendered($spaces, ariaCarriersFromSource($ariaFiles['spaces'])))->toBe($expected['spaces']);
+    expect($countInRendered($forge, ariaCarriersFromSource($ariaFiles['forge'])))->toBe($expected['forge']);
+    expect($countInRendered($forgeRepo, ariaCarriersFromSource($ariaFiles['forge-repo'])))->toBe($expected['forge-repo']);
 });
 
 // ─── Gast-Markup (P4, vorher P3.2/P3.3): mobile Bypass, kein Server-Login ────

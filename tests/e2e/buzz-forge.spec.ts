@@ -127,6 +127,41 @@ async function useWorkspace(page: Page): Promise<void> {
     await loginNsec(page, BUZZ_USER_NSEC)
 }
 
+/**
+ * Den Steckbrief aufziehen.
+ *
+ * Seit P4 (2026-08-24, Plan `2026-08-24T1810-forge-navigation-buzz-vorbild.md`)
+ * ist der Repo-Kopf — Beschreibung, Clone-Befehl, Branches, Schutzregeln,
+ * Maintainer, README — ein `<details>` und startet in der schmalen Form
+ * **geschlossen**. Das ist die Absicht, nicht ein Versehen: der Kopf stand bis
+ * dahin in voller Breite über der Reiterleiste, auf dem Telefon vier
+ * Bildschirmhöhen vor dem ersten Issue.
+ *
+ * Die Zusagen darunter bleiben damit unverändert bestehen — sie prüfen weiterhin,
+ * dass Branch-Zustand, Schutzregel, Maintainer und Clone-Zeile **da und sichtbar**
+ * sind. Nur der Weg dorthin hat einen Schritt mehr, und der Schritt selbst wird
+ * hier mitgeprüft: ohne ein `open` am `<details>` läuft jede folgende Zusicherung
+ * in ihren Timeout, statt stillschweigend zu verschwinden.
+ *
+ * **Formbewusst, nicht breitenbewusst.** In der zweispaltigen Form (ab 65 rem
+ * Container, `theme.css`) ist die Zusammenfassung `display: none` und der Rumpf
+ * steht ohnehin offen; dann gibt es nichts zu klicken. Der Buzz-Arm misst bei
+ * 1279 px, also immer in der schmalen Form — die Abfrage steht trotzdem hier,
+ * damit derselbe Helfer im `desktop-`-Arm nicht in einen 30-s-Timeout läuft.
+ */
+async function oeffneSteckbrief(page: Page): Promise<void> {
+    const steckbrief = page.locator('[data-forge-steckbrief]')
+    const schalter = page.locator('[data-forge-steckbrief-schalter]')
+    await expect(steckbrief).toHaveCount(1, { timeout: 30_000 })
+    if (!(await schalter.isVisible())) {
+        return
+    }
+    if ((await steckbrief.getAttribute('open')) === null) {
+        await schalter.click()
+    }
+    await expect(steckbrief).toHaveAttribute('open', /.*/)
+}
+
 test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
     test.skip(process.env.E2E_RELAY !== 'buzz', 'nur im Buzz-Modus (E2E_RELAY=buzz) relevant')
 
@@ -293,12 +328,36 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         // P5: die Zeilen stehen unter einem Tages-Trenner, und der spricht die
         // Sprache von `/updates` (die Zuordnung selbst prüft `forgeTimeline.test.ts`
         // — hier geht es nur darum, DASS die Gruppe im echten Browser rendert).
-        const trenner = page.locator('section:has([data-forge-activity]) > h2')
+        //
+        // ── `> h3`, nicht `> h2` (Befund aus P6, Schritt 26) ─────────────────
+        // Der Selektor traf seit P4 das FALSCHE Element. `:has()` matcht auch die
+        // äussere `section[data-forge-region="activity"]`, und deren direktes `h2`
+        // ist der Regionstitel „Aktivität" — nicht der Trenner. Die Zusicherung
+        // war damit dauerhaft rot, ohne dass es auffiel: der volle Buzz-Arm lief
+        // seit P4 nicht mehr durch, und `toBeVisible()` darüber blieb grün, weil
+        // der Regionstitel unterhalb `xl` zwar auf 1 px geklemmt, aber nicht
+        // `display:none` ist. Am 2026-08-25 gegen den P6-VORZUSTAND gegengeprüft
+        // (Dateien per Kopie auf `e0f2493` zurückgesetzt, Hashes vor/nach
+        // byte-identisch): dieselbe Meldung, dasselbe „Aktivität" — der Befund ist
+        // vorbestehend und nicht von P6 verursacht.
+        //
+        // Die Trenner sind `h3` und stehen je in der INNEREN Section ihrer
+        // Gruppe; die äussere hat kein direktes `h3`. Damit trifft der Selektor
+        // genau das, worüber er urteilt.
+        const trenner = page.locator('section:has([data-forge-activity]) > h3')
         await expect(trenner.first()).toBeVisible()
         await expect(trenner.first()).toHaveText(/^(Heute|Gestern|Diese Woche|Älter)$/)
 
         // Und die Zeile selbst trägt die kurze Angabe; die Uhrzeit steht im Tooltip.
-        const zeit = page.locator('[data-forge-activity]').first().locator('span[title]').first()
+        //
+        // ── `[data-forge-zeit]` statt „das erste `span[title]`" (P6, Schritt 26) ──
+        // Dieselbe Klasse wie beim Trenner darüber, und sie war von ihm verdeckt:
+        // seit dem P1-Nachzug trägt der Personen-Chip im Satz den ROHEN Pubkey in
+        // `title`, und der steht VOR der Metazeile. Der Selektor traf damit den
+        // Schlüssel statt der Zeit (gemessen: `4b3cac49…` gegen `/\d{2}:\d{2}/`).
+        // Ein Anker, der eine POSITION beschreibt, wandert mit dem nächsten
+        // Einschub; das Element trägt jetzt einen Namen.
+        const zeit = page.locator('[data-forge-activity]').first().locator('[data-forge-zeit]').first()
         await expect(zeit).toHaveAttribute('title', /\d{2}:\d{2}/)
         await expect(zeit).not.toHaveText(/\d{2}:\d{2}/)
 
@@ -359,6 +418,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
 
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+        await oeffneSteckbrief(page)
         await expect(page.locator('[data-forge-clone]')).toContainText('example.invalid')
 
         // Punkt 2 — der Branch-Zustand steht mit Kurzhash da.
@@ -447,6 +507,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
 
+        await oeffneSteckbrief(page)
         const zeile = page.locator('[data-forge-clone]')
         const knopf = page.locator('[data-forge-clone-copy]')
         await expect(zeile).toContainText('example.invalid')
@@ -491,6 +552,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await ohne.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(ohne.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
 
+        await oeffneSteckbrief(ohne)
         await expect(ohne.locator('[data-forge-clone]')).toContainText('example.invalid')
         await expect(ohne.locator('[data-forge-clone]')).toHaveClass(/select-all/)
         await expect(ohne.locator('[data-forge-clone-copy]')).toHaveCount(0)
