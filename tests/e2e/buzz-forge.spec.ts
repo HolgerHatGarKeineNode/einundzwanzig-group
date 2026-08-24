@@ -328,12 +328,36 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         // P5: die Zeilen stehen unter einem Tages-Trenner, und der spricht die
         // Sprache von `/updates` (die Zuordnung selbst prüft `forgeTimeline.test.ts`
         // — hier geht es nur darum, DASS die Gruppe im echten Browser rendert).
-        const trenner = page.locator('section:has([data-forge-activity]) > h2')
+        //
+        // ── `> h3`, nicht `> h2` (Befund aus P6, Schritt 26) ─────────────────
+        // Der Selektor traf seit P4 das FALSCHE Element. `:has()` matcht auch die
+        // äussere `section[data-forge-region="activity"]`, und deren direktes `h2`
+        // ist der Regionstitel „Aktivität" — nicht der Trenner. Die Zusicherung
+        // war damit dauerhaft rot, ohne dass es auffiel: der volle Buzz-Arm lief
+        // seit P4 nicht mehr durch, und `toBeVisible()` darüber blieb grün, weil
+        // der Regionstitel unterhalb `xl` zwar auf 1 px geklemmt, aber nicht
+        // `display:none` ist. Am 2026-08-25 gegen den P6-VORZUSTAND gegengeprüft
+        // (Dateien per Kopie auf `e0f2493` zurückgesetzt, Hashes vor/nach
+        // byte-identisch): dieselbe Meldung, dasselbe „Aktivität" — der Befund ist
+        // vorbestehend und nicht von P6 verursacht.
+        //
+        // Die Trenner sind `h3` und stehen je in der INNEREN Section ihrer
+        // Gruppe; die äussere hat kein direktes `h3`. Damit trifft der Selektor
+        // genau das, worüber er urteilt.
+        const trenner = page.locator('section:has([data-forge-activity]) > h3')
         await expect(trenner.first()).toBeVisible()
         await expect(trenner.first()).toHaveText(/^(Heute|Gestern|Diese Woche|Älter)$/)
 
         // Und die Zeile selbst trägt die kurze Angabe; die Uhrzeit steht im Tooltip.
-        const zeit = page.locator('[data-forge-activity]').first().locator('span[title]').first()
+        //
+        // ── `[data-forge-zeit]` statt „das erste `span[title]`" (P6, Schritt 26) ──
+        // Dieselbe Klasse wie beim Trenner darüber, und sie war von ihm verdeckt:
+        // seit dem P1-Nachzug trägt der Personen-Chip im Satz den ROHEN Pubkey in
+        // `title`, und der steht VOR der Metazeile. Der Selektor traf damit den
+        // Schlüssel statt der Zeit (gemessen: `4b3cac49…` gegen `/\d{2}:\d{2}/`).
+        // Ein Anker, der eine POSITION beschreibt, wandert mit dem nächsten
+        // Einschub; das Element trägt jetzt einen Namen.
+        const zeit = page.locator('[data-forge-activity]').first().locator('[data-forge-zeit]').first()
         await expect(zeit).toHaveAttribute('title', /\d{2}:\d{2}/)
         await expect(zeit).not.toHaveText(/\d{2}:\d{2}/)
 

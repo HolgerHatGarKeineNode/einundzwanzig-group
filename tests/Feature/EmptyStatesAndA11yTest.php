@@ -419,11 +419,36 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // „Neues Issue"-Knopf übernommen, es ist derselbe Zustand an einem anderen Ort.
     // Der Steckbrief-Aufklapper trägt KEIN eigenes `aria-expanded` — er ist ein echtes
     // `<details>` und bekommt es vom Browser; genau deshalb ist er eines.
+    //
+    // **P6 desselben Plans (2026-08-24, Aktivitätsbalken und Maintainer-Stapel):
+    // NACHGEMESSEN, Ergebnis 'forge' 18 → 20.** Der Multiset-Diff (`array_count_values`,
+    // `git show HEAD:…⚡forge.blade.php` gegen den Arbeitsbaum) zeigt genau EINE
+    // veränderte Zeichenkette: `aria-hidden="true"` von 15 auf 17.
+    //
+    // **Er ist NICHT einseitig, und das gehört gesagt:** dahinter stehen drei
+    // Additions und eine Deletion, die sich auf derselben Zeichenkette
+    // gegenseitig verrechnen —
+    //   +1 an der Balken-Schiene (Schritt 25): ein Grafikobjekt, dessen Aussage
+    //      als Satz daneben steht (`sr-only`, „:count Ereignisse in den letzten
+    //      30 Tagen"). Ohne `aria-hidden` läse die Sprachausgabe zweimal.
+    //   +1 an der Balken-ZAHL: dieselbe Begründung — sie ist die sichtbare
+    //      Fassung desselben Satzes.
+    //   +1 am Maintainer-Stapel (Schritt 24): drei Avatare plus „+9" sind für
+    //      die Sprachausgabe eine einzige Auskunft („3 Maintainer"), nicht vier
+    //      Elemente.
+    //   −1 an der alten Maintainer-ZIFFER, die der Stapel ersetzt hat.
+    //
+    // **Die Live-Region der neuen Ansichts-Steuerung („12 von 47",
+    // `role="status" aria-live="polite"`) steht bewusst NICHT in dieser Zahl.**
+    // Sie liegt in `partials/forge-ansicht.blade.php`, und Partials führt diese
+    // Liste grundsätzlich nicht (dieselbe Regel wie beim Lightbox-Overlay und
+    // den Ortskarten oben). Ihr Riegel ist eine Verhaltenszusage im E2E-Arm, nicht
+    // diese Zählung — wer sie hier sucht, sucht am falschen Ort.
     $expected = [
         'room' => 38,
         'directory' => 3,
         'spaces' => 9,
-        'forge' => 18,
+        'forge' => 20,
         // **34 → 39 mit P5 (2026-08-24).** Nachgerechnet, nicht nachgezogen: die
         // Schreibriegel vor Zuweisen und Freigeben bringen genau fünf Träger mit —
         // drei `::aria-disabled` (Zuweisung, Freigabe, Änderungswunsch; drei
@@ -432,7 +457,15 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // doppelt, weil der Extraktor Vorkommen sammelt und nicht Werte.
         // `aria-disabled` statt `disabled` ist dabei die Zusage selbst: der Knopf
         // behält seinen Fokus, sonst käme eine Tastatur nie an die Begründung.
-        'forge-repo' => 39,
+        //
+        // **P6, Schritt 27 (Krümelspur): 39 → 41.** Multiset-Diff EINSEITIG —
+        // keine Deletion, zwei Additions, beide in der neuen `nav` im Kopf:
+        //   +1 `aria-current="page"` am letzten Krümel (dem Ort, an dem man
+        //      steht — er ist bewusst kein Link).
+        //   +1 `aria-hidden="true"` am Schrägstrich dazwischen: er ist
+        //      Interpunktion, kein Wort, und die Sprachausgabe soll ihn nicht
+        //      als „Schrägstrich" zwischen die Krümel lesen.
+        'forge-repo' => 41,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
