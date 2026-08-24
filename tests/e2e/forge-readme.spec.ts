@@ -192,6 +192,39 @@ async function oeffneRepo(page: Page, dtag: string): Promise<void> {
     // Auf eine ENTSCHIEDENE Lage warten: `pruefe` ist der Anfangszustand, und
     // eine Messung dagegen liefe gegen ein Skelett.
     await expect(page.locator('[data-forge-readme]')).not.toHaveAttribute('data-lage', 'pruefe', { timeout: 30_000 })
+    await oeffneSteckbrief(page)
+}
+
+/**
+ * Den Steckbrief aufziehen — **der README-Bereich liegt seit P4 darin.**
+ *
+ * P4 des Plans `2026-08-24T1810-forge-navigation-buzz-vorbild.md` (2026-08-24)
+ * hat den Repo-Kopf samt README aus der vollen Breite in eine zweite Spur
+ * geräumt; in der schmalen Form ist daraus ein `<details>` geworden, das
+ * GESCHLOSSEN startet. Ein geschlossenes `<details>` rendert seinen Rumpf zwar
+ * ins DOM (Attribut-Zusicherungen wie `data-lage` tragen also unverändert),
+ * aber unsichtbar — jeder `click()` und jedes `toBeVisible()` liefe in einen
+ * 30-s-Timeout.
+ *
+ * Der Helfer steht deshalb im `oeffneRepo` und nicht in jedem einzelnen Test:
+ * es ist eine Eigenschaft des WEGES zur Fläche, keine Zusage dieses Prüfstands.
+ *
+ * In der zweispaltigen Form (ab 65 rem Container, `theme.css`) ist die
+ * Zusammenfassung `display: none` und der Rumpf steht offen — dann gibt es
+ * nichts zu klicken. Dieser Prüfstand misst bei 1279 px, also immer schmal; die
+ * Abfrage steht trotzdem hier, damit der Helfer breitenunabhängig bleibt.
+ */
+async function oeffneSteckbrief(page: Page): Promise<void> {
+    const steckbrief = page.locator('[data-forge-steckbrief]')
+    const schalter = page.locator('[data-forge-steckbrief-schalter]')
+    await expect(steckbrief).toHaveCount(1, { timeout: 30_000 })
+    if (!(await schalter.isVisible())) {
+        return
+    }
+    if ((await steckbrief.getAttribute('open')) === null) {
+        await schalter.click()
+    }
+    await expect(steckbrief).toHaveAttribute('open', /.*/)
 }
 
 /*
@@ -335,6 +368,7 @@ test.describe('Forge: das README des Code-Browsers', () => {
             .filter({ has: page.getByText(REPO_D, { exact: true }) })
             .first()
             .click()
+        await oeffneSteckbrief(page)
         await expect(page.locator('[data-forge-readme]')).toHaveAttribute('data-lage', 'da', { timeout: 60_000 })
         expect(zaehler.anfragen, 'Der zweite Besuch hat erneut geladen.').toBe(nachErstem)
     })

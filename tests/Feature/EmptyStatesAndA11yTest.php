@@ -401,12 +401,30 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // nicht, was der Umbau daraus machen soll. Steigt oder sinkt sie in einer späteren
     // Phase, ist das an dieser Stelle zu NACHMESSEN und zu BEGRÜNDEN (Multiset-Diff,
     // wie oben bei 'room'/'spaces' vorgemacht), nicht stillschweigend anzupassen.
+    //
+    // **P4 desselben Plans (2026-08-24, Steckbrief-Spur, Sticky-Reiter, Handlungsknopf):
+    // NACHGEMESSEN, Ergebnis 'forge-repo' 31 → 34.** Multiset-Diff
+    // (`array_count_values`, `git show HEAD:…⚡forge-repo.blade.php` gegen den
+    // Arbeitsbaum) ist EINSEITIG: es fiel KEIN Träger weg — nicht einer der 31 —, es
+    // kamen genau drei dazu, alle am neuen Blatt für „Neues Issue":
+    //   +1 `role="dialog"`        — das Blatt IST ein Dialog; bis P4 war das
+    //                               Issue-Formular ein Aufklapper in der Liste und
+    //                               brauchte keine Dialogrolle.
+    //   +1 `aria-modal="true"`    — es fängt den Fokus (`x-trap.noscroll`), also muss
+    //                               der Rest der Seite für die Sprachausgabe
+    //                               verschwinden. Ohne dieses Paar wäre die Falle für
+    //                               die Tastatur da und für den Screenreader nicht.
+    //   +1 `aria-haspopup="dialog"` — am Handlungsknopf, der es öffnet.
+    // `:aria-expanded="…"` bleibt bei 5: der Handlungsknopf hat den Träger vom alten
+    // „Neues Issue"-Knopf übernommen, es ist derselbe Zustand an einem anderen Ort.
+    // Der Steckbrief-Aufklapper trägt KEIN eigenes `aria-expanded` — er ist ein echtes
+    // `<details>` und bekommt es vom Browser; genau deshalb ist er eines.
     $expected = [
         'room' => 38,
         'directory' => 3,
         'spaces' => 9,
         'forge' => 18,
-        'forge-repo' => 31,
+        'forge-repo' => 34,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
