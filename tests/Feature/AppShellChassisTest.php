@@ -208,6 +208,44 @@ test('app-shell rendert Chrome (status-strip + main-Outlet + nav); chrome=false 
 });
 
 /**
+ * `pb-28` hält den Platz für die fixe Bottom-Bar frei — und ab `xl` fiel er weg,
+ * OBWOHL die Bar im App-Host dort stehen bleibt.
+ *
+ * Die Web-Shell hat ab `xl` keine Bottom-Bar mehr (`bottom-nav.blade.php:52`
+ * schaltet sie mit `xl:hidden` weg, aber nur hinter `! $native`) — dort wäre der
+ * Abstand toter Boden, und `xl:pb-8` ist richtig. Im App-Host bleibt sie auf JEDER
+ * Breite; dort fiel der Abstand ab 1280 px von 112 px auf 32 px und die Bar
+ * überlappte den Inhalt. Gemessen am 2026-08-23 bei `NATIVEPHP_RUNNING=true`,
+ * 1366 × 1024 (Tablet quer).
+ *
+ * **Der Host ist die richtige Frage, nicht die Breite.** Dieselbe Unterscheidung
+ * wie in `app-frame.blade.php:44` und `bottom-nav.blade.php:41`.
+ *
+ * Geprüft wird die Klassenliste und nicht die gerenderte Höhe: Letzteres bräuchte
+ * einen Browser mit gebautem CSS und einen App-Host-Server. Der Zusammenhang
+ * „`xl:pb-8` vorhanden → Abstand fällt ab xl weg" ist CSS-Semantik; dieser Test
+ * hält fest, dass die Klasse im App-Host NICHT gesetzt wird.
+ *
+ * Die zweite Hälfte ist die Gegenkontrolle: ohne sie wäre der Test auch grün,
+ * wenn `xl:pb-8` NIRGENDS mehr stünde — dann hätte die Web-Shell dauerhaft
+ * 112 px toten Boden, und niemand merkte es.
+ */
+test('pb-28 bleibt im App-Host auf jeder Breite — in der Web-Shell fällt es ab xl', function () {
+    config(['nativephp-internal.running' => true]);
+    $app = Blade::render('<x-group::app-shell><p>inhalt</p></x-group::app-shell>');
+
+    expect($app)->toContain('pb-28')
+        ->and($app)->not->toContain('xl:pb-8');
+
+    // GEGENKONTROLLE: in der Web-Shell muss es weiterhin da sein.
+    config(['nativephp-internal.running' => false]);
+    $web = Blade::render('<x-group::app-shell><p>inhalt</p></x-group::app-shell>');
+
+    expect($web)->toContain('pb-28')
+        ->and($web)->toContain('xl:pb-8');
+});
+
+/**
  * Der Rahmen ab `xl` ist EINZEILIG — und das ist keine Kosmetik, sondern die
  * Bedingung dafür, dass Rail und Bühne bis zum unteren Fensterrand reichen.
  *
