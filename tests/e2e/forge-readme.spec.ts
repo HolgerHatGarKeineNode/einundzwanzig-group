@@ -2,7 +2,7 @@ import { test, expect, type Page } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -59,6 +59,30 @@ let bare = ''
 let owner = ''
 let ids: string[] = []
 
+/**
+ * Die Ref-Ankündigung — EINMAL gebaut, dann wiederverwendet.
+ *
+ * Sie ist bei unveränderter Vorlage konstant; je Anfrage ein `git`-Prozess
+ * dafür zu starten ist reine Last. Und die ist messbar: mit diesem Spec im
+ * Volllauf kippten zweimal zeitkritische Nachbarspecs
+ * (`spaces.spec.ts:501`, `a11y-contrast.spec.ts:642`) — beide seriell grün,
+ * beide ohne diesen Spec grün (571/571). Der `upload-pack`-POST muss ein
+ * echter Prozess bleiben, die Ankündigung nicht.
+ */
+let ankuendigungCache: Buffer | null = null
+const ankuendigung = (): Buffer => {
+    if (!ankuendigungCache) {
+        const adv = execFileSync('git', ['upload-pack', '--stateless-rpc', '--advertise-refs', bare], {
+            encoding: 'buffer',
+            maxBuffer: 64 * 1024 * 1024,
+        })
+        // pkt-line-Dienstkopf, den ein Smart-HTTP-Server voranstellt.
+        ankuendigungCache = Buffer.concat([Buffer.from('001e# service=git-upload-pack\n0000', 'utf8'), adv])
+    }
+
+    return ankuendigungCache
+}
+
 const nak = (args: readonly string[]): string => {
     const res = spawnSync(NAK, [...args], { encoding: 'utf8', timeout: 30_000 })
 
@@ -111,16 +135,10 @@ async function verdrahteGit(page: Page, opts: { verzoegerung?: number; status?: 
         const url = route.request().url()
         try {
             if (url.includes('/info/refs')) {
-                const adv = execFileSync('git', ['upload-pack', '--stateless-rpc', '--advertise-refs', bare], {
-                    encoding: 'buffer',
-                    maxBuffer: 64 * 1024 * 1024,
-                })
-                // pkt-line-Dienstkopf, den ein Smart-HTTP-Server voranstellt.
-                const kopf = Buffer.from('001e# service=git-upload-pack\n0000', 'utf8')
                 await route.fulfill({
                     status: 200,
                     headers: { 'content-type': 'application/x-git-upload-pack-advertisement' },
-                    body: Buffer.concat([kopf, adv]),
+                    body: ankuendigung(),
                 })
 
                 return
@@ -176,52 +194,77 @@ async function oeffneRepo(page: Page, dtag: string): Promise<void> {
     await expect(page.locator('[data-forge-readme]')).not.toHaveAttribute('data-lage', 'pruefe', { timeout: 30_000 })
 }
 
+/*
+ * Die Einrichtung steht auf DATEIEBENE, nicht im ersten `describe`.
+ *
+ * Playwright bindet `beforeAll` an seinen Block: lag sie im ersten, liefe der
+ * zweite `describe` (der Code-Browser) ohne Fixture — kein geseetes 30617, kein
+ * `bare` für die Gegenstelle. Genau so ist der erste Lauf gescheitert, und zwar
+ * mit einer Meldung, die auf die Fläche zeigte statt auf die fehlende Vorlage.
+ */
+test.beforeAll(() => {
+    expect(NSEC, 'NOSTR_TEST_NSEC ist nicht gesetzt').toBeTruthy()
+    owner = nak(['key', 'public', NSEC]).trim().split('\n')[0]?.trim() ?? ''
+    expect(owner).toHaveLength(64)
+
+    // Ein echtes Repository mit README — die Vorlage der Gegenstelle.
+    arbeit = mkdtempSync(join(tmpdir(), 'e2e-readme-'))
+    const quelle = join(arbeit, 'quelle')
+    execFileSync('git', ['init', '-q', '-b', 'main', quelle])
+    execFileSync('git', ['-C', quelle, 'config', 'user.email', 't@e.st'])
+    execFileSync('git', ['-C', quelle, 'config', 'user.name', 'T'])
+    writeFileSync(join(quelle, 'README.md'), '# Willkommen\n\nEin **fetter** Absatz aus dem echten Repository.\n')
+    writeFileSync(join(quelle, 'index.js'), 'export const x = 1\n')
+    // Ein Unterverzeichnis — sonst prüft die Krümelspur nichts.
+    mkdirSync(join(quelle, 'src'))
+    writeFileSync(join(quelle, 'src', 'app.ts'), 'const gruss = "hallo aus dem Unterverzeichnis"\nexport default gruss\n')
+    // Ein echtes 1×1-PNG: es ENTHÄLT NUL-Bytes und wäre bei falscher
+    // Prüfreihenfolge „binär". Genau dagegen ist der Wächter geschrieben.
+    writeFileSync(
+        join(quelle, 'bild.png'),
+        Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+            'base64',
+        ),
+    )
+    // Über TEXT_GRENZE (512 000) — der Fall `vendor.js.map`.
+    writeFileSync(join(quelle, 'gross.txt'), 'x'.repeat(600_000))
+    // Mit NUL, ohne Bild-Endung: der Binärfall.
+    writeFileSync(join(quelle, 'daten.bin'), Buffer.from([1, 2, 0, 3, 4, 0, 5]))
+    execFileSync('git', ['-C', quelle, 'add', '-A'])
+    execFileSync('git', ['-C', quelle, 'commit', '-qm', 'erste'])
+    bare = join(arbeit, 'r.git')
+    // `--initial-branch=main` ist NICHT Kosmetik: ohne ihn zeigt HEAD des
+    // nackten Repos auf `refs/heads/master`, der Push legt aber `main` an —
+    // HEAD hängt dann ins Leere, die Ankündigung enthält kein HEAD, und der
+    // Client bricht mit `NotFoundError: Could not find HEAD` ab. Genau so
+    // ist der erste Lauf gescheitert. Buzz legt seine Repos ebenso an
+    // (`api/git/transport.rs:2191`).
+    execFileSync('git', ['init', '-q', '--bare', '--initial-branch=main', bare])
+    execFileSync('git', ['-C', quelle, 'push', '-q', bare, 'main'])
+    // Und die Gegenprobe zur Vorbedingung: HEAD muss auflösbar sein, sonst
+    // prüfen die Zusagen unten etwas anderes als sie behaupten.
+    expect(
+        execFileSync('git', ['-C', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim(),
+    ).toBe('refs/heads/main')
+
+    // Alte Fassungen aufräumen ist hier NICHT nötig: ein 30617 ist
+    // ersetzbar, ein zweiter Lauf überschreibt dieselbe Adresse.
+    saeeRepo(REPO_D, `${WORKSPACE_HTTP}/git/${owner}/${REPO_D}`)
+    saeeRepo(FREMD_D, 'https://github.com/beispiel/fremd', 'https://github.com/beispiel/fremd')
+    saeeRepo(OHNE_D, 'ssh://git@example.invalid/nur-ssh.git')
+})
+
+test.afterAll(() => {
+    for (const id of ids) {
+        nak(['event', '--auth', '--sec', NSEC, '-k', '5', '-e', id, ZOOID_WS])
+    }
+    if (arbeit) {
+        rmSync(arbeit, { recursive: true, force: true })
+    }
+})
+
 test.describe('Forge: das README des Code-Browsers', () => {
-    test.beforeAll(() => {
-        expect(NSEC, 'NOSTR_TEST_NSEC ist nicht gesetzt').toBeTruthy()
-        owner = nak(['key', 'public', NSEC]).trim().split('\n')[0]?.trim() ?? ''
-        expect(owner).toHaveLength(64)
-
-        // Ein echtes Repository mit README — die Vorlage der Gegenstelle.
-        arbeit = mkdtempSync(join(tmpdir(), 'e2e-readme-'))
-        const quelle = join(arbeit, 'quelle')
-        execFileSync('git', ['init', '-q', '-b', 'main', quelle])
-        execFileSync('git', ['-C', quelle, 'config', 'user.email', 't@e.st'])
-        execFileSync('git', ['-C', quelle, 'config', 'user.name', 'T'])
-        writeFileSync(join(quelle, 'README.md'), '# Willkommen\n\nEin **fetter** Absatz aus dem echten Repository.\n')
-        writeFileSync(join(quelle, 'index.js'), 'export const x = 1\n')
-        execFileSync('git', ['-C', quelle, 'add', '-A'])
-        execFileSync('git', ['-C', quelle, 'commit', '-qm', 'erste'])
-        bare = join(arbeit, 'r.git')
-        // `--initial-branch=main` ist NICHT Kosmetik: ohne ihn zeigt HEAD des
-        // nackten Repos auf `refs/heads/master`, der Push legt aber `main` an —
-        // HEAD hängt dann ins Leere, die Ankündigung enthält kein HEAD, und der
-        // Client bricht mit `NotFoundError: Could not find HEAD` ab. Genau so
-        // ist der erste Lauf gescheitert. Buzz legt seine Repos ebenso an
-        // (`api/git/transport.rs:2191`).
-        execFileSync('git', ['init', '-q', '--bare', '--initial-branch=main', bare])
-        execFileSync('git', ['-C', quelle, 'push', '-q', bare, 'main'])
-        // Und die Gegenprobe zur Vorbedingung: HEAD muss auflösbar sein, sonst
-        // prüfen die Zusagen unten etwas anderes als sie behaupten.
-        expect(
-            execFileSync('git', ['-C', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim(),
-        ).toBe('refs/heads/main')
-
-        // Alte Fassungen aufräumen ist hier NICHT nötig: ein 30617 ist
-        // ersetzbar, ein zweiter Lauf überschreibt dieselbe Adresse.
-        saeeRepo(REPO_D, `${WORKSPACE_HTTP}/git/${owner}/${REPO_D}`)
-        saeeRepo(FREMD_D, 'https://github.com/beispiel/fremd', 'https://github.com/beispiel/fremd')
-        saeeRepo(OHNE_D, 'ssh://git@example.invalid/nur-ssh.git')
-    })
-
-    test.afterAll(() => {
-        for (const id of ids) {
-            nak(['event', '--auth', '--sec', NSEC, '-k', '5', '-e', id, ZOOID_WS])
-        }
-        if (arbeit) {
-            rmSync(arbeit, { recursive: true, force: true })
-        }
-    })
 
     // ── Die Zusage, um die es geht ──────────────────────────────────────────
 
@@ -371,5 +414,155 @@ test.describe('Forge: das README des Code-Browsers', () => {
         expect((await abbruch.innerText()).trim().length).toBeGreaterThan(0)
         // Der Fortschritt meldet sich der assistiven Technik.
         await expect(page.locator('[data-forge-readme-phase]')).toHaveAttribute('aria-live', 'polite')
+    })
+})
+
+/**
+ * DER CODE-BROWSER (P6): Baum, Dateianzeige, Speicherauskunft.
+ *
+ * Alles hier liest aus DEMSELBEN Klon wie das README — das ist die Auflage, und
+ * der Prüfstand hält sie fest: nach dem einen Download darf keine weitere
+ * Anfrage an `/git/` gehen, egal wie tief jemand blättert.
+ *
+ * Die drei Dateien mit Sonderbehandlung sind echt und liegen im Fixture:
+ * ein 1×1-PNG (enthält NUL — wäre bei falscher Prüfreihenfolge „binär"),
+ * eine 600-kB-Textdatei (über `TEXT_GRENZE`) und eine NUL-haltige `.bin`.
+ */
+test.describe('Forge: der Code-Browser', () => {
+    /** Repository laden und den Code-Reiter öffnen. */
+    async function oeffneCode(page: Page): Promise<void> {
+        await oeffneRepo(page, REPO_D)
+        if ((await page.locator('[data-forge-readme]').getAttribute('data-lage')) === 'bereit') {
+            await page.locator('[data-forge-readme-start]').click()
+        }
+        await expect(page.locator('[data-forge-readme]')).toHaveAttribute('data-lage', 'da', { timeout: 60_000 })
+        await page.getByRole('tab', { name: 'Code', exact: true }).click()
+        await expect(page.locator('[data-forge-baum]')).toBeVisible({ timeout: 30_000 })
+    }
+
+    test('der Wurzelbaum steht da — Verzeichnisse zuerst', async ({ page }) => {
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        const namen = await page.locator('[data-forge-baum-eintrag]').evaluateAll((els) =>
+            els.map((e) => `${e.getAttribute('data-art')}:${e.getAttribute('data-name')}`),
+        )
+        expect(namen[0]).toBe('tree:src')
+        expect(namen).toContain('blob:README.md')
+        expect(namen).toContain('blob:index.js')
+        expect(namen).toContain('blob:bild.png')
+    })
+
+    test('AUFLAGE: Blättern kostet KEIN Byte Netz — ein Datenpfad, nicht zwei', async ({ page }) => {
+        const zaehler = await verdrahteGit(page)
+        await oeffneCode(page)
+        const nachKlon = zaehler.anfragen
+        expect(nachKlon).toBeGreaterThan(0)
+
+        // In ein Verzeichnis, wieder heraus, eine Datei öffnen, ein Bild öffnen.
+        await page.locator('[data-forge-baum-eintrag][data-name="src"]').click()
+        await expect(page.locator('[data-forge-baum-eintrag][data-name="app.ts"]')).toBeVisible()
+        await page.locator('[data-forge-baum-hoch]').click()
+        await expect(page.locator('[data-forge-baum-eintrag][data-name="index.js"]')).toBeVisible()
+        await page.locator('[data-forge-baum-eintrag][data-name="index.js"]').click()
+        await expect(page.locator('[data-forge-datei]')).toBeVisible()
+
+        expect(zaehler.anfragen, 'Das Blättern hat nachgeladen.').toBe(nachKlon)
+    })
+
+    test('die Krümelspur führt hinein und wieder heraus', async ({ page }) => {
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        await page.locator('[data-forge-baum-eintrag][data-name="src"]').click()
+        await expect(page.locator('[data-forge-krumel]')).toContainText('src')
+        await page.locator('[data-forge-krumel-wurzel]').click()
+        await expect(page.locator('[data-forge-baum-eintrag][data-name="src"]')).toBeVisible()
+    })
+
+    test('eine Textdatei wird gezeigt', async ({ page }) => {
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        await page.locator('[data-forge-baum-eintrag][data-name="src"]').click()
+        await page.locator('[data-forge-baum-eintrag][data-name="app.ts"]').click()
+        const datei = page.locator('[data-forge-datei]')
+        await expect(datei).toHaveAttribute('data-art', 'text')
+        await expect(page.locator('[data-forge-datei-text]')).toContainText('hallo aus dem Unterverzeichnis')
+        await expect(page.locator('[data-forge-datei-name]')).toHaveText('src/app.ts')
+    })
+
+    test('WÄCHTER: eine zu grosse Datei wird NICHT gerendert — und sagt warum', async ({ page }) => {
+        // Der Fall `vendor.js.map`: 6 MB in den DOM zu schieben und dort zu
+        // scheitern wäre keine Entscheidung, sondern ihr Fehlen.
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        await page.locator('[data-forge-baum-eintrag][data-name="gross.txt"]').click()
+        const datei = page.locator('[data-forge-datei]')
+        await expect(datei).toHaveAttribute('data-art', 'zu-gross')
+        await expect(page.locator('[data-forge-datei-hinweis]')).toContainText('600')
+        // `toBeHidden`, NICHT `toHaveCount(0)`: `x-show` blendet aus, es
+        // entfernt nicht. Die falsche Frage hätte hier einen Defekt gemeldet,
+        // wo keiner ist — und die richtige Frage ist ohnehin die des Nutzers.
+        await expect(page.locator('[data-forge-datei-text]')).toBeHidden()
+    })
+
+    test('KONTROLLE: eine normale Textdatei WIRD gerendert', async ({ page }) => {
+        // Ohne diese Gegenprobe wäre die Zusage darüber auch dann grün, wenn
+        // die Anzeige gar nichts mehr zeigt.
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        await page.locator('[data-forge-baum-eintrag][data-name="index.js"]').click()
+        await expect(page.locator('[data-forge-datei]')).toHaveAttribute('data-art', 'text')
+        await expect(page.locator('[data-forge-datei-text]')).toContainText('export const x = 1')
+    })
+
+    test('eine Binärdatei wird als solche benannt, nicht als Zeichensalat gezeigt', async ({ page }) => {
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        await page.locator('[data-forge-baum-eintrag][data-name="daten.bin"]').click()
+        await expect(page.locator('[data-forge-datei]')).toHaveAttribute('data-art', 'binaer')
+        await expect(page.locator('[data-forge-datei-hinweis]')).toBeVisible()
+        await expect(page.locator('[data-forge-datei-text]')).toBeHidden()
+    })
+
+    test('WÄCHTER: ein PNG ist ein BILD, obwohl es NUL-Bytes enthält', async ({ page }) => {
+        // Prüfte die Fläche den Inhalt vor der Endung, landete jedes Bild bei
+        // „binär" und würde nie angezeigt.
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        await page.locator('[data-forge-baum-eintrag][data-name="bild.png"]').click()
+        await expect(page.locator('[data-forge-datei]')).toHaveAttribute('data-art', 'bild')
+        const bild = page.locator('[data-forge-datei-bild]')
+        await expect(bild).toBeVisible()
+        // `alt` ist der DATEINAME — ein erfundener Bildinhalt wäre eine
+        // Behauptung über etwas, das wir nicht kennen.
+        await expect(bild).toHaveAttribute('alt', 'bild.png')
+        expect(await bild.getAttribute('src')).toMatch(/^blob:/)
+    })
+
+    // ── Speicher ────────────────────────────────────────────────────────────
+
+    test('die Speicherauskunft nennt den Klon mit GEMESSENER Grösse', async ({ page }) => {
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        await page.locator('[data-forge-speicher-schalter]').click()
+        const zeile = page.locator('[data-forge-speicher-klon]').filter({ hasText: REPO_D })
+        await expect(zeile).toHaveCount(1)
+        // Eine Zahl, keine Schätzung: die Summe der Dateigrössen im Klon.
+        await expect(zeile).toContainText(/\d/)
+    })
+
+    test('ein entfernter Klon ist wirklich weg — und die Fläche geht zurück auf Anfang', async ({ page }) => {
+        await verdrahteGit(page)
+        await oeffneCode(page)
+        await page.locator('[data-forge-speicher-schalter]').click()
+        await page
+            .locator('[data-forge-speicher-klon]')
+            .filter({ hasText: REPO_D })
+            .locator('[data-forge-speicher-entfernen]')
+            .click()
+
+        // Zurück auf Anfang: der Download wird wieder angeboten, statt einen
+        // Baum zu zeigen, den es nicht mehr gibt.
+        await expect(page.locator('[data-forge-readme]')).toHaveAttribute('data-lage', 'bereit', { timeout: 30_000 })
+        await expect(page.locator('[data-forge-code-ansage]')).toBeVisible()
     })
 })
