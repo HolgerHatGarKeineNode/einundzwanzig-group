@@ -424,7 +424,15 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         'directory' => 3,
         'spaces' => 9,
         'forge' => 18,
-        'forge-repo' => 34,
+        // **34 → 39 mit P5 (2026-08-24).** Nachgerechnet, nicht nachgezogen: die
+        // Schreibriegel vor Zuweisen und Freigeben bringen genau fünf Träger mit —
+        // drei `::aria-disabled` (Zuweisung, Freigabe, Änderungswunsch; drei
+        // verschiedene Ausdrücke, also drei verschiedene Treffer) und zwei
+        // `role="status"` für die beiden „Wird gesendet …"-Anzeigen. Die zählen
+        // doppelt, weil der Extraktor Vorkommen sammelt und nicht Werte.
+        // `aria-disabled` statt `disabled` ist dabei die Zusage selbst: der Knopf
+        // behält seinen Fokus, sonst käme eine Tastatur nie an die Begründung.
+        'forge-repo' => 39,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
