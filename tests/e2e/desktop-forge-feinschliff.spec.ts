@@ -169,26 +169,29 @@ test.describe('Forge-Feinschliff (P6)', () => {
         // Der worker-eigene zooid überlebt den Lauf (RUNMARK-Wiederverwendung),
         // also wird aufgeräumt.
         //
-        // **Ein 30617 braucht `a` UND `k` — `-e <id>` allein richtet nichts aus.**
-        // Am 2026-08-24 Schritt für Schritt gemessen:
-        //   · `-e <id>`                    → `success`, Repo bleibt abrufbar
-        //   · `-t a=30617:<pub>:<d>`       → `success`, Repo bleibt abrufbar
-        //   · `-t a=…` PLUS `-t k=30617`   → `success`, Repo ist WEG
-        // Nach zehn Läufen dieses Prüfstands standen zweiundzwanzig
-        // Repositories in der Liste, obwohl jeder Lauf „aufgeräumt" hatte. Ein
-        // 30617 ist ADRESSIERBAR; NIP-09 verlangt dafür das `a`-Tag, und dieser
-        // Relay verlangt zusätzlich das `k`-Tag mit der Art. Dieselbe Klasse wie
-        // „kind 5 löscht ein 45003 nicht, quittiert aber mit success" — eine
-        // Quittung ist keine Wirkung.
+        // **KORREKTUR 2026-08-25:** Die vorige Fassung dieses Kommentars behauptete,
+        // ein 30617 brauche zwingend `a` UND `k` — `-e <id>` allein richte nichts
+        // aus. Das war die falsche Diagnose. Direkt am laufenden Testrelay neu
+        // gemessen (per REQUERY, nicht per `nak`-Ausgabe — die druckt das
+        // signierte Ereignis auch bei ABLEHNUNG):
+        //   · OHNE `--auth`, `-e <id>` allein        → `failed: auth-required`, Repo bleibt abrufbar
+        //   · OHNE `--auth`, `a`+`k`                 → `failed: auth-required`, Repo bleibt abrufbar
+        //   · MIT `--auth`,  `-e <id>` allein         → `success`, Repo ist WEG
+        // Keine der beiden Schleifen unten trug bisher `--auth` — DAS war die
+        // Lücke, nicht die gewählte Tag-Form. Backlog beim Nachmessen (2026-08-25):
+        // 84 liegengebliebene Test-Repositories über 18 Worker-Instanzen, davon
+        // der Großteil aus genau diesem `afterAll`. Ein 30617 ist zusätzlich
+        // ADRESSIERBAR (NIP-09), deshalb bleibt die a/k-Form als redundante
+        // Absicherung neben `-e` stehen — beide brauchen jetzt `--auth`.
         //
         // Der Prüfstand hängt nicht mehr davon ab (er filtert auf die Kennung
         // dieses Laufs), aber liegenbleibender Bestand ist trotzdem Müll: er
         // verlängert jede Repo-Liste und drückt gegen `FORGE_ROOT_LIMIT`.
         for (const id of ids) {
-            nak(['event', '--sec', NSEC, '-k', '5', '-e', id, ZOOID_WS])
+            nak(['event', '--auth', '--sec', NSEC, '-k', '5', '-e', id, ZOOID_WS])
         }
         for (const dtag of [REPO_VIEL, REPO_WENIG]) {
-            nak(['event', '--sec', NSEC, '-k', '5', '-t', `a=30617:${pubkey}:${dtag}`, '-t', 'k=30617', ZOOID_WS])
+            nak(['event', '--auth', '--sec', NSEC, '-k', '5', '-t', `a=30617:${pubkey}:${dtag}`, '-t', 'k=30617', ZOOID_WS])
         }
     })
 

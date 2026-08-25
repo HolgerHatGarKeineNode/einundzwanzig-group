@@ -465,7 +465,38 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         //   +1 `aria-hidden="true"` am Schrägstrich dazwischen: er ist
         //      Interpunktion, kein Wort, und die Sprachausgabe soll ihn nicht
         //      als „Schrägstrich" zwischen die Krümel lesen.
-        'forge-repo' => 41,
+        //
+        // **Flux-Angleich (2026-08-25): 41 → 37.** Der Nutzer hat entschieden, dass
+        // dort, wo eine Flux-Komponente existiert, sie auch benutzt wird. Der
+        // handgebaute Fortschrittsbalken des Klon-Downloads ist dabei
+        // `flux:progress` gewichen.
+        //
+        // Multiset-Diff (`array_count_values`, Arbeitsbaum gegen die Fassung vor dem
+        // Angleich) ist EINSEITIG — vier Deletions, KEINE Addition:
+        //   −1 `role="progressbar"`
+        //   −1 `aria-valuemin="0"`
+        //   −1 `aria-valuemax="100"`
+        //   −1 `:aria-valuenow="Math.round(klon.fortschritt.anteil * 100)"`
+        //
+        // **Die vier sind nicht weg, sie sind nur nicht mehr HIER zählbar.**
+        // `ui-progress` setzt alle vier selbst und hält `aria-valuenow` bei jedem
+        // Wert nach — nachgelesen an der Quelle, nicht angenommen:
+        // `vendor/livewire/flux-pro/dist/flux.js:10623` (`role`, `aria-valuemin`)
+        // und `:10639` (`aria-valuenow`, `aria-valuemax` in `updateVisual()`).
+        // Diese Zählung liest die BLADE-QUELLE; was ein Vendor-Stub zur Laufzeit
+        // setzt, sieht sie per Konstruktion nicht.
+        //
+        // **Das ist ein echter Verlust an Prüfbarkeit an dieser Stelle, und er ist
+        // hier notiert statt weggerechnet.** Wer den Balken künftig anfasst, hat
+        // diesen Riegel nicht mehr — die Zusage hängt ab jetzt an Flux. `aria-label`
+        // stand nie in dieser Zahl (der Extraktor schließt es aus) und steht
+        // unverändert an der Komponente.
+        //
+        // 'forge' bleibt bei 20: der Angleich hat dort drei Hauspillen auf
+        // `flux:badge` gehoben und eine Metazeile von `<p>` auf `<div>` gestellt —
+        // beides ohne ARIA-Träger. Multiset-Diff dieser Datei: leer in beide
+        // Richtungen.
+        'forge-repo' => 37,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)

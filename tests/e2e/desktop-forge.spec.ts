@@ -106,6 +106,7 @@ const nak = (args: readonly string[]): string => {
 }
 
 let besitzerSec = ''
+let besitzerPub = ''
 let repoEventId = ''
 
 /**
@@ -266,6 +267,9 @@ test.describe('Forge: die Desktop-Bühne', () => {
         repoEventId = (JSON.parse(zeile as string) as { id: string }).id
         expect(repoEventId).toHaveLength(64)
 
+        besitzerPub = nak(['key', 'public', besitzerSec]).trim().split('\n')[0]?.trim() ?? ''
+        expect(besitzerPub).toHaveLength(64)
+
         // Und der Relay muss es auch WIEDER HERAUSGEBEN. Annehmen und ausliefern
         // sind zwei verschiedene Zusagen — ein Gruppenrelay darf ein Ereignis
         // speichern und trotzdem nicht auf eine REQ antworten.
@@ -277,8 +281,29 @@ test.describe('Forge: die Desktop-Bühne', () => {
     test.afterAll(() => {
         // Der worker-eigene zooid überlebt den Lauf (RUNMARK-Wiederverwendung) —
         // ohne dies stünde bei jedem weiteren Lauf ein zweites Repo in der Liste.
+        //
+        // **`--auth` ist Pflicht, und sein Fehlen ist LAUTLOS.** Der worker-eigene
+        // zooid nimmt ein kind 5 OHNE NIP-42 nicht an: `nak` druckt trotzdem das
+        // signierte Löschereignis, aber der Relay antwortet mit
+        // `auth-required: authentication is required for access` statt `success` —
+        // die alte Fassung dieser Zeile prüfte das nie. Am 2026-08-25 direkt am
+        // laufenden Testrelay gemessen (Requery, nicht die `nak`-Ausgabe): OHNE
+        // `--auth` blieb ein frisches 30617 nach `kind 5 -e <id>` unverändert
+        // abrufbar; MIT `--auth` war es weg — zweimal reproduziert. Backlog zum
+        // Messzeitpunkt: 84 liegengebliebene Test-Repositories über 18
+        // Worker-Instanzen, ausschließlich aus dieser Lücke und der
+        // strukturgleichen in `desktop-forge-feinschliff.spec.ts`.
+        //
+        // **`-t a=… -t k=30617` zusätzlich zu `-e`**, weil ein 30617 ADRESSIERBAR
+        // ist (NIP-09) — mit `--auth` ist die `-e`-Form allein am aktuellen
+        // zooid-Stand bereits ausreichend (ebenfalls gemessen), die a/k-Form ist
+        // hier redundante Absicherung nach demselben Muster wie in
+        // `desktop-forge-feinschliff.spec.ts`.
         if (repoEventId && besitzerSec) {
-            nak(['event', '--sec', besitzerSec, '-k', '5', '-e', repoEventId, ZOOID_WS])
+            nak(['event', '--auth', '--sec', besitzerSec, '-k', '5', '-e', repoEventId, ZOOID_WS])
+            if (besitzerPub) {
+                nak(['event', '--auth', '--sec', besitzerSec, '-k', '5', '-t', `a=30617:${besitzerPub}:${REPO_D}`, '-t', 'k=30617', ZOOID_WS])
+            }
         }
     })
 
