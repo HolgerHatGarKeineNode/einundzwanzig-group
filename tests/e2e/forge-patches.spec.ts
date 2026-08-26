@@ -657,4 +657,339 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
         }
     })
 
+
+    /**
+     * DIE ZWEI FASSUNGEN DER VORGANGSZEILE — über ALLE Vorgangsarten (P3-Nachbesserung).
+     *
+     * ── Warum es diesen Riegel gibt ───────────────────────────────────────────
+     * P3 hat die Zeile auf zwei Ränge gebracht und dafür zwei ausdrücklich
+     * gesetzte Rasterfassungen gebaut. Meine erste Sonde dazu war schwach: sie
+     * mass NUR die Patch-Zeile, und zwei ihrer drei Proben waren **nicht
+     * diskriminierend** — die x-Position der Vorzeichenspalte ist per Grid immer
+     * gleich, und ein Drei-Zeichen-Vergleich traf Zeilen mit gleichem Anfang.
+     * Beide melden in JEDEM Zustand dasselbe. Ein Riegel, der nicht unterscheiden
+     * kann, ist Dekoration.
+     *
+     * ── Was hier die Fassungen UNTERSCHEIDET ──────────────────────────────────
+     * Genau ein struktureller Unterschied, und er ist der Prüfgegenstand:
+     *
+     *   schmal  `leute` (Gesichter + Kommentarzahl) steht auf der METAZEILE
+     *   breit   `leute` steht auf der TITELZEILE, links neben dem Zustand
+     *
+     * Auf einem Telefon darf die erste Zeile nur den Titel tragen; auf einer
+     * breiten Zeile beantwortet sie „was und wer". Gemessen wird also
+     * `leute.y > titel.y` gegen `leute.y === titel.y` — eine Aussage, die in
+     * genau einer der beiden Fassungen wahr ist.
+     *
+     * ── Und die Rangzahl ──────────────────────────────────────────────────────
+     * Zusätzlich wird gezählt, wie viele BÄNDER die Zeile hat: die y-Positionen
+     * aller belegten Rasterfelder, entdoppelt. Mehr als zwei heisst dritter Rang
+     * — genau der Fund, an dem die erste Fassung gescheitert ist (die Labels
+     * hatten ein eigenes Feld).
+     */
+    const FELDER = [
+        ['glyphe', '.forge-vz-glyphe'],
+        ['titel', '.forge-vz-titel'],
+        ['meta', '.forge-vz-meta'],
+        ['leute', '.forge-vz-leute'],
+        ['zustand', '.forge-vz-zustand'],
+    ] as const
+
+    type Matrix = Record<string, { x: number; y: number; w: number } | null>
+
+    async function feldmatrix(page: Page, wurzel: string): Promise<Matrix> {
+        return page.evaluate(
+            ([w, felder]) => {
+                const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement | null
+                if (!zeile) return {} as Matrix
+                const basis = zeile.getBoundingClientRect()
+                const out: Matrix = {}
+                for (const [name, sel] of felder as [string, string][]) {
+                    const el = zeile.querySelector(sel) as HTMLElement | null
+                    if (!el || !el.getClientRects().length) {
+                        out[name] = null
+                        continue
+                    }
+                    const r = el.getBoundingClientRect()
+                    out[name] = { x: Math.round(r.x - basis.x), y: Math.round(r.y - basis.y), w: Math.round(r.width) }
+                }
+                return out
+            },
+            [wurzel, FELDER.map((f) => [f[0], f[1]])] as const,
+        )
+    }
+
+    /**
+     * Zwei verschiedene Fragen, die beide „Rang" heissen — und nur eine davon
+     * ist eine ZUSAGE.
+     *
+     * 1. **STRUKTUR** (Zusage): wie viele BÄNDER legt das Raster an? Das sind die
+     *    Rasterfelder, geclustert zu Streifen. Genau zwei: Titelzeile und
+     *    Metazeile. Ein drittes Feld wäre der Fehler, den die Abnahme meint.
+     * 2. **UMBRUCH** (Beobachtung): wie viele Zeilen sieht der Leser am Ende? Das
+     *    hängt an der Titellänge. Ein langer Titel füllt seine letzte Zeile, die
+     *    Labels fliessen dann auf die nächste — auf 390 px gemessen sind das drei
+     *    sichtbare Streifen. Das ist normaler Textfluss, kein dritter Rang, und
+     *    es wird PROTOKOLLIERT statt behauptet.
+     *
+     * ── Wie ich das gelernt habe ──────────────────────────────────────────────
+     * Drei Entwürfe dieses Zählers, alle durch die Mutationsprobe gefallen:
+     *   · nackte y-Werte → die Typ-Glyphe (1,6 px optischer Versatz) wurde ein
+     *     drittes Band, bei einem Layout, das stimmt;
+     *   · Rasterfelder → konnte die Mutation „Labels bekommen ihr Feld zurück"
+     *     nicht sehen, weil die Labels seither IM Titelfeld liegen; die Mutation
+     *     traf gar nicht, und der Riegel meldete Deckung, die es nicht gab;
+     *   · Blatt-Kästen → sieht den Umbruch und wirft ihn mit dem Rang zusammen.
+     *
+     * Die tragende Zusage ist deshalb STRUKTURELL und wird mit einer zweiten,
+     * unabhängigen Assertion gehalten: die Labels müssen IM Titelfeld liegen.
+     * Diese ist mutationsgeprüft, indem sie im Markup herausgezogen wurden.
+     */
+    const streifen = (ys: number[]): number => {
+        let n = 0
+        let letzter = Number.NEGATIVE_INFINITY
+        for (const y of [...ys].sort((a, b) => a - b)) {
+            if (y - letzter >= 8) n++
+            letzter = y
+        }
+        return n
+    }
+
+    /** Sichtbare Blatt-Kästen — nur fürs Protokoll, nicht als Zusage. */
+    const sichtbareStreifen = async (page: Page, wurzel: string): Promise<number> =>
+        page.evaluate((w) => {
+            const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement | null
+            if (!zeile) return 0
+            const ys: number[] = []
+            for (const el of Array.from(zeile.querySelectorAll('*')) as HTMLElement[]) {
+                if (!el.getClientRects().length) continue
+                if ((el.getAttribute('class') ?? '').split(/\s+/).includes('sr-only')) continue
+                const text = Array.from(el.childNodes).some((k) => k.nodeType === 3 && (k.textContent ?? '').trim())
+                if (!text && !el.hasAttribute('data-flux-badge')) continue
+                ys.push(Math.round(el.getBoundingClientRect().y))
+            }
+            let n = 0
+            let letzter = Number.NEGATIVE_INFINITY
+            for (const y of ys.sort((a, b) => a - b)) {
+                if (y - letzter >= 8) n++
+                letzter = y
+            }
+            return n
+        }, wurzel)
+
+    /**
+     * Wie breit ist der CONTAINER der Zeile? Die Fassung hängt an ihm, nicht am
+     * Fenster: `@container vorgang (min-width: 30rem)`. Auf `/forge` liegt
+     * dieselbe Zeile in einer schmalen Spur und steht deshalb bei 1280 px Fenster
+     * in der SCHMALEN Fassung — gemessen, nicht vermutet. Ein Riegel, der die
+     * Fassung aus der Fensterbreite ableitet, prüft die falsche Grösse.
+     */
+    const containerBreite = async (page: Page, wurzel: string): Promise<number> =>
+        page.evaluate((w) => {
+            const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement | null
+            const box = zeile?.closest('.forge-vorgangskopf') as HTMLElement | null
+            return box ? Math.round(box.getBoundingClientRect().width) : 0
+        }, wurzel)
+
+    /**
+     * Trägt die Leute-Kiste etwas SICHTBARES? Die Breite taugt dafür nicht: in der
+     * schmalen Fassung teilt sich `leute` die Rasterspalte mit der Zustandspille
+     * und misst deren 30 px, auch wenn nichts darin steht.
+     */
+    const leuteGefuellt = async (page: Page, wurzel: string): Promise<boolean> =>
+        page.evaluate((w) => {
+            const zeile = document.querySelector(`${w} .forge-vorgangszeile`)
+            const l = zeile?.querySelector('.forge-vz-leute')
+            if (!l) return false
+            return Array.from(l.querySelectorAll('*')).some((k) => (k as HTMLElement).getClientRects().length > 0)
+        }, wurzel)
+
+    /** Liegen die Labels IM Titelfeld? Das ist die eigentliche Rang-Zusage. */
+    const labelsImTitel = async (page: Page, wurzel: string): Promise<boolean | null> =>
+        page.evaluate((w) => {
+            const zeile = document.querySelector(`${w} .forge-vorgangszeile`)
+            const labels = zeile?.querySelector('[data-forge-labels]')
+            if (!labels) return null
+            return !!labels.closest('.forge-vz-titel')
+        }, wurzel)
+
+
+    for (const [fassung, breite] of [
+        ['schmal', 390],
+        ['breit', 1280],
+    ] as const) {
+        test(`DoD P3: die ${fassung}e Fassung ist gesetzt — über alle Vorgangsarten`, async ({ page }) => {
+            await page.setViewportSize({ width: breite, height: 1100 })
+            await oeffneForge(page)
+
+            // ── Eine Zeile MIT LABELS ist Pflicht, nicht Beiwerk ──────────────
+            // Die Patch-Zeile trägt keine Labels. Ein Riegel, der nur sie misst,
+            // kann den dritten Rang nicht sehen: das Labelfeld ist dann leer und
+            // trägt kein Band. Die Mutationsprobe hat genau das gezeigt — mit
+            // wiederhergestelltem Labelband blieb der Riegel GRÜN. Deshalb sät
+            // dieser Test sich ein Issue mit drei Labels und räumt es wieder weg.
+            const issueId = eventIdAus(
+                nak([
+                    'event', '--auth', '--sec', besitzerSec, '-k', '1621',
+                    '-t', `a=30617:${besitzerPub}:${REPO_D}`,
+                    '-t', 'subject=Der Klon bricht ab, wenn der Relay mitten im Pack schliesst',
+                    '-t', 't=bug', '-t', 't=git-daemon', '-t', 't=needs-repro',
+                    '-c', 'Reproduzierbar mit einem 14-MB-Repo.', ZOOID_WS,
+                ]),
+            )
+
+            // ── Und eine GEFÜLLTE Leute-Kiste ────────────────────────────────
+            // Ohne sie steht die Fassungs-Zusage über einer LEEREN Kiste. Gemessen:
+            // in der schmalen Fassung teilt sich `leute` die Spalte mit der
+            // Zustandspille und erbt deren 30 px Breite, in der breiten hat es eine
+            // eigene Spalte und misst 0 — beides ohne ein einziges Gesicht darin.
+            // Die Lage stimmte trotzdem (die Mutationsprobe färbte rot), aber die
+            // Abnahme spricht von den GESICHTERN, nicht von einem Platzhalter.
+            // Zuweisungen kommen aus 1630–1633, nicht aus einem `p` am Issue; ein
+            // Kommentar ist der billigere Weg zum selben Beleg.
+            const kommentarId = eventIdAus(
+                nak([
+                    'event', '--auth', '--sec', besitzerSec, '-k', '1',
+                    '-t', `a=30617:${besitzerPub}:${REPO_D}`, '-t', `e=${issueId};;root`,
+                    '-c', 'Ich sehe dasselbe auf 2.44.', ZOOID_WS,
+                ]),
+            )
+
+            // ── Die dritte Vorgangsart: ein Pull Request ─────────────────────
+            const prId = eventIdAus(
+                nak([
+                    'event', '--auth', '--sec', besitzerSec, '-k', '1618',
+                    '-t', `a=30617:${besitzerPub}:${REPO_D}`, '-t', `p=${besitzerPub}`,
+                    '-t', 'subject=Pack-Abbruch sauber melden statt still abzubrechen',
+                    '-t', 'branch-name=fix/pack-abbruch', '-t', 'target-branch=master',
+                    '-t', `c=${'a'.repeat(40)}`, '-c', 'PR-Rumpf.', ZOOID_WS,
+                ]),
+            )
+            const prKommentarId = eventIdAus(
+                nak([
+                    'event', '--auth', '--sec', besitzerSec, '-k', '1',
+                    '-t', `a=30617:${besitzerPub}:${REPO_D}`, '-t', `e=${prId};;root`,
+                    '-c', 'Bitte noch den Testfall.', ZOOID_WS,
+                ]),
+            )
+
+            try {
+                await page.goto('/forge?tab=repos')
+                await page.locator('[data-forge-repo]').filter({ hasText: REPO_NAME }).first().click()
+                await page.getByRole('tab', { name: /^Issues/ }).click()
+                await expect(page.locator('[data-forge-issue]').first()).toBeVisible({ timeout: 30_000 })
+                // Vorbedingung: die gemessene Zeile trägt WIRKLICH Labels — sonst
+                // prüft die Rangzahl unten wieder nichts.
+                await expect(
+                    page.locator('[data-forge-issue]').first().locator('[data-forge-labels] [data-flux-badge]'),
+                    'die Beleg-Zeile trägt keine Label-Pillen — die Rangzahl wäre blind',
+                ).toHaveCount(3, { timeout: 20_000 })
+
+                /**
+                 * ALLE VIER Vorgangsarten. Es gibt genau vier Stellen mit
+                 * `.forge-vorgangszeile`: Issue, Pull Request und Patch auf der
+                 * Repo-Seite, dazu die workspace-weite Liste auf `/forge`
+                 * (`partials/forge-vorgangsliste.blade.php`, für Issues und PRs
+                 * derselbe Bauplan). Ein Riegel über zwei davon hätte die anderen
+                 * zwei frei laufen lassen — sie tragen dieselben Feldklassen und
+                 * würden bei einem Rasterbruch genauso kippen.
+                 */
+                const arten: { name: string; wurzel: string; labels: boolean; hin: () => Promise<void> }[] = [
+                    {
+                        name: 'Issue mit Labels', wurzel: '[data-forge-issue]', labels: true,
+                        hin: async () => { await page.getByRole('tab', { name: /^Issues/ }).click() },
+                    },
+                    {
+                        name: 'Pull Request', wurzel: '[data-forge-pr]', labels: false,
+                        hin: async () => { await page.getByRole('tab', { name: /^Pull Requests/ }).click() },
+                    },
+                    {
+                        name: 'Patch', wurzel: '[data-forge-patch]', labels: false,
+                        hin: async () => { await page.getByRole('tab', { name: /^Patches/ }).click() },
+                    },
+                    {
+                        name: 'Workspace-Liste', wurzel: '[data-forge-vorgang-link]', labels: false,
+                        hin: async () => {
+                            await page.goto('/forge?tab=issues')
+                            await expect(page.locator('[data-forge-region="issues"]')).toBeVisible({ timeout: 30_000 })
+                        },
+                    },
+                ]
+
+                let leuteBelegt = 0
+
+                for (const { name, wurzel, labels } of arten) {
+                    await arten.find((x) => x.name === name)!.hin()
+                    await expect(page.locator(wurzel).first(), `${name}: keine Zeile sichtbar`).toBeVisible({ timeout: 30_000 })
+
+                    const m = await feldmatrix(page, wurzel)
+                    console.log(`[p3-matrix] ${fassung} ${name}: ${JSON.stringify(m)}`)
+
+                    expect(m.titel, `${name}: kein Titelfeld gefunden — die Matrix wäre leer`).toBeTruthy()
+                    expect(m.zustand, `${name}: kein Zustandsfeld gefunden`).toBeTruthy()
+
+                    // ── Zusage 1: das RASTER legt genau zwei Bänder an ────────
+                    const felderStreifen = streifen(Object.values(m).filter(Boolean).map((f) => f!.y))
+                    const sichtbar = await sichtbareStreifen(page, wurzel)
+                    console.log(`[p3-raenge] ${fassung} ${name}: Raster ${felderStreifen} · sichtbar ${sichtbar}`)
+                    expect(
+                        felderStreifen,
+                        `${name}: das Raster legt ${felderStreifen} Bänder an statt zwei. Matrix: ${JSON.stringify(m)}`,
+                    ).toBeLessThanOrEqual(2)
+
+                    // ── Zusage 2: die Labels liegen IM Titelfeld ──────────────
+                    // Ohne sie wäre Zusage 1 blind: ein Labelband, das als eigenes
+                    // Rasterfeld zurückkehrt, hat diese Zeile schon einmal auf drei
+                    // Ränge gebracht — und die reine Feldzählung sah es nicht, weil
+                    // die Mutation im Markup sitzt, nicht im Raster.
+                    if (labels) {
+                        const drin = await labelsImTitel(page, wurzel)
+                        expect(drin, `${name}: kein [data-forge-labels] gefunden — die Rang-Zusage wäre ungeprüft`).not.toBeNull()
+                        expect(
+                            drin,
+                            `${name}: die Labels liegen NICHT im Titelfeld — sie bilden wieder einen eigenen Rang`,
+                        ).toBe(true)
+                    }
+
+                    // ── Der Unterschied der Fassungen ─────────────────────────
+                    // Nur an einer Kiste MIT Inhalt: eine leere sitzt zwar auch im
+                    // richtigen Rasterfeld, aber der Leser sieht davon nichts.
+                    const cb = await containerBreite(page, wurzel)
+                    const erwartet = cb >= 480 ? 'breit' : 'schmal'
+                    console.log(`[p3-fassung] ${fassung} ${name}: Container ${cb} px → ${erwartet}`)
+                    if (m.leute && (await leuteGefuellt(page, wurzel))) {
+                        leuteBelegt++
+                        if (erwartet === 'schmal') {
+                            expect(
+                                m.leute.y,
+                                `${name}: Container ${cb} px (schmale Fassung) — die Gesichter müssen UNTER dem Titel stehen (leute.y ${m.leute.y} vs titel.y ${m.titel!.y})`,
+                            ).toBeGreaterThan(m.titel!.y)
+                        } else {
+                            expect(
+                                m.leute.y,
+                                `${name}: Container ${cb} px (breite Fassung) — die Gesichter stehen auf der Titelzeile (leute.y ${m.leute.y} vs titel.y ${m.titel!.y})`,
+                            ).toBe(m.titel!.y)
+                        }
+                    }
+
+                    // Der Zustand hängt in BEIDEN Fassungen rechts an der Titelzeile.
+                    expect(m.zustand!.y, `${name}: die Zustandspille sitzt nicht auf der Titelzeile`).toBe(m.titel!.y)
+                    expect(m.zustand!.x, `${name}: die Zustandspille steht nicht rechts vom Titel`).toBeGreaterThan(m.titel!.x)
+                }
+
+                // Fail-closed: hätte KEINE Zeile eine gefüllte Leute-Kiste, wäre die
+                // Fassungs-Zusage oben nie ausgeführt worden — grün ohne Deckung.
+                expect(
+                    leuteBelegt,
+                    'keine einzige Zeile trug sichtbare Gesichter oder Zahlen — die Fassungs-Zusage lief leer',
+                ).toBeGreaterThan(0)
+            } finally {
+                loesche(prKommentarId)
+                loesche(kommentarId)
+                loesche(prId)
+                loesche(issueId)
+            }
+        })
+    }
+
 })
