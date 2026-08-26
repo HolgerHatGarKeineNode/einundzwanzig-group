@@ -57,7 +57,12 @@
  * |---|---|---|---|---|
  * | mit `workspace_url`, Space ungeladen | 60 | 36 | 532 | 264 |
  * | ohne `workspace_url`, Space ungeladen | 60 | 36 | 570 | **226** |
- * | mit `workspace_url`, Space MIT Beschreibung | **64,8** | 36 | 527,2 | 264 |
+ * | mit `workspace_url`, Space MIT Beschreibung | **64** | 36 | **528** | 264 |
+ *
+ * Die dritte Zeile stand bis 2026-08-26 als `64,8 | 36 | 527,2` da. Die Nachkomma-
+ * stelle kam aus der Beschreibungszeile in `text-[0.7rem]` (Zeilenbox 16,8 px); die
+ * Typo-Leiter aus P4 hat sie auf `text-xs` (16 px) gelegt, und damit sind alle Höhen
+ * dieser Fläche ganzzahlig.
  *
  * Alle drei werden hier gemessen. Die zweite Lage braucht einen EIGENEN `serve` ohne
  * `NOSTR_WORKSPACE_URL` (Fixture unten): ob die Forge-Zeile existiert, entscheidet der
@@ -424,7 +429,8 @@ testOhneWorkspace(
 
 for (const { hoehe, gibtDieListeAb } of [
     { hoehe: 900, gibtDieListeAb: 'alles' },
-    { hoehe: 380, gibtDieListeAb: 'teilweise' },
+    { hoehe: 380, gibtDieListeAb: 'alles' },
+    { hoehe: 379, gibtDieListeAb: 'teilweise' },
     { hoehe: 360, gibtDieListeAb: 'nichts' },
 ] as const) {
     test(`die Space-Beschreibung ist die eine Höhe, die der Server nicht kennt — 1440×${hoehe}`, async ({ page }) => {
@@ -434,7 +440,18 @@ for (const { hoehe, gibtDieListeAb } of [
         // die Richtung ist die Zusage: der Kopf darf wachsen, wenn die Beschreibung
         // eintrifft, aber nie schrumpfen.
         //
-        // ── WOHIN die 4,8 px gehen, hängt an der Fensterhöhe ────────────────────────
+        // ── WOHIN die 4 px gehen, hängt an der Fensterhöhe ──────────────────────────
+        // NACHGEZOGEN 2026-08-26 (P4, Typo-Leiter): der Betrag war **4,8 px** und ist
+        // jetzt **4,0**. Die Beschreibungszeile der Rail trug `text-[0.7rem]`
+        // (Zeilenbox 16,8 px) und trägt seit der Zusammenlegung auf vier Schriftstufen
+        // `text-xs` (16 px). Dadurch verschwindet die Nachkommastelle aus ALLEN Zahlen
+        // dieses Tests — und mit ihr der Grund, warum 1440×380 einmal der Teil-Fall war:
+        // die Grenze lag bei 380,8 px und liegt jetzt bei glatt 380. Bei 380 federt die
+        // Liste seither VOLLSTÄNDIG. Der Teil-Fall ist nicht verschwunden, er ist einen
+        // Pixel gewandert; damit die Abdeckung nicht still verlorengeht, läuft er hier
+        // als 1440×379 weiter (gemessen: 376 und tiefer = „nichts", 377–379 = Teil-Fall,
+        // 380 und höher = „alles").
+        //
         // Zwei Fassungen dieses Absatzes waren vorher falsch, und beide auf dieselbe
         // Weise: sie behaupteten mehr, als gemessen war.
         //
@@ -448,20 +465,22 @@ for (const { hoehe, gibtDieListeAb } of [
         // SOLANGE sie Spiel hat, und ihr Boden ist das eigene `pb-2` (8 px). Der Platz,
         // den die Spalte im gewachsenen Zustand braucht, ist
         //
-        //     64,8 (Kopf MIT Beschreibung) + 36 (Suchfeld) + 8 (mb-2) + 264 (Fußzeile)
-        //   +  8 (pb-2 der Liste)                                       = **380,8 px**
+        //     64 (Kopf MIT Beschreibung) + 36 (Suchfeld) + 8 (mb-2) + 264 (Fußzeile)
+        //   +  8 (pb-2 der Liste)                                         = **380 px**
         //
-        // Darüber federt die Liste vollständig, darunter teilt sie sich die 4,8 px mit
-        // der Fußzeile, und sobald mehr als 4,8 px fehlen, wandert die Fußzeile ganz.
+        // Ab da federt die Liste vollständig, darunter teilt sie sich die 4 px mit der
+        // Fußzeile, und sobald mehr als 4 px fehlen, wandert die Fußzeile ganz.
         //
         // Am gerenderten Element gemessen (2026-08-21, Sonde über sechs Höhen):
-        //   1440×900  Kopf +4,80 · Liste −4,80 · Fußzeile-y ±0
-        //   1440×500  Kopf +4,80 · Liste −4,80 · Fußzeile-y ±0
-        //   1440×380  Kopf +4,80 · Liste −4,00 · Fußzeile-y **+0,80**   ← 380,8 − 380
-        //   1440×370  Kopf +4,80 · Liste  ±0   · Fußzeile-y **+4,80**
-        //   1440×360  Kopf +4,80 · Liste  ±0   · Fußzeile-y **+4,80**
+        //   1440×900  Kopf +4 · Liste −4 · Fußzeile-y ±0
+        //   1440×380  Kopf +4 · Liste −4 · Fußzeile-y ±0     ← genau die Grenze
+        //   1440×379  Kopf +4 · Liste −3 · Fußzeile-y **+1**
+        //   1440×378  Kopf +4 · Liste −2 · Fußzeile-y **+2**
+        //   1440×377  Kopf +4 · Liste −1 · Fußzeile-y **+3**
+        //   1440×376  Kopf +4 · Liste ±0 · Fußzeile-y **+4**
+        //   1440×360  Kopf +4 · Liste ±0 · Fußzeile-y **+4**
         //
-        // Die 0,80 bei 380 px sind kein Rauschen, sondern genau der fehlende Rest —
+        // Der Rest bei 377–379 ist kein Rauschen, sondern genau der fehlende Betrag —
         // das ist die Probe auf die Formel. Alle drei Lagen laufen hier als eigener
         // Fall: eine Regel, die nur an einer Stelle geprüft ist, ist keine Regel,
         // sondern ein Messpunkt, und zwei Stellen haben den Teilbereich dazwischen
@@ -474,12 +493,13 @@ for (const { hoehe, gibtDieListeAb } of [
         await vorDemBoot(page)
         const { platzhalter, rail } = await vergleich(page)
 
-        // Kopf: +4,8 px, in beiden Lagen. Der Wert steht als Literal da, damit stilles
-        // Wachsen auffällt. `toBeCloseTo`, weil 64,8 − 60 in IEEE-754 als
-        // 4,799999999999997 herauskommt — zwei Nachkommastellen sind eine
-        // Zehntel-Subpixel-Grenze, keine Aufweichung.
-        expect(rail[0].h - platzhalter[0].h).toBeCloseTo(4.8, 2)
-        expect(rail[0].h).toBe(64.8)
+        // Kopf: +4 px, in beiden Lagen. Der Wert steht als Literal da, damit stilles
+        // Wachsen auffällt. `toBeCloseTo` bleibt, obwohl der Betrag seit P4 ganzzahlig
+        // ist: die Toleranz von zwei Nachkommastellen ist eine Zehntel-Subpixel-Grenze
+        // und kostet nichts — sie hat vorher 64,8 − 60 = 4,799999999999997 aufgefangen,
+        // und der nächste Typo-Schritt kann die Nachkommastelle zurückbringen.
+        expect(rail[0].h - platzhalter[0].h).toBeCloseTo(4, 2)
+        expect(rail[0].h).toBe(64)
         // Das Suchfeld behält seine Höhe immer — es ist `shrink-0`.
         expect(rail[1].h).toBe(platzhalter[1].h)
         // Und die Fußzeile ebenfalls: sie wird verschoben, nie gestaucht.
@@ -499,17 +519,17 @@ for (const { hoehe, gibtDieListeAb } of [
         // abhängt. Jede Lage nennt ihre Erwartung als Literal, damit ein stilles
         // Verschieben zwischen den Lagen auffällt.
         if (gibtDieListeAb === 'alles') {
-            expect(listeGibtAb).toBeCloseTo(4.8, 2)
+            expect(listeGibtAb).toBeCloseTo(4, 2)
             expect(fussWandert).toBe(0)
         } else if (gibtDieListeAb === 'teilweise') {
-            // 380,8 − 380 = 0,8 px fehlen der Spalte, genau die wandern.
-            expect(fussWandert).toBeCloseTo(0.8, 2)
-            expect(listeGibtAb).toBeCloseTo(4, 2)
+            // 380 − 379 = 1 px fehlt der Spalte, genau der wandert.
+            expect(fussWandert).toBeCloseTo(380 - hoehe, 2)
+            expect(listeGibtAb).toBeCloseTo(4 - (380 - hoehe), 2)
         } else {
-            // Mehr als 4,8 px fehlen: die Liste steht auf ihrem Boden, die Fußzeile
+            // Mehr als 4 px fehlen: die Liste steht auf ihrem Boden, die Fußzeile
             // nimmt alles.
             expect(rail[2].h).toBe(platzhalter[2].h)
-            expect(fussWandert).toBeCloseTo(4.8, 2)
+            expect(fussWandert).toBeCloseTo(4, 2)
         }
     })
 }
