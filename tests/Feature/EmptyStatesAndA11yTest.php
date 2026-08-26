@@ -556,6 +556,26 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // ist für die Sprachausgabe NICHT versteckt; sie trägt das Wort, im
         // schmalen Bild als `sr-only`. Hier verschwindet also kein Inhalt hinter
         // einem `aria-hidden`, es verschwindet ein Duplikat.
+        //
+        // **P5 desselben Plans (2026-08-26): 34 → 33.** Derselbe Vorgang wie bei
+        // 'forge' oben und aus derselben Ursache — Multiset-Diff EINSEITIG,
+        // `aria-hidden="true"` von 7 auf 6, keine Addition. Der eine ist die
+        // handgezogene Zeitleisten-Linie der Repo-Aktivität
+        // (`<span aria-hidden="true" class="absolute start-[0.875rem] …">`), die
+        // `flux:timeline` ersetzt hat.
+        //
+        // Die Begründung steht ausgeschrieben bei 'forge' und gilt hier
+        // unverändert: am gerenderten Baum ist nichts verloren gegangen (die
+        // Linien tragen weder Text noch `role`/`aria-label`, sie standen nie im
+        // Barrierebaum), und `flux:timeline.indicator` bringt einen EIGENEN
+        // Träger mit, den dieser Quelltext-Scanner nicht sehen kann. Gemessen,
+        // nicht gefolgert — `p5-aria-zeitleiste.log`; der Riegel dafür ist die
+        // DOM-Zusage in `forge-patches.spec.ts`.
+        //
+        // **Diese Zeilen stehen hier, weil eine gesenkte Erwartungszahl ohne
+        // Begründung daneben nicht mehr unterscheidbar ist von einer stillen
+        // Abschwächung.** Die Zahl bei 'forge' hatte den Block, diese nicht —
+        // im Gate aufgefallen und nachgezogen.
         'forge-repo' => 33,
     ];
 

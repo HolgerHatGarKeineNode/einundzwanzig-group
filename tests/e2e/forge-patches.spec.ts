@@ -487,6 +487,18 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
         await oeffneForge(page)
         await page.locator('[data-forge-suche-feld]').fill('x')
         for (const wahl of ['[data-forge-suche-feld]', '[data-forge-suche-leeren]']) {
+            // Auf die BEDINGUNG warten, nicht auf eine Wartezeit. `boundingBox()`
+            // ist eine Einzelmessung ohne Auto-Wait, und der Leeren-Knopf hängt an
+            // `x-show="suche !== ''"` — also an einer Alpine-Reaktion auf das
+            // `input`-Ereignis von `fill()`. Wer sofort misst, misst manchmal den
+            // Zustand DAVOR: `null` statt eines Kastens. Isoliert 3/3 grün, im
+            // vollen Dateilauf auf frischem Slot einmal rot
+            // (`p5n2-dateilauf-frischer-slot41.log`) — das Bild einer Wettlaufs,
+            // nicht eines fehlenden Bestands.
+            await expect(
+                page.locator(wahl).first(),
+                `${wahl} ist nach der Eingabe nicht sichtbar geworden`,
+            ).toBeVisible({ timeout: 10_000 })
             const kasten = await page.locator(wahl).first().boundingBox()
             expect(kasten, `${wahl} hat keinen Kasten`).not.toBeNull()
             expect(Math.round(kasten?.width ?? 0), `${wahl} zu schmal`).toBeGreaterThanOrEqual(24)
@@ -1098,48 +1110,85 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
      * Rahmen der Karte, UND seine Textkante trifft die der Zeilen.
      */
     test('DoD P5: der Gruppenkopf liegt im Rahmen und fluchtet mit den Zeilen', async ({ page }) => {
-        await oeffneForge(page)
-        await page.goto('/forge?tab=issues')
-        await expect(page.locator('[data-forge-gruppe]').first()).toBeVisible({ timeout: 30_000 })
+        // ── Dieser Test sät sein eigenes Issue, und das ist der Kern ────────────
+        // Vorher tat er es nicht: er nahm die ERSTE `[data-forge-gruppe]`, die auf
+        // der Fläche stand — und die stand dort nur, weil ein FREMDER Spec auf
+        // demselben zooid-Slot ein 1621 hinterlassen hatte (mehrere seeden, keiner
+        // räumt auf). Auf drei frischen Slots lief er in einen 30-s-Timeout. Der
+        // Mechanismus war in Ordnung, die Zusage trug sich nur selbst nicht.
+        //
+        // Gewählt wurde SÄEN statt einer blossen Vorbedingung, obwohl beides den
+        // stillen Fall beendet hätte: eine Vorbedingung, die überspringt, wäre
+        // fail-open (grün ohne Messung) — genau die Bauform, die in dieser Datei
+        // schon zweimal aufgeräumt wurde. Eine, die hart fällt, wäre ehrlich, liesse
+        // die DoD-Zeile auf einem frischen Slot aber UNBEWEISBAR. Nur Säen macht die
+        // Aussage vom Laufzustand unabhängig. Die explizite `karteGefunden`-Prüfung
+        // unten BLEIBT trotzdem — sie fängt den toten Selektor, nicht die leere Fläche.
+        //
+        // Und gemessen wird gezielt die EIGENE Gruppe (`[data-address$=":<repo>"]`),
+        // nicht die erste beste: sonst hinge das Ergebnis weiter an fremdem Müll,
+        // nur diesmal unbemerkt in der anderen Richtung.
+        const gruppenIssueId = eventIdAus(
+            nak([
+                'event', '--auth', '--sec', besitzerSec, '-k', '1621',
+                '-t', `a=30617:${besitzerPub}:${REPO_D}`,
+                '-t', 'subject=Der Kopfstreifen und seine Liste gehoeren in EINEN Rahmen',
+                '-c', 'Gesät von der P5-Lageprüfung; sie räumt es im finally wieder weg.',
+                ZOOID_WS,
+            ]),
+        )
 
-        const m = await page.evaluate(() => {
-            const gruppe = document.querySelector('[data-forge-gruppe]') as HTMLElement
-            const kopf = gruppe.querySelector('[data-forge-gruppe-link]')?.parentElement as HTMLElement
-            const zeile = gruppe.querySelector('.forge-vorgangszeile') as HTMLElement
-            const titel = zeile.querySelector('.forge-vz-titel') as HTMLElement
-            const r = (e: HTMLElement) => e.getBoundingClientRect()
-            // Die KARTE suchen, nicht die Sektion: nach der Mutationsprobe stand fest,
-            // dass ein Kopf ausserhalb der Karte, aber innerhalb der Sektion die
-            // Lageprüfung passiert — die Sektion umfasst dann beides. Gefragt ist,
-            // ob der Kopf im RAHMEN liegt, und den zieht `surface-card`.
-            const karte = (gruppe.classList.contains('surface-card') ? gruppe : gruppe.querySelector('.surface-card')) as HTMLElement | null
-            const g = karte ? r(karte) : r(gruppe)
-            return {
-                karteGefunden: !!karte,
-                kopfImRahmen: !!karte && r(kopf).left >= g.left && r(kopf).right <= g.right && r(kopf).top >= g.top,
-                kopfFlaeche: getComputedStyle(kopf).backgroundColor,
-                kopfUnterkante: getComputedStyle(kopf).borderBottomWidth,
-                kopfTextX: Math.round(r(gruppe.querySelector('[data-forge-gruppe-link]') as HTMLElement).x - g.x),
-                glypheX: Math.round(r(zeile.querySelector('.forge-vz-glyphe') as HTMLElement).x - g.x),
-                titelX: Math.round(r(titel).x - g.x),
-                // Geschachtelte Karten: die Gruppe SELBST ist die Karte, in ihr darf
-                // keine zweite stecken.
-                karten: gruppe.querySelectorAll('.surface-card').length,
-            }
-        })
-        console.log(`[p5-kartenkopf] ${JSON.stringify(m)}`)
+        try {
+            await oeffneForge(page)
+            await page.goto('/forge?tab=issues')
+            // Die Gruppe DIESES Repos, nicht die erste auf der Fläche.
+            const meine = `[data-forge-gruppe][data-address$=":${REPO_D}"]`
+            await expect(
+                page.locator(meine).first(),
+                'die selbst gesäte Repo-Gruppe erscheint nicht — dann misst die Lageprüfung fremden Laufzustand oder nichts',
+            ).toBeVisible({ timeout: 30_000 })
 
-        expect(m.karteGefunden, 'keine surface-card in der Gruppe gefunden — die Lageprüfung liefe leer').toBe(true)
-        expect(m.kopfImRahmen, 'der Gruppenkopf liegt nicht im Rahmen der Karte').toBe(true)
-        expect(parseFloat(m.kopfUnterkante), 'der Kopfstreifen hat keine Unterkante — dann ist er kein Streifen').toBeGreaterThan(0)
-        // EINE Karte, nicht zwei geschachtelte: zwei Kanten übereinander waren der
-        // Zustand, gegen den `.forge-diff-datei` schon einmal aufgeräumt wurde.
-        expect(m.karten, 'in der Gruppe steckt eine zweite surface-card — zwei Kanten auf derselben Stelle').toBe(0)
-        // Die Fluchtlinie: Kopftext und Zeilenglyphe stehen auf derselben Kante.
-        expect(
-            Math.abs(m.kopfTextX - m.glypheX),
-            `Kopftext (x=${m.kopfTextX}) und Zeileninhalt (x=${m.glypheX}) stehen nicht auf einer Fluchtlinie`,
-        ).toBeLessThanOrEqual(1)
+            const m = await page.evaluate((sel) => {
+                const gruppe = document.querySelector(sel) as HTMLElement
+                const kopf = gruppe.querySelector('[data-forge-gruppe-link]')?.parentElement as HTMLElement
+                const zeile = gruppe.querySelector('.forge-vorgangszeile') as HTMLElement
+                const titel = zeile.querySelector('.forge-vz-titel') as HTMLElement
+                const r = (e: HTMLElement) => e.getBoundingClientRect()
+                // Die KARTE suchen, nicht die Sektion: nach der Mutationsprobe stand fest,
+                // dass ein Kopf ausserhalb der Karte, aber innerhalb der Sektion die
+                // Lageprüfung passiert — die Sektion umfasst dann beides. Gefragt ist,
+                // ob der Kopf im RAHMEN liegt, und den zieht `surface-card`.
+                const karte = (gruppe.classList.contains('surface-card') ? gruppe : gruppe.querySelector('.surface-card')) as HTMLElement | null
+                const g = karte ? r(karte) : r(gruppe)
+                return {
+                    karteGefunden: !!karte,
+                    kopfImRahmen: !!karte && r(kopf).left >= g.left && r(kopf).right <= g.right && r(kopf).top >= g.top,
+                    kopfFlaeche: getComputedStyle(kopf).backgroundColor,
+                    kopfUnterkante: getComputedStyle(kopf).borderBottomWidth,
+                    kopfTextX: Math.round(r(gruppe.querySelector('[data-forge-gruppe-link]') as HTMLElement).x - g.x),
+                    glypheX: Math.round(r(zeile.querySelector('.forge-vz-glyphe') as HTMLElement).x - g.x),
+                    titelX: Math.round(r(titel).x - g.x),
+                    // Geschachtelte Karten: die Gruppe SELBST ist die Karte, in ihr darf
+                    // keine zweite stecken.
+                    karten: gruppe.querySelectorAll('.surface-card').length,
+                }
+            }, meine)
+            console.log(`[p5-kartenkopf] ${JSON.stringify(m)}`)
+
+            expect(m.karteGefunden, 'keine surface-card in der Gruppe gefunden — die Lageprüfung liefe leer').toBe(true)
+            expect(m.kopfImRahmen, 'der Gruppenkopf liegt nicht im Rahmen der Karte').toBe(true)
+            expect(parseFloat(m.kopfUnterkante), 'der Kopfstreifen hat keine Unterkante — dann ist er kein Streifen').toBeGreaterThan(0)
+            // EINE Karte, nicht zwei geschachtelte: zwei Kanten übereinander waren der
+            // Zustand, gegen den `.forge-diff-datei` schon einmal aufgeräumt wurde.
+            expect(m.karten, 'in der Gruppe steckt eine zweite surface-card — zwei Kanten auf derselben Stelle').toBe(0)
+            // Die Fluchtlinie: Kopftext und Zeilenglyphe stehen auf derselben Kante.
+            expect(
+                Math.abs(m.kopfTextX - m.glypheX),
+                `Kopftext (x=${m.kopfTextX}) und Zeileninhalt (x=${m.glypheX}) stehen nicht auf einer Fluchtlinie`,
+            ).toBeLessThanOrEqual(1)
+        } finally {
+            loesche(gruppenIssueId)
+        }
     })
 
 })
