@@ -350,11 +350,26 @@ test('NEGATIVKONTROLLE: dieselbe Sonde sieht den Fehler, wenn man das alte Marku
 
     const kaputt = await messen(page)
 
-    // Genau der gemeldete Zustand: Bühne in der Rail-Spur, Ortskarte 80 px, Text gekürzt.
+    // Genau der gemeldete Zustand: Bühne in der Rail-Spur, Text gekürzt.
     expect(kaputt.mainX).toBe(0)
     expect(kaputt.mainW).toBe(320)
-    expect(kaputt.karteW).toBe(80)
     expect(kaputt.gekuerzt).toBe(true)
+    // ── Die Kartenbreite: 80 → 77,33 (P2, 2026-08-26) ────────────────────────
+    // Diese Zahl beschreibt NICHT den Fehler, sondern eine FOLGE der Bühnen-
+    // Polsterung, und die ist mit P2 stetig geworden: `xl:px-8` (feste 32 px) ist
+    // `xl:px-[clamp(2rem,2.5vw,3rem)]` gewichen, weil die alte zweite Stufe
+    // `2xl:px-12` den Inhaltsdeckel bei 1536 px um 31 px FALLEN liess.
+    //
+    // Nachgerechnet bei den 1440 px dieses Laufs: 2,5 vw sind 36 px je Seite, die
+    // Bühne im kaputten Zustand ist 320 px breit → 320 − 72 = 248 px Inhalt,
+    // geteilt auf drei Karten mit 8 px Rinne: (248 − 16) / 3 = 77,33.
+    // Vorher mit 32 px Polster: (320 − 64 − 16) / 3 = 80.
+    //
+    // Die Zusage dieser Kontrolle ist unberührt — sie lautet „dieselbe Sonde sieht
+    // den Fehler", und das tun die drei Assertions darüber unverändert. Die Zahl
+    // wird trotzdem exakt festgehalten statt auf ein `< 100` aufgeweicht: eine
+    // Schwelle hier verlöre die Fähigkeit, eine ZWEITE Layout-Änderung zu melden.
+    expect(kaputt.karteW).toBe(77.33)
 })
 
 /**
