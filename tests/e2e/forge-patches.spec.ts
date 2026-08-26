@@ -3,6 +3,7 @@ import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { nip19 } from 'nostr-tools'
+import { measure } from './support/contrast'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
@@ -533,4 +534,127 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
         })
         expect(name.length, 'Das Suchfeld hat keinen zugänglichen Namen.').toBeGreaterThan(0)
     })
+
+    /**
+     * DIE DIFF-ZAHLEN HALTEN IHREN KONTRAST — der Riegel, der P1 im Gate gefehlt hat.
+     *
+     * ── Warum es ihn braucht, und warum genau hier ────────────────────────────
+     * P1 (2026-08-26) hat die vier Diff-Zahlen von getöntem Text auf
+     * `flux:badge color="green|red"` gehoben und dafür Zahlen protokolliert. Eine
+     * davon war FALSCH: das Messskript bildete Flux' Klassenwahl von Hand nach und
+     * nahm für Rot die 800er-Stufe, obwohl der Stub `text-red-700` rendert
+     * (Tailwinds Palette ist zwischen den Farbtönen nicht einheitlich). Der wahre
+     * Wert lag gut einen Punkt tiefer — über der Schwelle, aber eben nicht dort,
+     * wo es im Protokoll stand.
+     *
+     * **Der eigentliche Mangel war nicht die Zahl, sondern dass nichts sie hielt.**
+     * Eine protokollierte Zahl altert still, und der nächste Leser glaubt ihr, WEIL
+     * sie protokolliert ist. Gemessen wird deshalb ab hier am gerenderten Baum, in
+     * beiden Themes, mit dem Haus-Helfer (`support/contrast.ts`) — der kennt die
+     * `oklab`-Serialisierung von Tailwind v4 und komponiert Alpha über den echten
+     * Untergrund, statt einen Zahlen-Regex darauf loszulassen.
+     *
+     * Dieser Spec ist der Ort, weil er als einziger einen ECHTEN Patch mit ECHTEM
+     * Diff sät: die Patch-Zeile trägt `+n`/`−n` auf `surface-card`, der aufgeklappte
+     * Diff-Kopf dieselben Zahlen auf `zinc-50` — zwei verschiedene Untergründe,
+     * beide gefordert.
+     *
+     * Schwelle: die Zahlen sind TEXT (1.4.3, 4,5:1), nicht Grafik. Der Helfer leitet
+     * sie aus der gerenderten Schrift ab statt sie festzunageln; hier wird zusätzlich
+     * geprüft, dass er wirklich 4,5 verlangt — käme er auf 3, wäre die Zusage
+     * heimlich abgeschwächt.
+     */
+    const DIFF_ZAHL_TRAEGER = [
+        { selector: '[data-forge-stat-plus]', label: 'Diff-Zahl + (Patch-Zeile)', kind: 'text' as const },
+        { selector: '[data-forge-stat-minus]', label: 'Diff-Zahl − (Patch-Zeile)', kind: 'text' as const },
+        { selector: '[data-forge-diff-plus]', label: 'Diff-Zahl + (Diff-Kopf)', kind: 'text' as const },
+        { selector: '[data-forge-diff-minus]', label: 'Diff-Zahl − (Diff-Kopf)', kind: 'text' as const },
+    ]
+
+    /** Patches öffnen UND den ersten aufklappen, damit auch der Diff-Kopf steht. */
+    async function oeffnePatchMitDiff(page: Page): Promise<void> {
+        await oeffnePatches(page)
+        await page.locator('[data-forge-patch]').first().locator('button').first().click()
+        await expect(page.locator('[data-forge-diff]').first()).toBeVisible()
+    }
+
+    for (const theme of ['light', 'dark'] as const) {
+        test(`DoD P1: die vier Diff-Zahlen halten 4,5:1 auf ihrem echten Untergrund (${theme})`, async ({ page }) => {
+            await page.addInitScript((t) => {
+                try {
+                    localStorage.setItem('flux.appearance', t as string)
+                } catch {
+                    /* kein localStorage → der Lauf misst dann das Default-Theme */
+                }
+            }, theme)
+            await oeffnePatchMitDiff(page)
+            if (theme === 'dark') {
+                await expect(page.locator('html')).toHaveClass(/dark/, { timeout: 15_000 })
+            } else {
+                await expect(page.locator('html')).not.toHaveClass(/dark/, { timeout: 15_000 })
+            }
+
+            const gemessen = (await measure(page, DIFF_ZAHL_TRAEGER)).filter((m) => m.label.startsWith('Diff-Zahl'))
+            for (const m of gemessen) {
+                console.log(`[diff-kontrast] ${theme}: ${m.label} — ${m.fg} auf ${m.bg} = ${m.ratio}:1 (verlangt ${m.min}, Deckkraft ${m.opacity})`)
+            }
+
+            // Fail-CLOSED: der Helfer meldet einen nicht getroffenen Selektor als
+            // eigenen Eintrag mit `ratio: 0` und „(NICHT GEFUNDEN)" im Label. Ohne
+            // diese beiden Zeilen wäre ein weggewanderter Anker eine stille Lücke.
+            expect(gemessen, 'nicht alle vier Diff-Zahlen wurden gemessen').toHaveLength(4)
+            expect(
+                gemessen.filter((m) => m.label.includes('NICHT GEFUNDEN')).map((m) => m.label),
+                'ein Anker der Diff-Zahlen wurde nicht gefunden — der Riegel misst dann nichts',
+            ).toEqual([])
+
+            for (const m of gemessen) {
+                expect(m.min, `${m.label}: die Schwelle ist auf ${m.min} gerutscht — die Zahlen sind TEXT und schulden 4,5`).toBe(4.5)
+                expect(m.opacity, `${m.label}: Deckkraft ${m.opacity} — ein Elternteil dimmt die Zahl, das Verhältnis waere zu gut`).toBe(1)
+                expect(m.ratio, `${m.label}: ${m.ratio}:1 auf ${m.bg} — WCAG 1.4.3 verlangt ${m.min}:1`).toBeGreaterThanOrEqual(m.min)
+            }
+        })
+    }
+
+    /**
+     * KONTROLLE zum Riegel darüber: eine verschlechterte Farbe MUSS er sehen.
+     *
+     * Ohne sie wüsste niemand, ob der grüne Lauf „der Kontrast stimmt" bedeutet oder
+     * „die Messung greift gar nicht" — der Fehler, an dem dieses Repo schon zweimal
+     * eine Zusage verloren hat. Injiziert wird kein Fantasiewert, sondern genau die
+     * Verschlechterung, die ein Mensch versehentlich baut: die Zahl bekommt die
+     * FLÄCHENFARBE ihres eigenen Badges als Textfarbe (`green-400`/`red-400`) — das
+     * ist der klassische „ich nehme denselben Ton"-Griff und liegt sicher unter 4,5.
+     */
+    test('KONTROLLE: der Kontrast-Wächter der Diff-Zahlen erkennt eine verschlechterte Farbe', async ({ page }) => {
+        await oeffnePatchMitDiff(page)
+
+        const vorher = (await measure(page, DIFF_ZAHL_TRAEGER)).filter((m) => m.label.startsWith('Diff-Zahl'))
+        expect(vorher, 'Ausgangsmessung unvollstaendig').toHaveLength(4)
+        for (const m of vorher) {
+            expect(m.ratio, `Ausgangszustand ${m.label} ist schon rot — die Kontrolle kann so nichts zeigen`).toBeGreaterThanOrEqual(m.min)
+        }
+
+        await page.evaluate(() => {
+            for (const sel of ['[data-forge-stat-plus]', '[data-forge-diff-plus]']) {
+                const el = document.querySelector(sel) as HTMLElement | null
+                if (el) el.style.color = 'var(--color-green-400)'
+            }
+            for (const sel of ['[data-forge-stat-minus]', '[data-forge-diff-minus]']) {
+                const el = document.querySelector(sel) as HTMLElement | null
+                if (el) el.style.color = 'var(--color-red-400)'
+            }
+        })
+
+        const nachher = (await measure(page, DIFF_ZAHL_TRAEGER)).filter((m) => m.label.startsWith('Diff-Zahl'))
+        expect(nachher).toHaveLength(4)
+        for (const m of nachher) {
+            console.log(`[diff-kontrast] KONTROLLE: ${m.label} — ${m.fg} auf ${m.bg} = ${m.ratio}:1 (verlangt ${m.min})`)
+            expect(
+                m.ratio,
+                `${m.label}: die verschlechterte Farbe misst ${m.ratio}:1 und bleibt damit ueber ${m.min} — der Waechter kann eine Regression nicht sehen`,
+            ).toBeLessThan(m.min)
+        }
+    })
+
 })
