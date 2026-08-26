@@ -177,7 +177,6 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
                 '-t', `p=${owner}`,
                 '-t', 'subject=P8 Zwergotter PR',
                 '-t', 'branch-name=feat/p8',
-                '-t', 'target-branch=master',
                 '-c', 'Ziel fuer den PR-Kommentar.',
             ]),
         ).toContain('success')

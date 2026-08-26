@@ -164,7 +164,7 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
             expect(publish(BUZZ_OWNER_SEC_HEX, [
                 '-k', '1618', '-t', `a=${address}`, '-t', `p=${owner}`,
                 '-t', `subject=${subject}`, '-t', 'branch-name=feat/p5',
-                '-t', 'target-branch=master', '-t', `c=${COMMIT}`, '-c', 'PR-Rumpf.',
+                '-t', `c=${COMMIT}`, '-c', 'PR-Rumpf.',
             ])).toContain('success')
         }
         const prs = events(['-k', '1618', '-t', `a=${address}`])

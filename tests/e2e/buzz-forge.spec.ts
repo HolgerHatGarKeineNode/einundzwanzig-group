@@ -294,7 +294,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
             ['-k', '1618', '-t', `a=${address}`],
             PR_SUBJECT,
             ['-k', '1618', '-t', `a=${address}`, '-t', `p=${owner}`, '-t', `subject=${PR_SUBJECT}`,
-             '-t', 'branch-name=feat/zwergotter', '-t', 'target-branch=master',
+             '-t', 'branch-name=feat/zwergotter',
              '-t', `c=${COMMIT}`, '-c', 'Ein Testvorschlag.'],
         )
     })
