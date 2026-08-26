@@ -76,6 +76,85 @@ async function openForgeAt320(page: Page): Promise<void> {
  * ueber die Bridge) — negativ/0 heisst „liegt innerhalb", positiv heisst „ragt
  * ueber den sichtbaren Ausschnitt hinaus".
  */
+/**
+ * Die Tab-Leiste ZWINGEN zu scrollen, bis der letzte Reiter GANZ draussen liegt —
+ * Vorbedingung der beiden Erreichbarkeits-Tests unten.
+ *
+ * ── Warum das seit P1 (2026-08-26) nötig ist ──────────────────────────────────
+ * Mit dem Fall von `variant="segmented"` ist die Leiste SCHMALER geworden: Flux'
+ * Default gibt jedem Reiter `px-2` statt `px-4` und 16 px Rinne dazwischen, gegen
+ * 32 px Polster je Reiter plus 8 px Schienenpolster vorher. Gemessen bei 320 px,
+ * DE: der letzte Reiter liegt jetzt **19 px INNERHALB** des Ausschnitts. Drei
+ * Reiter passen ohne Scrollen — der beabsichtigte Gewinn, und zugleich das Ende
+ * der bisherigen Vorbedingung.
+ *
+ * ── Und warum die bisherige Vorbedingung ohnehin nichts hielt ─────────────────
+ * Gemessen an HEAD, mit gestashter P1-Arbeit, am realen Baum (nicht geschätzt):
+ * der Rand-Abstand betrug dort **1 px** bei 74 px Reiterbreite. Die Vorbedingung
+ * lautete `> 0`, die Zusage danach `<= 1` — **beide waren mit demselben Wert
+ * gleichzeitig erfüllt**. Der Test konnte gar nicht rot werden, egal ob
+ * irgendetwas scrollt; die Kontrollgruppe daneben („ohne `scrollIntoView` bleibt
+ * er draussen") war aus demselben Grund grün: 1 px bleibt 1 px. Ein toter Anker,
+ * der wie ein Riegel aussah.
+ *
+ * ── Was WIRKLICH scrollt, gemessen ────────────────────────────────────────────
+ * Drei Läufe mit verschieden breiter Sonde:
+ *   - Reiter zu ~88 % verdeckt (7 px sichtbar): der Fokus scrollt **nicht**.
+ *     Weder Flux' `Activatable.activate()` noch der Browser holen ihn herein.
+ *   - Reiter GANZ draussen: der Fokus holt ihn auf Rand-Abstand 0 —
+ *     **auch dann, wenn `Element.prototype.scrollIntoView` vorher auf ein No-op
+ *     gesetzt wurde.** Das ist also nicht Flux, sondern `HTMLElement.focus()`
+ *     selbst; dieser Weg läuft nicht über den JS-Prototypen.
+ *
+ * Daraus folgt beides: die Zusage, die diese Datei prüfen KANN, ist „ein
+ * vollständig ausgescrollter Reiter wird beim Fokussieren sichtbar" (WCAG 2.2
+ * SC 2.4.11, Focus Not Obscured) — und die alte Kontrollgruppe prüfte den
+ * falschen Mechanismus. Sie ist unten durch eine ersetzt, die tatsächlich
+ * unterscheidet: OHNE Fokus bleibt der Reiter draussen.
+ *
+ * Die Sonde wird aus der gemessenen Reiterbreite GERECHNET, nicht als feste Zahl
+ * gesetzt — eine feste Zahl wäre sprachabhängig: „Kanäle" misst in acht Sprachen
+ * acht Breiten, und in der schmalsten kippte dieselbe Zahl von „ganz draussen"
+ * zurück auf „angeschnitten".
+ *
+ * **Nicht als Assertion festgehalten, dass die Leiste heute passt.** Sie hängt an
+ * der Sprache UND am Bestandszähler des Reiters „Repositories" (`counts().repos`,
+ * seit P1) — in einem Workspace mit Repos ist sie wieder breiter. Der Docstring
+ * dieser Datei sagt seit jeher: der Container DARF scrollen. Die harte Zusage ist
+ * der Dokument-Überlauf, und der wird oben geprüft.
+ *
+ * @returns die Breite der eingesetzten Sonde in px (fürs Protokoll)
+ */
+async function schiebeLetztenTabGanzHinaus(page: Page): Promise<number> {
+    return page.evaluate(() => {
+        const tabs = document.querySelector('[data-flux-tabs]')
+        const area = document.querySelector('ui-tabs-scroll-area')
+        const letzter = Array.from(document.querySelectorAll('[data-flux-tab]')).at(-1)
+        if (!tabs || !area || !letzter) return Number.NaN
+
+        const tabBreite = letzter.getBoundingClientRect().width
+        const jetzt = letzter.getBoundingClientRect().right - area.getBoundingClientRect().right
+        // Ziel: der Reiter liegt VOLLSTÄNDIG rechts ausserhalb, plus 8 px Reserve
+        // gegen Sub-Pixel-Rundung.
+        const breite = Math.max(1, Math.ceil(tabBreite + 8 - jetzt))
+
+        const spacer = document.createElement('div')
+        spacer.setAttribute('data-forge-overflow-probe', 'vorbedingung')
+        spacer.style.cssText = `display:inline-block;flex:none;min-width:${breite}px;height:1px`
+        tabs.prepend(spacer)
+
+        return breite
+    })
+}
+
+/** Breite des letzten Reiters — die Schwelle für „liegt ganz draussen". */
+async function letzterTabBreite(page: Page): Promise<number> {
+    return page.evaluate(() => {
+        const letzter = Array.from(document.querySelectorAll('[data-flux-tab]')).at(-1)
+        return letzter ? Math.round(letzter.getBoundingClientRect().width) : Number.NaN
+    })
+}
+
 async function letzterTabUeberstand(page: Page): Promise<number> {
     return page.evaluate(() => {
         const area = document.querySelector('ui-tabs-scroll-area')
@@ -204,43 +283,179 @@ test('der letzte Tab wird beim Fokussieren vollstaendig sichtbar (Tastatur-Errei
     await expect(tabs).toHaveCount(3)
     const letzter = tabs.last()
 
-    // Vorbedingung: der letzte Tab ist überhaupt AUSGESCROLLT, sonst prüft der Test
-    // nichts (ein Tab, der schon sichtbar ist, kann nicht unsichtbar werden).
+    const ohneSonde = await letzterTabUeberstand(page)
+    const breite = await letzterTabBreite(page)
+    console.log(`[forge-ueberlauf] letzter Tab OHNE Sonde @320px: Rand-Abstand ${ohneSonde}px bei ${breite}px Reiterbreite`)
+
+    // Vorbedingung: der letzte Tab liegt VOLLSTÄNDIG ausserhalb — nicht bloss
+    // „irgendwie > 0". Der alte Schwellwert `> 0` war mit der Zusage `<= 1`
+    // gleichzeitig erfüllbar und damit vakuös (Messung am HEAD-Stand: 1 px).
+    // Begründung und Messprotokoll am Helfer oben.
+    const sonde = await schiebeLetztenTabGanzHinaus(page)
     const vorUeberstand = await letzterTabUeberstand(page)
-    expect(vorUeberstand, `Der letzte Tab liegt schon vor dem Fokus (Rand-Abstand ${vorUeberstand}px) im sichtbaren Bereich — der Test kann die Erreichbarkeits-Zusage so nicht prüfen.`)
-        .toBeGreaterThan(0)
+    console.log(`[forge-ueberlauf] Sonde ${sonde}px → Rand-Abstand ${vorUeberstand}px`)
+    expect(vorUeberstand, `Der letzte Tab liegt nach der Sonde nicht vollstaendig ausserhalb (Rand-Abstand ${vorUeberstand}px bei ${breite}px Breite) — der Test kann die Erreichbarkeits-Zusage so nicht pruefen.`)
+        .toBeGreaterThanOrEqual(breite)
 
     await letzter.focus()
-    // scrollIntoView läuft über den Fokus-Handler, nicht synchron mit .focus() —
+    // Das Hereinholen laeuft ueber den Fokus-Handler, nicht synchron mit .focus() —
     // 1px Toleranz gegen Rundung (Sub-Pixel-Layout, deviceScaleFactor).
     await expect.poll(() => letzterTabUeberstand(page), { timeout: 5_000, message: 'Der letzte Tab wurde beim Fokussieren nicht vollstaendig sichtbar' })
         .toBeLessThanOrEqual(1)
 })
 
 /**
- * KONTROLLGRUPPE zum Erreichbarkeits-Test: OHNE `scrollIntoView` bleibt der
- * letzte Tab nach dem Fokus ausserhalb des sichtbaren Bereichs — der Test oben
- * prueft also wirklich den Scroll-Mechanismus, nicht einen Zufallstreffer.
+ * KONTROLLGRUPPE zum Erreichbarkeits-Test: OHNE den Fokus bleibt der letzte Tab
+ * ausserhalb des sichtbaren Bereichs.
+ *
+ * **Das ist eine ANDERE Kontrolle als bis P1 (2026-08-26).** Hier stand
+ * „`Element.prototype.scrollIntoView` auf ein No-op setzen, dann muss der Tab
+ * draussen bleiben" — die Annahme dahinter (Flux' `Activatable.activate()` holt
+ * ihn ueber diesen Prototypen herein) ist gemessen FALSCH: mit vollstaendig
+ * ausgescrolltem Tab und abgeschaltetem Prototypen landet er trotzdem auf
+ * Rand-Abstand 0. Es ist `HTMLElement.focus()` selbst, und dieser Weg laeuft
+ * nicht ueber den JS-Prototypen. Die alte Kontrolle blieb nur deshalb gruen, weil
+ * der reale Rand-Abstand 1 px betrug und 1 px auch ohne jedes Scrollen `> 0` ist.
+ *
+ * Was diese Kontrolle stattdessen ausschliesst: dass der Tab aus einem ANDEREN
+ * Grund als dem Fokus sichtbar wird (Autoscroll der Scroll-Area, ein spaeter
+ * Layout-Lauf, ein Alpine-Effekt). Sie ist damit die Kontrolle, die zum
+ * tatsaechlich gemessenen Mechanismus passt.
  */
-test('KONTROLLE: ohne scrollIntoView bleibt der letzte Tab nach Fokus UNSICHTBAR', async ({ page }) => {
+test('KONTROLLE: OHNE Fokus bleibt der letzte Tab ausserhalb des sichtbaren Bereichs', async ({ page }) => {
     await openForgeAt320(page)
     const tablist = page.locator('ui-tabs-scroll-area')
     await expect(tablist).toBeVisible({ timeout: 20_000 })
     const tabs = page.getByRole('tab')
     await expect(tabs).toHaveCount(3)
-    const letzter = tabs.last()
 
+    const breite = await letzterTabBreite(page)
+    const sonde = await schiebeLetztenTabGanzHinaus(page)
     const vorUeberstand = await letzterTabUeberstand(page)
-    expect(vorUeberstand, `Der letzte Tab liegt schon vor dem Fokus (Rand-Abstand ${vorUeberstand}px) im sichtbaren Bereich — die Kontrolle kann so nichts beweisen.`)
-        .toBeGreaterThan(0)
+    console.log(`[forge-ueberlauf] KONTROLLE: Sonde ${sonde}px → Rand-Abstand ${vorUeberstand}px bei ${breite}px Reiterbreite`)
+    expect(vorUeberstand, `Der letzte Tab liegt nach der Sonde nicht vollstaendig ausserhalb (Rand-Abstand ${vorUeberstand}px) — die Kontrolle kann so nichts beweisen.`)
+        .toBeGreaterThanOrEqual(breite)
 
-    await page.evaluate(() => {
-        Element.prototype.scrollIntoView = () => undefined
-    })
-
-    await letzter.focus()
+    // Bewusst KEIN focus(). Dieselbe Wartezeit wie im Test oben, damit ein spaet
+    // laufender Mechanismus die Gelegenheit haette, den Tab hereinzuholen.
     await page.waitForTimeout(500)
+
     const nachUeberstand = await letzterTabUeberstand(page)
-    expect(nachUeberstand, 'Mit deaktiviertem scrollIntoView wurde der letzte Tab dennoch vollstaendig sichtbar — die Kontrolle beweist nichts, weil ein anderer Mechanismus denselben Effekt erzeugt.')
-        .toBeGreaterThan(0)
+    expect(nachUeberstand, 'Der letzte Tab wurde OHNE Fokus vollstaendig sichtbar — dann misst der Test oben nicht den Fokus, sondern einen anderen Mechanismus.')
+        .toBeGreaterThanOrEqual(breite)
 })
+
+/**
+ * DIE REITERREIHE, MOBIL: 40 px hoch, und die drei Farbrollen sind die
+ * gerechneten (P1, 2026-08-26).
+ *
+ * ── Warum die HÖHE hier steht ─────────────────────────────────────────────────
+ * Unterhalb `xl` ist diese Reihe die EINZIGE Navigation zwischen Aktivität,
+ * Repositories und Kanälen. Mit `variant="segmented"` steckten die Reiter in einer
+ * Schiene mit `p-1` und maßen 32 px — unter Apples HIG-Maß von 44 und über dem
+ * WCAG-2.5.8-Boden von 24. Flux' Default-Variante gibt ihnen die vollen `h-10`.
+ * 40 px ist die Zusage, die P1 abgegeben hat; ohne diesen Riegel hinge sie an
+ * einer Klasse in einem Vendor-Stub.
+ *
+ * ── Warum die FARBEN hier stehen ──────────────────────────────────────────────
+ * P1 korrigiert zwei Textfarben von Flux' Default, weil sie WCAG reissen
+ * (inaktiv `text-zinc-400` = 2,42:1 hell gegen 1.4.3; das Wort des aktiven
+ * Reiters in `accent-content` = 4,21:1 und damit 0,29 unter 4,5). Die Korrektur
+ * steht als UNGESCHICHTETE Regel in `theme.css` und schlägt damit jede
+ * `@layer utilities` — aber genau das ist eine Annahme über die Reihenfolge im
+ * GEBAUTEN Stylesheet, und dieses Haus hat schon zweimal dafür bezahlt, sie nicht
+ * gemessen zu haben. Hier wird sie gemessen.
+ *
+ * **Parse-frei.** Verglichen werden zwei COMPUTED-Werte miteinander, nie eine
+ * Zeichenkette gegen einen erwarteten Hex: `getComputedStyle` liefert für
+ * Tailwind-v4-Farben `oklch`/`oklab`, und ein Zahlen-Regex darauf erfindet
+ * Werte. Ein Sondenelement bekommt `color: var(--color-brand-800)`, und der
+ * Reiter muss denselben computed String tragen.
+ *
+ * **Und eine Unterscheidungsprobe dazu**: aktiv ≠ inaktiv, und aktiv ≠ Flux'
+ * Default `zinc-400`. Ohne sie wäre der Test grün, wenn ALLE drei Rollen dieselbe
+ * Farbe trügen — eine Identität allein sagt nicht, dass sie etwas unterscheidet.
+ */
+for (const theme of ['light', 'dark'] as const) {
+    test(`die Reiterreihe misst mobil 40 px und traegt die gerechneten Farbrollen (${theme})`, async ({ page }) => {
+        await page.addInitScript((t) => {
+            try {
+                localStorage.setItem('flux.appearance', t as string)
+            } catch {
+                /* kein localStorage → der Lauf misst dann das Default-Theme */
+            }
+        }, theme)
+        await openForgeAt320(page)
+        await expect(page.getByRole('tab')).toHaveCount(3)
+        if (theme === 'dark') {
+            await expect(page.locator('html')).toHaveClass(/dark/, { timeout: 15_000 })
+        } else {
+            await expect(page.locator('html')).not.toHaveClass(/dark/, { timeout: 15_000 })
+        }
+
+        // ── Höhe: jeder Reiter, nicht nur der erste ──────────────────────────
+        const hoehen = await page.evaluate(() =>
+            Array.from(document.querySelectorAll('[data-flux-tab]')).map((el) =>
+                Math.round(el.getBoundingClientRect().height),
+            ),
+        )
+        console.log(`[forge-reiter] ${theme}: Reiterhoehen @320px = ${JSON.stringify(hoehen)}`)
+        expect(hoehen.length).toBe(3)
+        for (const h of hoehen) {
+            expect(h, `Ein Reiter misst ${h}px statt der zugesagten 40 — die mobile Navigation faellt unter das Touch-Mass.`)
+                .toBeGreaterThanOrEqual(40)
+        }
+
+        // ── Farbrollen, computed gegen computed ─────────────────────────────
+        const farben = await page.evaluate(() => {
+            const probe = document.createElement('span')
+            document.body.appendChild(probe)
+            const aufgeloest = (ausdruck: string): string => {
+                probe.style.color = ''
+                probe.style.color = ausdruck
+                return getComputedStyle(probe).color
+            }
+            const tabs = Array.from(document.querySelectorAll('[data-flux-tab]')) as HTMLElement[]
+            const aktiv = tabs.find((t) => t.hasAttribute('data-selected')) ?? null
+            const inaktiv = tabs.find((t) => !t.hasAttribute('data-selected')) ?? null
+            const ergebnis = {
+                aktivText: aktiv ? getComputedStyle(aktiv).color : '',
+                aktivLinie: aktiv ? getComputedStyle(aktiv).borderBottomColor : '',
+                inaktivText: inaktiv ? getComputedStyle(inaktiv).color : '',
+                sollAktivHell: aufgeloest('var(--color-brand-800)'),
+                sollAktivDunkel: aufgeloest('var(--color-accent-content)'),
+                sollInaktiv: aufgeloest('var(--color-muted)'),
+                sollLinie: aufgeloest('var(--color-accent-content)'),
+                // Flux' EIGENER Default für die inaktive Beschriftung — hell
+                // `text-zinc-400`, dunkel `text-white/50`. Beide Zweige braucht es:
+                // im dunklen Modus ist `--color-muted` SELBST zinc-400, ein
+                // Vergleich gegen zinc-400 wäre dort per Konstruktion falsch
+                // (erster Lauf genau so rot geworden). Gegen `white/50` trennt er.
+                fluxDefaultInaktivHell: aufgeloest('var(--color-zinc-400)'),
+                fluxDefaultInaktivDunkel: aufgeloest('rgb(255 255 255 / 0.5)'),
+            }
+            probe.remove()
+            return ergebnis
+        })
+        console.log(`[forge-reiter] ${theme}: ${JSON.stringify(farben)}`)
+
+        expect(farben.aktivText, 'kein aktiver Reiter gefunden — die Messung waere leer').not.toBe('')
+        expect(farben.inaktivText, 'kein inaktiver Reiter gefunden — die Messung waere leer').not.toBe('')
+
+        // Die Linie trägt den Zustand (1.4.11, 3:1) und bleibt Flux' accent-content.
+        expect(farben.aktivLinie, 'der Unterstrich des aktiven Reiters traegt nicht mehr accent-content — die 1.4.11-Zusage haengt an ihm')
+            .toBe(farben.sollLinie)
+        // Das Wort trägt 1.4.3 und ist deshalb hell brand-800, dunkel accent-content.
+        expect(farben.aktivText, 'das Wort des aktiven Reiters traegt nicht die gerechnete Farbe — die Korrektur in theme.css greift nicht mehr')
+            .toBe(theme === 'dark' ? farben.sollAktivDunkel : farben.sollAktivHell)
+        expect(farben.inaktivText, 'die inaktive Beschriftung traegt nicht --color-muted — dann steht wieder Flux zinc-400 da und 1.4.3 reisst')
+            .toBe(farben.sollInaktiv)
+
+        // Unterscheidungsprobe: die drei Rollen sind nicht dieselbe Farbe.
+        expect(farben.aktivText, 'aktiv und inaktiv sind farbgleich — der Zustand haette dann nur noch die Linie').not.toBe(farben.inaktivText)
+        expect(
+            farben.inaktivText,
+            'die inaktive Beschriftung traegt Flux\' unkorrigierten Default — die Korrektur ist wirkungslos',
+        ).not.toBe(theme === 'dark' ? farben.fluxDefaultInaktivDunkel : farben.fluxDefaultInaktivHell)
+    })
+}

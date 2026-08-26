@@ -259,9 +259,15 @@ async function oeffnePatches(page: Page): Promise<void> {
     await page.locator('[data-forge-repo]').filter({ hasText: REPO_NAME }).first().click()
     // Der Patches-Tab wird GEKLICKT und nicht über `?tab=` angesteuert: so
     // prüft der Lauf nebenbei, dass es ihn wirklich gibt und dass er schaltet.
-    // `exact: true`, weil `name` in Playwright eine Teilzeichenkette ist — ein
-    // loses „Patches" träfe sonst auch eine Zeile, die das Wort nur enthält.
-    await page.getByRole('tab', { name: 'Patches', exact: true }).click()
+    //
+    // `/^Patches/` statt `{ name: 'Patches', exact: true }`: der Reiter trägt seit
+    // P1 (2026-08-26) einen Bestandszähler IM Accessible Name („Patches 3") —
+    // Bestand ist keine Benachrichtigung, wer die Reiterreihe hört, will ihn
+    // hören. Ein loses `'Patches'` wäre eine Teilzeichenkette und träfe auch eine
+    // Zeile, die das Wort nur enthält (der Grund für das alte `exact`); der
+    // ANKER am Zeilenanfang hält genau das fern und lässt nur die Zahl dahinter
+    // zu. `getByRole('tab')` schränkt zusätzlich auf Reiter ein.
+    await page.getByRole('tab', { name: /^Patches/ }).click()
     await expect(page.locator('[data-forge-patch]').first()).toBeVisible({ timeout: 30_000 })
 }
 
