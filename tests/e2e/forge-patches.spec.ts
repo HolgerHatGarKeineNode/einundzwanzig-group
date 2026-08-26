@@ -992,4 +992,154 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
         })
     }
 
+
+    /**
+     * P5 — DIE ZEITLEISTE IST EIN BAUTEIL, und drei Dinge daran können still brechen.
+     *
+     * 1. **Fremde Kinder.** `flux:timeline.item` platziert JEDES vorgesehene Teil per
+     *    `grid-area` (Indikator 3/1, Inhalt 2/3/5, Linien, Lücken). Ein Kind, das
+     *    keines davon ist, wird AUTOMATISCH platziert. Vor dem Umbau gemessen
+     *    (`p5-subgrid-messung.log`): dieselbe Zeile einmal mit drei bedingten Kindern
+     *    direkt im Item und einmal ohne — die Zeitangabe wanderte um 48 px, ohne dass
+     *    irgendetwas rot wurde. Deshalb ist die Zusage STRUKTURELL: im Item stehen nur
+     *    Flux-Teile.
+     * 2. **Die Leitlinie der ersten Zeile.** Flux blendet sie über
+     *    `:not(:first-child)` aus. Unter Alpine bleibt das `<template>` als erstes
+     *    Kind stehen, die erste echte Zeile ist damit `:nth-child(2)` und zöge eine
+     *    Linie nach oben ins Leere. Eine ungeschichtete Regel in `theme.css` fängt das.
+     * 3. **Die Bindung selbst.** `flux:timeline*` ist das einzige Flux-Bauteil, das
+     *    NICHT gefaltet wird — und nur der Faltungs-Pfad wandelt `::attr` in `:attr`.
+     *    Ein `::data-type` bliebe wörtlich im HTML stehen: totes Attribut, Anker weg.
+     *    Der Test prüft deshalb den WERT, nicht nur das Attribut.
+     */
+    test('DoD P5: die Zeitleiste ist ein Bauteil und traegt ihre Anker', async ({ page }) => {
+        await oeffneForge(page)
+        await page.goto('/forge?tab=activity')
+        await expect(page.locator('[data-forge-activity]').first()).toBeVisible({ timeout: 30_000 })
+
+        const m = await page.evaluate(() => {
+            const items = Array.from(document.querySelectorAll('[data-flux-timeline-item]')) as HTMLElement[]
+            const fremde: string[] = []
+            for (const it of items) {
+                for (const k of Array.from(it.children)) {
+                    const flux = Array.from(k.attributes).some((a) => a.name.startsWith('data-flux-timeline'))
+                    if (!flux) fremde.push(`${k.tagName}.${(k.getAttribute('class') ?? '').slice(0, 24)}`)
+                }
+            }
+            const erste = items[0]
+            const leit = erste?.querySelector('[data-flux-timeline-line-leading]') as HTMLElement | null
+            const ol = erste?.closest('[data-flux-timeline]') as HTMLElement | null
+            const linien = items.flatMap((i) =>
+                Array.from(i.querySelectorAll('[data-flux-timeline-line-leading],[data-flux-timeline-line-trailing]')),
+            )
+            return {
+                zeilen: items.length,
+                fremde,
+                linien: linien.length,
+                linienMitText: linien.filter((l) => (l.textContent ?? '').trim() !== '').length,
+                linienMitRolle: linien.filter((l) => l.hasAttribute('role') || l.hasAttribute('aria-label')).length,
+                ariaHiddenJeZeile: items.map((i) => i.querySelectorAll('[aria-hidden="true"]').length),
+                // GETRENNT vom Gesamtzähler: nur der Träger, den FLUX mitbringt.
+                // Der Gesamtzähler wäre hier fail-open — unsere eigene `·`-Trennung
+                // trägt ebenfalls eines und hielte die Zusage grün, während Flux'
+                // Träger längst weg wäre (gemessen, `p5-mutation5-aria-traeger.log`).
+                ariaHiddenAusFlux: items.map(
+                    (i) => i.querySelectorAll('[data-flux-timeline-indicator] [aria-hidden="true"]').length,
+                ),
+                erstesKindDesOl: ol?.firstElementChild?.tagName ?? null,
+                leitlinieDerErsten: leit ? getComputedStyle(leit).display : null,
+                typen: items.map((i) => i.getAttribute('data-type')),
+                anker: items.filter((i) => i.hasAttribute('data-forge-activity')).length,
+                totesAttribut: items.filter((i) => i.hasAttribute('::data-type')).length,
+            }
+        })
+        console.log(`[p5-zeitleiste] ${JSON.stringify(m)}`)
+
+        expect(m.zeilen, 'keine Zeitleistenzeile sichtbar — der Riegel misst nichts').toBeGreaterThan(0)
+        expect(m.fremde, `fremde Kinder im timeline.item: ${m.fremde.join(', ')} — sie werden automatisch platziert`).toEqual([])
+        // Vorbedingung für 2.: die Alpine-Falle muss überhaupt vorliegen. Läge das
+        // `<template>` nicht als erstes Kind, prüfte die Zeile darunter nichts.
+        expect(m.erstesKindDesOl, 'das <template> ist nicht mehr das erste Kind — die Zusage unten liefe leer').toBe('TEMPLATE')
+        expect(m.leitlinieDerErsten, 'die erste Zeile zieht eine Leitlinie nach oben ins Leere').toBe('none')
+        expect(m.anker, 'die Zeilen tragen den Anker data-forge-activity nicht mehr').toBe(m.zeilen)
+        expect(m.totesAttribut, 'es steht ein wörtliches `::data-type` im HTML — `::` ist auf flux:timeline tot').toBe(0)
+        expect(
+            m.typen.filter((t) => t && t.length > 0).length,
+            `data-type ist leer — die Bindung ist tot. Werte: ${JSON.stringify(m.typen)}`,
+        ).toBe(m.zeilen)
+
+        // ── 4. Der ARIA-Träger, der beim Umbau aus dem QUELLTEXT verschwand ──────
+        // `EmptyStatesAndA11yTest` zählt `aria-hidden="true"` im Blade-Quelltext und
+        // sieht in keine Komponente hinein. Die handgezogene Linie trug dort eines,
+        // `flux:timeline` zieht seine Linien selbst — die Zahl fiel 16 → 15 / 34 → 33.
+        // Eine Zahl NACHZUZIEHEN ist billig; die Frage ist, ob am gerenderten Baum
+        // etwas verloren ging. Genau das steht hier, damit die Kalibrierung dort
+        // nicht als blosse Behauptung dasteht.
+        expect(m.linien, 'die Zeitleiste zieht gar keine Linien mehr — dann misst der Rest nichts').toBe(m.zeilen * 2)
+        expect(m.linienMitText, 'eine Leitlinie trägt Text — dann war das alte `aria-hidden` nicht folgenlos').toBe(0)
+        expect(m.linienMitRolle, 'eine Leitlinie trägt `role`/`aria-label` — sie stünde im Barrierebaum').toBe(0)
+        // Und die Gegenrichtung: die Komponente bringt einen EIGENEN Träger mit (die
+        // Grundlinien-Attrappe im Indikator). Fällt der bei einem Flux-Update weg,
+        // ist die Kalibrierung drüben ein echter Verlust — und dieser Riegel rot.
+        expect(
+            Math.min(...m.ariaHiddenAusFlux),
+            `der Indikator einer Zeile bringt kein eigenes aria-hidden mehr mit: ${JSON.stringify(m.ariaHiddenAusFlux)}`,
+        ).toBeGreaterThanOrEqual(1)
+    })
+
+    /**
+     * P5 — KOPF UND LISTE IN EINEM RAHMEN.
+     *
+     * In P4 wurde an dieser Fläche nachgemessen, was der getrennte Kopf kostet: er sass
+     * auf den Rändern der Region (x = 0 … 456), die Zeileninhalte im Kasten
+     * (x = 13 … 443). Zwei Fluchtlinien für ein Ding.
+     *
+     * Die Zusage ist deshalb zweiteilig und beide Teile sind nötig: der Kopf liegt IM
+     * Rahmen der Karte, UND seine Textkante trifft die der Zeilen.
+     */
+    test('DoD P5: der Gruppenkopf liegt im Rahmen und fluchtet mit den Zeilen', async ({ page }) => {
+        await oeffneForge(page)
+        await page.goto('/forge?tab=issues')
+        await expect(page.locator('[data-forge-gruppe]').first()).toBeVisible({ timeout: 30_000 })
+
+        const m = await page.evaluate(() => {
+            const gruppe = document.querySelector('[data-forge-gruppe]') as HTMLElement
+            const kopf = gruppe.querySelector('[data-forge-gruppe-link]')?.parentElement as HTMLElement
+            const zeile = gruppe.querySelector('.forge-vorgangszeile') as HTMLElement
+            const titel = zeile.querySelector('.forge-vz-titel') as HTMLElement
+            const r = (e: HTMLElement) => e.getBoundingClientRect()
+            // Die KARTE suchen, nicht die Sektion: nach der Mutationsprobe stand fest,
+            // dass ein Kopf ausserhalb der Karte, aber innerhalb der Sektion die
+            // Lageprüfung passiert — die Sektion umfasst dann beides. Gefragt ist,
+            // ob der Kopf im RAHMEN liegt, und den zieht `surface-card`.
+            const karte = (gruppe.classList.contains('surface-card') ? gruppe : gruppe.querySelector('.surface-card')) as HTMLElement | null
+            const g = karte ? r(karte) : r(gruppe)
+            return {
+                karteGefunden: !!karte,
+                kopfImRahmen: !!karte && r(kopf).left >= g.left && r(kopf).right <= g.right && r(kopf).top >= g.top,
+                kopfFlaeche: getComputedStyle(kopf).backgroundColor,
+                kopfUnterkante: getComputedStyle(kopf).borderBottomWidth,
+                kopfTextX: Math.round(r(gruppe.querySelector('[data-forge-gruppe-link]') as HTMLElement).x - g.x),
+                glypheX: Math.round(r(zeile.querySelector('.forge-vz-glyphe') as HTMLElement).x - g.x),
+                titelX: Math.round(r(titel).x - g.x),
+                // Geschachtelte Karten: die Gruppe SELBST ist die Karte, in ihr darf
+                // keine zweite stecken.
+                karten: gruppe.querySelectorAll('.surface-card').length,
+            }
+        })
+        console.log(`[p5-kartenkopf] ${JSON.stringify(m)}`)
+
+        expect(m.karteGefunden, 'keine surface-card in der Gruppe gefunden — die Lageprüfung liefe leer').toBe(true)
+        expect(m.kopfImRahmen, 'der Gruppenkopf liegt nicht im Rahmen der Karte').toBe(true)
+        expect(parseFloat(m.kopfUnterkante), 'der Kopfstreifen hat keine Unterkante — dann ist er kein Streifen').toBeGreaterThan(0)
+        // EINE Karte, nicht zwei geschachtelte: zwei Kanten übereinander waren der
+        // Zustand, gegen den `.forge-diff-datei` schon einmal aufgeräumt wurde.
+        expect(m.karten, 'in der Gruppe steckt eine zweite surface-card — zwei Kanten auf derselben Stelle').toBe(0)
+        // Die Fluchtlinie: Kopftext und Zeilenglyphe stehen auf derselben Kante.
+        expect(
+            Math.abs(m.kopfTextX - m.glypheX),
+            `Kopftext (x=${m.kopfTextX}) und Zeileninhalt (x=${m.glypheX}) stehen nicht auf einer Fluchtlinie`,
+        ).toBeLessThanOrEqual(1)
+    })
+
 })

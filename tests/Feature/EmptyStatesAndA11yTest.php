@@ -453,6 +453,29 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // Arbeitsbaum) ist EINSEITIG — eine einzige veränderte Zeichenkette,
         // `aria-hidden="true"` von 17 auf 13, keine Addition.
         //
+        // **P5 desselben Plans (2026-08-26): 16 → 15.** Wieder einseitig,
+        // `aria-hidden="true"` von 13 auf 12, wieder keine Addition. Der eine
+        // ist die handgezogene Zeitleisten-Linie
+        // (`<span aria-hidden="true" class="absolute start-[0.875rem] …">`),
+        // die `flux:timeline` ersetzt hat.
+        //
+        // **Am gerenderten Baum ist nichts verloren gegangen, und das ist
+        // gemessen statt gefolgert** (`p5-aria-zeitleiste.log`, Sonde über
+        // `/forge?tab=activity`): `flux:timeline.item` zeichnet Leit- und
+        // Folgelinie als eigene `<div>` — 12 Stück über 6 Zeilen, davon **0 mit
+        // Text und 0 mit `role`/`aria-label`**. Sie stehen also ohnehin nicht im
+        // Barrierebaum; das alte `aria-hidden` versteckte etwas, das nichts zu
+        // sagen hatte. Gleichzeitig bringt `flux:timeline.indicator` ein
+        // EIGENES `aria-hidden="true"` mit (die Grundlinien-Attrappe,
+        // `flux-pro/…/timeline/indicator.blade.php`) — gemessen **2 Träger je
+        // Zeile** im gerenderten Baum.
+        //
+        // Damit ist es derselbe blinde Fleck wie bei `forge-status-badge` und
+        // `flux:progress`: der Quelltext-Scanner sieht in keine Komponente
+        // hinein. Die Zahl fällt, die Sache nicht. Der Riegel dafür ist die
+        // DOM-Zusage in `forge-patches.spec.ts` („die Zeitleiste ist ein
+        // Bauteil"), nicht diese Zählung.
+        //
         // Die vier sind die Glyphen der Zustands-Pille in der Aktivitätsspur
         // (`exclamation-circle` / `check-circle` / `x-circle` / `pencil-square`).
         // Sie sind nicht gefallen, sondern UMGEZOGEN: dieselbe Pille steht seit
@@ -472,7 +495,7 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // dasselbe Attribut zweimal am selben Tag. Diese Zählung liest die
         // BLADE-QUELLE; was ein Vendor-Stub zur Laufzeit setzt, sieht sie per
         // Konstruktion nicht.
-        'forge' => 16,
+        'forge' => 15,
         // **34 → 39 mit P5 (2026-08-24).** Nachgerechnet, nicht nachgezogen: die
         // Schreibriegel vor Zuweisen und Freigeben bringen genau fünf Träger mit —
         // drei `::aria-disabled` (Zuweisung, Freigabe, Änderungswunsch; drei
@@ -533,7 +556,7 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // ist für die Sprachausgabe NICHT versteckt; sie trägt das Wort, im
         // schmalen Bild als `sr-only`. Hier verschwindet also kein Inhalt hinter
         // einem `aria-hidden`, es verschwindet ein Duplikat.
-        'forge-repo' => 34,
+        'forge-repo' => 33,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
