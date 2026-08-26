@@ -9,8 +9,15 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
  * `2026-08-23T1745-forge-mobil-desktop-amethyst.md`, Schritt 11/12).
  *
  * 320 px ist die gemeldete Bruchstelle: die alte Vier-Tab-Bar maß dort 409 px in
- * einem 288-px-Kasten, das Dokument scrollte 105 px waagerecht (siehe der
- * Blade-Kommentar bei `⚡forge.blade.php:193-197`). `scrollable scrollable:fade`
+ * einem 288-px-Kasten, das Dokument scrollte 105 px waagerecht (Herleitung im
+ * Blade-Kommentar an der Reiterreihe in `⚡forge.blade.php`, zu finden über
+ * „Gemessen bei 320 px mit den vier alten Tabs").
+ *
+ * **Der Verweis nennt bewusst KEINE Zeilennummer mehr.** Hier stand
+ * `⚡forge.blade.php:193-197`; der Block ist seither zweimal gewandert und lag
+ * beim Nachsehen bei ~258. Eine Zeilennummer in Prosa altert still — kein Test
+ * wird davon rot, und der nächste Leser landet mitten in einem fremden
+ * Kommentar. Ein Suchbegriff wandert mit. `scrollable scrollable:fade`
  * an `flux:tabs` ist die Reparatur — dieser Wächter hält ihre Wirkung fest, nach
  * der vorhandenen, mutationsgeprüften Vorlage `room.spec.ts:2976-3009`.
  *
