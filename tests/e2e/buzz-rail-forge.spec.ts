@@ -442,4 +442,63 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
         await page.keyboard.press('Alt+ArrowDown')
         await page.waitForURL(`**/rooms/${BUZZ_ROOM_WELCOME}*`, { timeout: 20_000 })
     })
+
+    /**
+     * Der Gruppenkopf als Sprungziel — `data-rail-gruppenkopf`.
+     *
+     * Bis 2026-08-27 ohne jeden E2E-Anker (`grep data-rail-gruppenkopf
+     * tests/e2e/*.spec.ts` = 0). Er ist das zweite von zwei Bedienelementen, die
+     * `flux:navlist.group` unmöglich machen — ein Umbau auf die Flux-Komponente
+     * verlöre ihn stillschweigend, und mit ihm den einzigen Weg, mit dem die
+     * Forge-Bühne ab `xl` überhaupt noch auf ihre Kanäle zeigen kann (dort gibt
+     * es keinen Kanäle-Tab mehr).
+     *
+     * Der Weg ist ECHT, kein von Hand gefeuertes CustomEvent: `/forge?tab=workspaces`
+     * setzt `_tabAusAdresse`, `_springZuRegion()` (`js/forge.ts:2438-2448`) sieht
+     * `tab === 'workspaces'` und schickt `forge-zeige-kanaele`; der Zuhörer sitzt
+     * in `desktop-rail.blade.php:41-48`. Ein `dispatchEvent` aus dem Test prüfte
+     * nur den Zuhörer und ließe einen abgerissenen Auslöser durchgehen.
+     */
+    test('`/forge?tab=workspaces` springt in die Rail — Gruppe auf, Fokus auf dem Kopf', async ({ page }) => {
+        // ── BEFUND 2026-08-27: der Fokus-Sprung ist wirkungslos, seit es ihn gibt ──
+        // Gemessen mit einer Sonde am Zuhörer (danach per Byte-Kopie zurückgebaut):
+        // das Ereignis KOMMT an (`["kam an"]`), aber `document.querySelectorAll(
+        // '[data-rail-gruppenkopf]').length` ist in DIESEM Moment **0** — und zwei
+        // `requestAnimationFrame` später immer noch 0. Der Kopf steht in
+        // `<template x-if="hasWorkspaceSection">`; die Bedingung wird erst wahr, wenn
+        // die Workspace-Daten eingetroffen sind, also lange nach dem `$nextTick` des
+        // Zuhörers (`desktop-rail.blade.php:41-48`). `focus()` und `scrollIntoView()`
+        // laufen auf `undefined` und verpuffen still.
+        //
+        // Die Gruppe geht trotzdem auf — aber NICHT durch das Ereignis: `toggleGroup`
+        // setzt nur einen Zustand und braucht kein DOM. Deshalb sah der Sprung immer
+        // funktionierend aus, obwohl seine Hauptzusage nie eingelöst wurde.
+        //
+        // `test.fail()` statt Löschen oder Grünbiegen: der Defekt ist damit festgehalten
+        // UND meldet sich von selbst, sobald der Fix ihn behebt (Playwright macht einen
+        // bestehenden `fail`-Test rot). Der Fix gehört ins Paket
+        // (`desktop-rail.blade.php`) und wartet auf einen freien Arbeitsbaum —
+        // er muss den Sprung aufheben, bis `hasWorkspaceSection` wahr ist,
+        // statt ihn einmal zu früh zu versuchen.
+        test.fail()
+
+        await bootRail(page)
+
+        // Gruppe bewusst ZUklappen: der Sprung muss sie SELBST öffnen. Bei schon
+        // offener Gruppe wäre die halbe Zusage („öffnet, falls zu") ungeprüft.
+        await setExpanded(groupToggle(page, 'workspace'), false)
+        await expect(workspacePanel(page)).toBeHidden()
+
+        await page.goto('/forge?tab=workspaces')
+        await expect(rail(page)).toBeVisible({ timeout: 20_000 })
+
+        // 1. Die Gruppe steht offen — `toggleGroup` lief, und zwar bedingt.
+        await expect(workspacePanel(page)).toBeVisible({ timeout: 20_000 })
+
+        // 2. Und der Kopf hat den Fokus. Das ist der Zweck des Sprungs: die
+        //    Tastatur landet dort, wo die Kanäle stehen. `toBeFocused` und nicht
+        //    `toBeVisible` — ein sichtbarer Kopf ohne Fokus erfüllt nichts.
+        await expect(rail(page).locator('[data-rail-gruppenkopf="workspace"]'))
+            .toBeFocused({ timeout: 20_000 })
+    })
 })
