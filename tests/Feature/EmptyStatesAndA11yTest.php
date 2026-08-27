@@ -631,7 +631,22 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // Scanner sieht Partials nicht — dieselbe Messlücke, die dort seit P7b
         // ausgeschrieben steht. Wer die Kalibrierung das nächste Mal anfasst,
         // zieht das Partial mit hinein; dann steigt die Zahl noch einmal.
-        'forge-repo' => 35,
+        //
+        // **35 → 38 mit P10 (2026-08-27), Fremdzuweisung.** Drei neue Träger, alle
+        // in der Personenauswahl unter „Personen zuweisen":
+        //
+        //     + :aria-disabled="canAssignPicked(issue) ? null : 'true'"   0 → 2
+        //     + aria-hidden="true"                                       6 → 7
+        //
+        // Die zwei `aria-disabled` sitzen an „Zuweisen" und „Zuweisung entfernen"
+        // — dasselbe Haus-Muster wie am Selbstzuweisungs-Knopf darüber: inert
+        // statt `disabled`, damit der Knopf den Fokus behält und eine Tastatur
+        // überhaupt an die Begründung daneben kommt. Das siebte `aria-hidden`
+        // liegt auf der Agenten-Marke im gewählten Chip; sie wiederholt sichtbar,
+        // was der zugängliche Name des Chips ohnehin trägt.
+        //
+        // Auch hier wächst der Baum, er schrumpft nicht.
+        'forge-repo' => 38,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
