@@ -154,7 +154,7 @@ async function oeffneRepo(page: Page, query = ''): Promise<void> {
     await useZooid(page)
     await zeigeWorkspaceAufZooid(page)
     await loginNsec(page, NSEC)
-    await page.goto(`/forge/${naddr}${query}`)
+    await page.goto(`/forge/${naddr}${query || '?tab=issues'}`)
     await page.waitForFunction(
         () => {
             const el = document.querySelector('[x-data^="nostrForgeRepo"]')

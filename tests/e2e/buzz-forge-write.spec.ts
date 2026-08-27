@@ -138,6 +138,9 @@ async function openRepo(page: Page): Promise<void> {
     await page.getByRole('tab', { name: 'Repositories' }).click()
     await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
     await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+    // Seit der GitHub-Parität startet die Repo-Seite auf CODE — die Schreib-
+    // tests leben von der Issue-Liste (und ihr zustand-Ausschnitt).
+    await page.getByRole('tab', { name: /^Issues/ }).click()
 }
 
 test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () => {
@@ -419,6 +422,9 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
         await useWorkspace(page)
         await openRepo(page)
 
+        // Das Issue ist „Erledigt" — im Offen-Ausschnitt der Liste (GH-Form)
+        // steht es nicht; erst der Umschalter holt es hervor.
+        await page.locator('[data-forge-zustand="geschlossen"]').click()
         const zeile = page.locator('[data-forge-issue]').filter({ hasText: marke }).first()
         await expect(zeile).toBeVisible({ timeout: 30_000 })
         await expect(zeile).toHaveAttribute('data-status', 'resolved')
@@ -630,6 +636,46 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
             (event) => tagValue(event.tags, 'subject') === marke,
         )
         expect(amRelay).toHaveLength(1)
+    })
+
+    /**
+     * P4 (GitHub-Parität): der Zustands-Umschalter der Liste — „N offen /
+     * M geschlossen". Der Relay liefert beides, die Liste zeigt seit P4 nur
+     * den gewählten Ausschnitt. Ohne diesen Test wäre der Umschalter eine
+     * Zierde, die auch nichts tut.
+     */
+    test('der Zustands-Umschalter der Issue-Liste zeigt offen und geschlossen getrennt', async ({ page }) => {
+        const offen = `P4 Offen ${randomUUID().slice(0, 8)}`
+        const zu = `P4 Zu ${randomUUID().slice(0, 8)}`
+        expect(
+            publish(BUZZ_USER_NSEC, ['-k', '1621', '-t', `a=${address}`, '-t', `p=${owner}`, '-t', `subject=${offen}`, '-c', 'Offen.']),
+        ).toContain('success')
+        expect(
+            publish(BUZZ_USER_NSEC, ['-k', '1621', '-t', `a=${address}`, '-t', `p=${owner}`, '-t', `subject=${zu}`, '-c', 'Wird zu.']),
+        ).toContain('success')
+        const frischZu = events(['-k', '1621', '-t', `a=${address}`]).find((e) => tagValue(e.tags, 'subject') === zu)?.id
+        expect(frischZu).toHaveLength(64)
+        expect(
+            publish(BUZZ_USER_NSEC, ['-k', '1632', '--tag', `e=${frischZu};;root`, '-t', `a=${address}`]),
+        ).toContain('success')
+
+        await useWorkspace(page)
+        await openRepo(page)
+
+        // Offen (Startwert): das offene Issue steht, das geschlossene nicht.
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: offen })).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: zu })).toHaveCount(0)
+
+        // Der Umschalter benennt BEIDE Zahlen — ungesucht, wie bei GitHub.
+        await expect(page.locator('[data-forge-zustand-wahl]')).toContainText('1')
+
+        await page.locator('[data-forge-zustand="geschlossen"]').click()
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: zu })).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: offen })).toHaveCount(0)
+
+        await page.locator('[data-forge-zustand="offen"]').click()
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: offen })).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: zu })).toHaveCount(0)
     })
 
     /**
