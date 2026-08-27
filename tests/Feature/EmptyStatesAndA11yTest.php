@@ -576,7 +576,28 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // Begründung daneben nicht mehr unterscheidbar ist von einer stillen
         // Abschwächung.** Die Zahl bei 'forge' hatte den Block, diese nicht —
         // im Gate aufgefallen und nachgezogen.
-        'forge-repo' => 33,
+        // **Anlege-Knopf in zwei Bauformen (2026-08-27): 33 → 35.** Diesmal eine
+        // ADDITION, und der Multiset-Diff ist ebenfalls einseitig — nichts ist
+        // weggefallen. Gemessen mit demselben Verfahren wie oben (`git show
+        // HEAD:…⚡forge-repo.blade.php` gegen den Arbeitsstand,
+        // `array_count_values`):
+        //
+        //     + x-bind:aria-disabled="canWrite() ? null : 'true'"                   0 → 1
+        //     + x-bind:aria-describedby="canWrite() ? null : 'forge-schreibhinweis'" 0 → 1
+        //
+        // Beide sitzen am FAB. Er verschwand bis dahin ohne Schreibrecht ganz;
+        // jetzt bleibt er stehen, trägt `aria-disabled` und zeigt per
+        // `aria-describedby` auf den Satz, der den Grund nennt (`id=
+        // "forge-schreibhinweis"` in der Issue-Liste). Das ist genau die Art
+        // Träger, für die dieser Test gebaut ist — hier wächst der Barrierebaum,
+        // er schrumpft nicht.
+        //
+        // **Die zweite Bauform steht NICHT in dieser Zahl.** Der beschriftete
+        // Desktop-Knopf lebt in `partials/forge-detail-suche.blade.php`, und der
+        // Scanner sieht Partials nicht — dieselbe Messlücke, die dort seit P7b
+        // ausgeschrieben steht. Wer die Kalibrierung das nächste Mal anfasst,
+        // zieht das Partial mit hinein; dann steigt die Zahl noch einmal.
+        'forge-repo' => 35,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
