@@ -120,22 +120,91 @@ async function anmelden(page: Page): Promise<void> {
     await loginNsec(page, BUZZ_USER_NSEC)
 }
 
-/** Kasten und Typo eines Knotens. */
+/**
+ * Kasten und Typo eines Knotens — **erst, wenn die Insel stillsteht.**
+ *
+ * ── Warum die Wartebedingung hier steht (gemessen 2026-08-27) ────────────────
+ * `Verwerfen-Ziel unter 24 px hoch — Received: 23.999969482421875` — vier von
+ * sechs Läufen grün, zwei rot, derselbe Stand, derselbe Slot, hintereinander.
+ * Ein deterministischer Codestand kann das nicht erzeugen, also war die MESSUNG
+ * unstet, nicht die Fläche.
+ *
+ * Am gebauten Stand nachgesehen, welche Animationen zum Messzeitpunkt in der
+ * Elternkette dieses Knopfes laufen: **genau eine**, `page-in` auf
+ * `.page-enter`, Zustand `running`. Sie ist `translateY(8px) → 0` über 0,3 s.
+ *
+ * **Meine erste Erklärung war falsch und die Messung hat sie widerlegt:** ich
+ * hatte auf eine `scale`-Animation getippt, weil 23,99997 = 24 × 0,9999987 so
+ * aussieht. `page-in` skaliert nicht. Was wirklich passiert: bei einem
+ * gebrochenen `translateY` liegen `top` und `bottom` als Fliesskommazahlen so,
+ * dass ihre Differenz um ~1e-5 px danebenfällt — die Höhe ändert sich nicht,
+ * nur ihre Berechnung. Der Fehler ist 2^-15 bzw. 2^-16 px gross, also ein
+ * Rechenartefakt und keine Layout-Aussage.
+ *
+ * Deshalb eine BEDINGUNG und keine Toleranz. Ein `toBeGreaterThanOrEqual(23.99)`
+ * hätte die WCAG-Grenze um Haaresbreite verschoben und damit den Prüfgegenstand
+ * angefasst, um das Messgerät zu retten. Nach dem Abwarten meldet dieselbe Sonde
+ * exakt `24`.
+ *
+ * Nur ENDLICHE Animationen werden abgewartet — ein Dauerläufer wie `status-pulse`
+ * hätte `finished` nie erfüllt und den Test in seinen Timeout laufen lassen.
+ */
 const geo = (page: Page, selector: string) =>
-    page.evaluate((sel) => {
+    page.evaluate(async (sel) => {
         const el = document.querySelector(sel)
         if (!el) {
             return null
         }
+        const laufende: Animation[] = []
+        let p: Element | null = el
+        while (p) {
+            for (const a of p.getAnimations({ subtree: false })) {
+                const iter = a.effect?.getTiming().iterations ?? 1
+                if (Number.isFinite(iter)) {
+                    laufende.push(a)
+                }
+            }
+            p = p.parentElement
+        }
+        await Promise.race([
+            Promise.all(laufende.map((a) => a.finished.catch(() => undefined))),
+            new Promise((r) => setTimeout(r, 1_500)),
+        ])
         const r = el.getBoundingClientRect()
 
         return { w: r.width, h: r.height, fontSize: parseFloat(getComputedStyle(el).fontSize) }
     }, selector)
 
+/**
+ * ── Die Haken zeigen auf die BEDEUTUNG, nicht auf die Form (2026-08-27) ──────
+ *
+ * Hier standen `> span.flex-1 > span.font-mono` und `> span:last-child`. Der
+ * erste zeigte seit P6b (`e8ec3d1`, 2026-08-27) ins Leere: dort sind elf
+ * `font-mono`-Träger gefallen, weil sie im Haus eine ZWEITE Schriftfamilie
+ * einbrachten — ein richtiger Umbau, der einen Prüfstand mitgerissen hat, den
+ * niemand als Leser dieser Klasse auf dem Schirm hatte.
+ *
+ * **Warum es niemandem auffiel:** der Merge-Vollauf lief gegen zooid, und die
+ * buzz-Specs standen dort als „99 skipped". Ein übersprungener Relay-Modus ist
+ * kein Vollauf.
+ *
+ * Eine Schriftklasse ist eine FORMENTSCHEIDUNG und darf morgen wieder wechseln.
+ * Ein `data-`-Haken benennt, WAS gemessen wird, und wandert mit der Sache statt
+ * mit ihrem Aussehen. Der zweite Selektor war nicht kaputt, aber aus demselben
+ * Holz: `> span:last-child` hält genau so lange, wie niemand ein Element
+ * anhängt.
+ *
+ * Gegengeprüft, dass dies der EINZIGE Leser der elf gefallenen Träger war:
+ * ein `grep -rn 'font-mono'` über `tests/` und die Paket-JS findet ausser
+ * diesem noch
+ * `a11y-contrast.spec.ts:331` (zeigt auf `partials/chat-row.blade.php`, NICHT
+ * in `e8ec3d1` — am Lauf belegt grün) und einen Kommentar in
+ * `desktop-a11y-contrast.spec.ts` (findet über den Text, nicht über die Klasse).
+ */
 const POPOVER = '[data-forge-mention-popover="issue"]'
 const AGENTZEILE = `${POPOVER} button[data-agent="true"]`
-const ABZEICHEN = `${AGENTZEILE} > span:last-child`
-const HINWEIS = `${AGENTZEILE} > span.flex-1 > span.font-mono`
+const ABZEICHEN = `${AGENTZEILE} [data-forge-mention-marke]`
+const HINWEIS = `${AGENTZEILE} [data-forge-mention-schluessel]`
 
 test.describe('Buzz-Forge: die Form des Agentenvorschlags und der Weckmeldung', () => {
     test.skip(process.env.E2E_RELAY !== 'buzz', 'nur im Buzz-Modus (E2E_RELAY=buzz) relevant')

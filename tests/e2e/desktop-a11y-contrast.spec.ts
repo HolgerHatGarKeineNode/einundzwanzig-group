@@ -84,13 +84,19 @@ for (const theme of ['light', 'dark'] as const) {
         // Fleck derselben Farbe (`text-brand-800` / `dark:text-brand-400`).
         //
         // Das war bis 2026-08-17 das Workspace-Label und ist jetzt der `#`-Prompt
-        // des Suchfelds (`desktop-rail.blade.php`, `font-mono text-sm font-bold
+        // des Suchfelds (`desktop-rail.blade.php`, `text-sm font-bold
         // text-brand-800 dark:text-brand-400`). Dieselbe Farbe, dieselbe
         // Größenklasse (14 px < 18,66 px ⇒ Schwelle 4,5:1), aber OHNE die drei
         // Bedingungen, an denen der alte Träger hing (Relay gesetzt, Räume geladen,
         // Gruppe gerendert): der Prompt steht in jeder Rail, immer. Der Anker ist
         // damit unbedingter geworden, nicht schwächer — und er misst weiter GENAU
         // die Klasse, für die er gebaut wurde.
+        //
+        // (2026-08-27: `font-mono` aus dem Zitat gestrichen. P6b hat die Klasse
+        // dort entfernt — dieser Anker findet über den TEXT `#` und war deshalb
+        // nie betroffen, aber ein Zitat, das die Klassenliste falsch wiedergibt,
+        // schickt den nächsten Leser in die falsche Datei. Der Schwesterfall in
+        // `buzz-agent-mention-form.spec.ts` fand über die Klasse und war rot.)
         const label = measured.find((m) => m.kind === 'text' && m.label.trim() === '#')
         expect(
             label,
