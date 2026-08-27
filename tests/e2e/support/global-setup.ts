@@ -77,6 +77,13 @@ export default function globalSetup(config: FullConfig): void {
      */
     pruefeTestschluessel()
 
+    // Sicherheitsnetz gegen unsterbliche Stacks aus FRÜHEREN, nie sauber beendeten
+    // Läufen (SIGKILL, Absturz — der Fall, den globalTeardown NICHT fängt, siehe
+    // global-teardown.ts). Läuft über ALLE Slots, räumt aber ausschließlich Stacks ab,
+    // deren Herzschlag älter als E2E_STACK_MAX_AGE_SEC ist (Default 3h) — ein fremder,
+    // gerade aktiver Lauf bleibt unangetastet. Details: reap-stale-teststacks.sh.
+    execFileSync('bash', ['tests/e2e/support/reap-stale-teststacks.sh'], { stdio: 'inherit' })
+
     // Lauf-Marker loeschen. Sie schuetzen INNERHALB eines Laufs davor, dass ein neu
     // gestarteter Worker den Relay neu aufsetzt und damit den gerade laufenden Test
     // mitreisst (Begruendung in zooid-testserver.sh/buzz-testserver.sh, RUNMARK).

@@ -21,13 +21,19 @@
  * Der zweite Block ist der eigentliche Waechter: er faehrt die Loeschung wirklich
  * gegen ein Wegwerf-Verzeichnis und prueft, dass der Marker eines FREMDEN Slots
  * ueberlebt. Weicht das Glob je wieder auf, faellt genau dieser Fall.
+ *
+ * Der dritte Block (`ownedTeardownTargets`) gehört zum Lebenszyklus-Fix (2026-08-27,
+ * `fix/teststack-lebenszyklus`): dieselbe Slot-Menge, aber als (Modus, Port)-Ziele für
+ * `global-teardown.ts`. Die reale Wirkung (kill+rm, docker down -v) prüft
+ * `teststackLifecycle.nodetest.ts` gegen ECHTE Fake-Stacks — hier nur die reine
+ * Slot→Ziel-Ableitung.
  */
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ownedRunMarkerPaths, ownedSlots, ownsRunMarker } from './runMarkers.ts'
+import { ownedRunMarkerPaths, ownedSlots, ownedTeardownTargets, ownsRunMarker } from './runMarkers.ts'
 
 test('ownedSlots: die Reihe beginnt am Offset und ist so lang wie die Worker-Zahl', () => {
     assert.deepEqual(ownedSlots({ workers: 4, slotOffset: 0 }), [0, 1, 2, 3])
@@ -86,4 +92,26 @@ test('N9-Waechter: die Loeschung selbst laesst fremde Marker stehen', () => {
     } finally {
         rmSync(dir, { recursive: true, force: true })
     }
+})
+
+test('ownedTeardownTargets: eigene Portreihe, beide Arme, als (Modus, Port)-Ziele', () => {
+    assert.deepEqual(ownedTeardownTargets({ workers: 2, slotOffset: 4 }), [
+        { mode: 'buzz', port: 3005 },
+        { mode: 'zooid', port: 3339 },
+        { mode: 'buzz', port: 3006 },
+        { mode: 'zooid', port: 3340 },
+    ])
+})
+
+test('ownedTeardownTargets: NIE ein Ziel außerhalb der eigenen Slot-Reihe', () => {
+    const lauf = { workers: 4, slotOffset: 4 }
+    const ziele = ownedTeardownTargets(lauf)
+    // Der fremde Nachbarslot (16/17, wie oben) darf unter KEINEM der beiden Arme
+    // auftauchen — das ist exakt die Zusage, die `global-teardown.ts` einlösen muss:
+    // niemals den Stack eines parallel laufenden, fremden Slots anfassen.
+    assert.equal(
+        ziele.some((z) => (z.mode === 'buzz' && z.port === 3017) || (z.mode === 'zooid' && z.port === 3351)),
+        false,
+    )
+    assert.equal(ziele.length, lauf.workers * 2)
 })

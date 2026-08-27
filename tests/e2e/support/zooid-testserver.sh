@@ -48,6 +48,14 @@ PIDFILE=/tmp/e2e-zooid-$ZOOID_PORT.pid
 # antwortet der Relay, ist innerhalb dieses Laufs nichts mehr zu tun — Bloat wird bis
 # zum naechsten Lauf toleriert, ein ABGESTUERZTER Relay aber weiterhin neu aufgesetzt.
 RUNMARK=/tmp/e2e-zooid-$ZOOID_PORT.run
+# Herzschlag: bei JEDEM Aufruf berührt, egal ob Wiederverwendung oder Neuaufsetzen —
+# das ist die einzige Stelle, die "wird dieser Slot noch benutzt?" beantworten kann.
+# reap-stale-teststacks.sh liest sie: ein Slot, der seit Stunden nicht mehr angefasst
+# wurde, gilt als verwaist und wird abgeräumt; ein Slot mitten in einem laufenden Test
+# hat einen frischen Herzschlag vom Start dieses Laufs und bleibt unangetastet, auch
+# wenn der Lauf selbst lange dauert (siehe teardown-stack.sh + reap-stale-teststacks.sh).
+ALIVE=/tmp/e2e-zooid-$ZOOID_PORT.alive
+touch "$ALIVE"
 DATA=./data-test-$ZOOID_PORT
 CONFIG=./config-test-$ZOOID_PORT
 LOG=/tmp/e2e-zooid-$ZOOID_PORT.log
