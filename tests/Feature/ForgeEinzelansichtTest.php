@@ -10,16 +10,11 @@
  * Relay-Zugang ist NICHT erforderlich — „Existenz prüfen" ist eine andere
  * Frage als „URL umbiegen".
  *
- * Eigene `fakeSessionPubkey()` statt einer geteilten: Pest garantiert keine
- * feste Lade-/Namensraum-Reihenfolge zwischen Testdateien (Begründung und
- * Präzedenz: `tests/Feature/ArticleAuthorRouteTest.php`).
+ * `fakeSessionPubkey()` kommt als globale Funktion aus
+ * `EmptyStatesAndA11yTest.php` (dasselbe Muster wie `LongformReaderTest.php`):
+ * Pest lädt alle Feature-Dateien in EINEN Prozess — eine zweite Deklaration
+ * wäre ein Fatal Error.
  */
-
-/** Beliebiger 64-hex-Pubkey für eine "angemeldete" Session (Server-Gate, nicht Signer). */
-function fakeSessionPubkey(): string
-{
-    return str_repeat('a', 64);
-}
 
 const NADDR = 'naddr1qvzqqqr4xgypqy2z6m4qc9tchk6qjlpxkm6m3v0ukv2rn8wfn8rsz3qhc4sdxl4c';
 

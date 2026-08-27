@@ -3,47 +3,39 @@
 declare(strict_types=1);
 
 /*
- * P2 — die Adressierbarkeit eines einzelnen Vorgangs auf `/forge/{naddr}`.
+ * Die Adressierbarkeit eines einzelnen Vorgangs — seit P1 (GitHub-Parität,
+ * 2026-08-27) über EIGENE ROUTEN statt Query+Akkordeon.
  *
  * Geprüft wird hier die MARKUP-Seite des Vertrags: die reine Adressform steht
- * in `js/forgeVorgang.test.ts` und läuft unter `node --test`. Was dort nicht
- * messbar ist, ist die Verdrahtung — ein Sprungziel ohne `tabindex` nimmt
- * keinen Fokus an, und ein `toggle()` ohne Art schreibt die Adresse nicht.
- * Beides bräche still: die Seite sähe unverändert aus, nur der geteilte Link
- * führte ins Leere.
+ * in `js/forgeVorgang.test.ts` (`vorgangPath`) und läuft unter `node --test`.
+ * Die Route selbst (Rendern, Alt-Link-Redirects, Guard-Rails) steht in
+ * `ForgeEinzelansichtTest.php`. Was hier bleibt, ist die VERDRAHTUNG der
+ * Listen: jede Zeile muss die Route ihrer Art tragen — ein Link ohne die
+ * richtige Art führe still auf die falsche Seite.
  */
 
-it('rendert für Issue und Pull Request je ein fokussierbares Sprungziel', function () {
+it('verlinkt Issue- und Pull-Request-Zeilen auf ihre EINZELROUTEN — Patches nicht', function () {
     $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->get(route('group.forge.repo', ['naddr' => 'naddr1beispiel']))->assertOk()->getContent();
 
-    // Genau zwei: Issue und Pull Request. Ein Patch (1617) trägt bewusst keine
-    // Adresse — die Form kennt `?issue=` und `?pr=`, sonst nichts.
-    expect(substr_count($html, 'data-forge-vorgang tabindex="-1"'))->toBe(2);
+    expect($html)->toContain("vorgangHrefFuer(issue, 'issue')")
+        ->and($html)->toContain("vorgangHrefFuer(pr, 'pr')")
+        ->and($html)->toContain('data-forge-vorgang-link')
+        // Die Patch-Zeile bleibt das einzige Akkordeon (keine Adresse, kein
+        // Schreibweg): sie trägt bewusst KEINEN Zeilen-Link.
+        ->and(substr_count($html, 'data-forge-vorgang-link'))->toBe(2);
 });
 
-it('übergibt dem Umschalter die Art, sonst wandert die Adresse nicht mit', function () {
-    $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.forge.repo', ['naddr' => 'naddr1beispiel']))->assertOk()->getContent();
+it('trägt den Kopier-Knopf auf beiden EINZELANSICHTEN — argumentlos, die Insel kennt ihre Id', function () {
+    $hex = str_repeat('a', 64);
 
-    expect($html)->toContain("toggle(issue.id, 'issue')")
-        ->toContain("toggle(pr.id, 'pr')");
-});
+    foreach (['issues' => 'group.forge.issue', 'pulls' => 'group.forge.pull'] as $segment => $route) {
+        $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+            ->get(route($route, ['naddr' => 'naddr1beispiel', 'id' => $hex]))->assertOk()->getContent();
 
-it('rendert den Kopier-Knopf im Rumpf beider Vorgangsarten', function () {
-    $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.forge.repo', ['naddr' => 'naddr1beispiel']))->assertOk()->getContent();
-
-    /*
-     * Das Suchmuster trägt sein `="` mit Absicht. Flux gibt ein boolesches
-     * Attribut als `name="name"` aus — ein Muster ohne `="` fände jeden Knopf
-     * ZWEIMAL (einmal im Namen, einmal im Wert) und die erwartete Zahl wäre
-     * geraten statt gemessen. Genau darauf ist diese Sonde beim Bauen
-     * hereingefallen.
-     */
-    expect(substr_count($html, 'data-forge-vorgang-copy="'))->toBe(2)
-        ->and($html)->toContain("copyVorgang(issue.id, 'issue')")
-        ->and($html)->toContain("copyVorgang(pr.id, 'pr')");
+        expect($html)->toContain('data-forge-vorgang-copy')
+            ->and($html)->toContain('x-on:click="copyVorgang()"');
+    }
 });
 
 it('lässt den serverseitigen /spaces-Redirect unberührt', function () {
