@@ -194,13 +194,6 @@ async function oeffnePull(page: Page, prId: string, naddrUsed = naddr, schonAnge
     )
 }
 
-/** Den Steckbrief aufklappen — mobil steht er hinter einem `<details>`. */
-async function oeffneSteckbrief(page: Page): Promise<void> {
-    await page.evaluate(() => {
-        document.querySelector<HTMLDetailsElement>('[data-forge-steckbrief]')?.setAttribute('open', '')
-    })
-}
-
 /** Der Bereich eines Vorschlags — seit P1 DIE EINZELSEITE, nicht die Zeile. */
 const prBlock = (page: Page, betreff: string) =>
     page.locator('[data-forge-einzel-blatt]', { hasText: betreff })
@@ -421,7 +414,6 @@ test.describe('Forge: der PR-Diff und die Datenlücken des Steckbriefs (P7b)', (
 
     test('DoD: Tag-Liste, Themen und verwandte Repositories stehen im Steckbrief', async ({ page }) => {
         await oeffneRepo(page)
-        await oeffneSteckbrief(page)
 
         // Tags: der `refs/tags/*`-Eintrag des 30618, samt Kurzhash.
         const tag = page.locator('[data-forge-tag]').first()
