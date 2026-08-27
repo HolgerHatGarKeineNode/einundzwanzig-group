@@ -448,7 +448,54 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         'room' => 38,
         'directory' => 3,
         'spaces' => 9,
-        'forge' => 20,
+        // **P1 des Gitea-Sprache-Plans (2026-08-26): 20 → 16.** Multiset-Diff
+        // (`array_count_values`, `git show HEAD:…⚡forge.blade.php` gegen den
+        // Arbeitsbaum) ist EINSEITIG — eine einzige veränderte Zeichenkette,
+        // `aria-hidden="true"` von 17 auf 13, keine Addition.
+        //
+        // **P5 desselben Plans (2026-08-26): 16 → 15.** Wieder einseitig,
+        // `aria-hidden="true"` von 13 auf 12, wieder keine Addition. Der eine
+        // ist die handgezogene Zeitleisten-Linie
+        // (`<span aria-hidden="true" class="absolute start-[0.875rem] …">`),
+        // die `flux:timeline` ersetzt hat.
+        //
+        // **Am gerenderten Baum ist nichts verloren gegangen, und das ist
+        // gemessen statt gefolgert** (`p5-aria-zeitleiste.log`, Sonde über
+        // `/forge?tab=activity`): `flux:timeline.item` zeichnet Leit- und
+        // Folgelinie als eigene `<div>` — 12 Stück über 6 Zeilen, davon **0 mit
+        // Text und 0 mit `role`/`aria-label`**. Sie stehen also ohnehin nicht im
+        // Barrierebaum; das alte `aria-hidden` versteckte etwas, das nichts zu
+        // sagen hatte. Gleichzeitig bringt `flux:timeline.indicator` ein
+        // EIGENES `aria-hidden="true"` mit (die Grundlinien-Attrappe,
+        // `flux-pro/…/timeline/indicator.blade.php`) — gemessen **2 Träger je
+        // Zeile** im gerenderten Baum.
+        //
+        // Damit ist es derselbe blinde Fleck wie bei `forge-status-badge` und
+        // `flux:progress`: der Quelltext-Scanner sieht in keine Komponente
+        // hinein. Die Zahl fällt, die Sache nicht. Der Riegel dafür ist die
+        // DOM-Zusage in `forge-patches.spec.ts` („die Zeitleiste ist ein
+        // Bauteil"), nicht diese Zählung.
+        //
+        // Die vier sind die Glyphen der Zustands-Pille in der Aktivitätsspur
+        // (`exclamation-circle` / `check-circle` / `x-circle` / `pencil-square`).
+        // Sie sind nicht gefallen, sondern UMGEZOGEN: dieselbe Pille steht seit
+        // P1 auch in der Issue-, PR-, Patch- und Vorgangslistenzeile, und vier
+        // Kopien desselben Zwanzigzeilers wären genau die Duplikat-Bauform, die
+        // dieses Repo sonst einsammelt. Sie liegt jetzt in
+        // `components/forge-status-badge.blade.php` — und Komponenten führt
+        // diese Liste grundsätzlich nicht (dieselbe Regel wie beim
+        // Lightbox-Overlay, den Ortskarten und der Ansichts-Steuerung oben).
+        //
+        // **Das ist ein echter Verlust an Prüfbarkeit an dieser Stelle, und er
+        // steht hier statt weggerechnet zu werden** — wie beim `flux:progress`
+        // weiter unten. Im GERENDERTEN Baum sind die vier `aria-hidden="true"`
+        // unverändert da: `flux:icon` schreibt das Attribut selbst in jedes
+        // `<svg>` (`flux/icon/*.blade.php`, jeder Variantenzweig). Deshalb steht
+        // es in der Komponente auch nicht noch einmal ausgeschrieben — das ergäbe
+        // dasselbe Attribut zweimal am selben Tag. Diese Zählung liest die
+        // BLADE-QUELLE; was ein Vendor-Stub zur Laufzeit setzt, sieht sie per
+        // Konstruktion nicht.
+        'forge' => 15,
         // **34 → 39 mit P5 (2026-08-24).** Nachgerechnet, nicht nachgezogen: die
         // Schreibriegel vor Zuweisen und Freigeben bringen genau fünf Träger mit —
         // drei `::aria-disabled` (Zuweisung, Freigabe, Änderungswunsch; drei
@@ -496,7 +543,40 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // `flux:badge` gehoben und eine Metazeile von `<p>` auf `<div>` gestellt —
         // beides ohne ARIA-Träger. Multiset-Diff dieser Datei: leer in beide
         // Richtungen.
-        'forge-repo' => 37,
+        //
+        // **P1 des Gitea-Sprache-Plans (2026-08-26): 37 → 34.** Multiset-Diff
+        // EINSEITIG — eine veränderte Zeichenkette, `aria-hidden="true"` von 10
+        // auf 7, keine Addition.
+        //
+        // Die drei sind die Hüllen der grauen Statuspunkte an der Issue-, Patch-
+        // und PR-Zeile (`<span aria-hidden="true" class="mt-1 flex size-4 …">`).
+        // Sie sind ERSATZLOS gefallen und nicht umgezogen: der Punkt sagte
+        // dasselbe wie das Zustandswort in derselben Zeile, und zwei Träger für
+        // eine Aussage sind einer zu viel. Was ihn ersetzt — die Zustands-Pille —
+        // ist für die Sprachausgabe NICHT versteckt; sie trägt das Wort, im
+        // schmalen Bild als `sr-only`. Hier verschwindet also kein Inhalt hinter
+        // einem `aria-hidden`, es verschwindet ein Duplikat.
+        //
+        // **P5 desselben Plans (2026-08-26): 34 → 33.** Derselbe Vorgang wie bei
+        // 'forge' oben und aus derselben Ursache — Multiset-Diff EINSEITIG,
+        // `aria-hidden="true"` von 7 auf 6, keine Addition. Der eine ist die
+        // handgezogene Zeitleisten-Linie der Repo-Aktivität
+        // (`<span aria-hidden="true" class="absolute start-[0.875rem] …">`), die
+        // `flux:timeline` ersetzt hat.
+        //
+        // Die Begründung steht ausgeschrieben bei 'forge' und gilt hier
+        // unverändert: am gerenderten Baum ist nichts verloren gegangen (die
+        // Linien tragen weder Text noch `role`/`aria-label`, sie standen nie im
+        // Barrierebaum), und `flux:timeline.indicator` bringt einen EIGENEN
+        // Träger mit, den dieser Quelltext-Scanner nicht sehen kann. Gemessen,
+        // nicht gefolgert — `p5-aria-zeitleiste.log`; der Riegel dafür ist die
+        // DOM-Zusage in `forge-patches.spec.ts`.
+        //
+        // **Diese Zeilen stehen hier, weil eine gesenkte Erwartungszahl ohne
+        // Begründung daneben nicht mehr unterscheidbar ist von einer stillen
+        // Abschwächung.** Die Zahl bei 'forge' hatte den Block, diese nicht —
+        // im Gate aufgefallen und nachgezogen.
+        'forge-repo' => 33,
     ];
 
     // Gegenprobe: die LIVE-Extraktion (für den countInRendered()-Abgleich unten)
