@@ -149,13 +149,7 @@ async function zeigeWorkspaceAufZooid(page: Page): Promise<void> {
     }, `${ZOOID_WS}/`)
 }
 
-/**
- * Die Detailseite öffnen und auf den geladenen Zustand warten.
- *
- * Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `view` `null` ist,
- * existiert die ganze Fläche nicht (`<template x-if="view">`), und jede Messung
- * liefe gegen ein leeres Dokument — grün, ohne etwas geprüft zu haben.
- */
+/** Die Steckbrief-Seite öffnen und auf den geladenen Zustand warten. */
 async function oeffneRepo(page: Page, query = ''): Promise<void> {
     await useZooid(page)
     await zeigeWorkspaceAufZooid(page)
@@ -173,6 +167,33 @@ async function oeffneRepo(page: Page, query = ''): Promise<void> {
     )
 }
 
+/**
+ * Die EINZELANSICHT eines Pull Requests öffnen (P1, GitHub-Parität) — mit
+ * `?tab=dateien`, weil der Diff seither im Dateien-Reiter der Einzelseite
+ * wohnt und nicht mehr im Akkordeon-Rumpf der Liste.
+ *
+ * Gewartet wird auf das BLATT (`[data-forge-einzel-blatt]`): es entsteht erst
+ * mit `vorgang() !== null` — dasselbe Kriterium wie `view` bei der Repo-Seite,
+ * nur am passenderen Knoten.
+ */
+async function oeffnePull(page: Page, prId: string, naddrUsed = naddr, schonAngemeldet = false): Promise<void> {
+    // `schonAngemeldet` überspringt ALLE Init-Skripte, nicht nur den Login:
+    // ein zweites `useZooid` registrierte ein WEITERES `__nostrWorkspace = ''`,
+    // das als zuletzt registriertes gewinnt und der nächsten Seite den Relay
+    // zieht — die Insel endet leer, ohne Fehlermeldung.
+    if (!schonAngemeldet) {
+        await useZooid(page)
+        await zeigeWorkspaceAufZooid(page)
+        await loginNsec(page, NSEC)
+    }
+    await page.goto(`/forge/${naddrUsed}/pulls/${prId}?tab=dateien`)
+    await page.waitForFunction(
+        () => !!document.querySelector('[data-forge-einzel-blatt]'),
+        undefined,
+        { timeout: 30_000 },
+    )
+}
+
 /** Den Steckbrief aufklappen — mobil steht er hinter einem `<details>`. */
 async function oeffneSteckbrief(page: Page): Promise<void> {
     await page.evaluate(() => {
@@ -180,9 +201,9 @@ async function oeffneSteckbrief(page: Page): Promise<void> {
     })
 }
 
-/** Die aufgeklappte PR-Zeile zu einem Betreff. */
+/** Der Bereich eines Vorschlags — seit P1 DIE EINZELSEITE, nicht die Zeile. */
 const prBlock = (page: Page, betreff: string) =>
-    page.locator('[data-forge-pr]').filter({ hasText: betreff }).first()
+    page.locator('[data-forge-einzel-blatt]', { hasText: betreff })
 
 test.describe('Forge: der PR-Diff und die Datenlücken des Steckbriefs (P7b)', () => {
     test.beforeAll(() => {
@@ -301,28 +322,18 @@ test.describe('Forge: der PR-Diff und die Datenlücken des Steckbriefs (P7b)', (
     // ── 1. Die Kostenansage ─────────────────────────────────────────────────
 
     test('DoD: die Kostenansage steht VOR dem Download — am Netzverkehr gemessen', async ({ page }) => {
+        // Der Mitschnitt hängt VOR allem, was die Seite lädt: eine Anfrage, die
+        // vor dem Zuhören losgeht, wäre genau die, die dieser Test nicht sehen
+        // darf. (Login und Navigation besorgt `oeffnePull` — hier steht bewusst
+        // KEINE eigene Präambel mehr: ein zweites `loginNsec` träfe die
+        // Authed-Weiterleitung und fände das Formular nie wieder.)
         const gitAnfragen: string[] = []
-        await useZooid(page)
-        await zeigeWorkspaceAufZooid(page)
-        await loginNsec(page, NSEC)
-        // Der Mitschnitt hängt VOR dem ersten `goto`: eine Anfrage, die vor dem
-        // Zuhören losgeht, wäre genau die, die dieser Test nicht sehen darf.
         page.on('request', (req) => {
             if (req.url().includes('/git/')) {
                 gitAnfragen.push(req.url())
             }
         })
-        await page.goto(`/forge/${naddr}?pr=${prIds[PR_EIGEN]}`)
-        await page.waitForFunction(
-            () => {
-                const el = document.querySelector('[x-data^="nostrForgeRepo"]')
-                const A = (window as unknown as { Alpine?: { $data(e: Element): { view?: unknown } } }).Alpine
-
-                return !!el && !!A && !!A.$data(el).view
-            },
-            undefined,
-            { timeout: 30_000 },
-        )
+        await oeffnePull(page, prIds[PR_EIGEN])
 
         const block = prBlock(page, PR_EIGEN)
         const ansage = block.locator('[data-forge-pr-diff-ansage]')
@@ -351,7 +362,7 @@ test.describe('Forge: der PR-Diff und die Datenlücken des Steckbriefs (P7b)', (
     // ── 2. Der Fremdhost ────────────────────────────────────────────────────
 
     test('DoD: ein Tip auf fremdem Host ist eine ruhige Auskunft MIT LINK, kein Fehlerbild', async ({ page }) => {
-        await oeffneRepo(page, `?pr=${prIds[PR_FREMD]}`)
+        await oeffnePull(page, prIds[PR_FREMD])
         const block = prBlock(page, PR_FREMD)
         const abschnitt = block.locator('[data-forge-pr-diff]')
         await expect(abschnitt).toHaveAttribute('data-quelle', 'fremd', { timeout: 30_000 })
@@ -377,7 +388,11 @@ test.describe('Forge: der PR-Diff und die Datenlücken des Steckbriefs (P7b)', (
     })
 
     test('die Lücken werden EINZELN benannt — nicht mit einem gemeinsamen Satz', async ({ page }) => {
-        await oeffneRepo(page, `?pr=${prIds[PR_OHNE]}`)
+        // Zwei komplette Einzelseiten-Ladezyklen (Login + Navigation + Relay-
+        // Bestand) passen nicht in die 30-s-Norm — hier zählt die Aussage über
+        // drei Sätze, nicht die Geschwindigkeit.
+        test.setTimeout(60_000)
+        await oeffnePull(page, prIds[PR_OHNE])
 
         const beide = prBlock(page, PR_OHNE)
         await expect(beide.locator('[data-forge-pr-diff]')).toHaveAttribute('data-quelle', 'unvollstaendig', {
@@ -387,11 +402,12 @@ test.describe('Forge: der PR-Diff und die Datenlücken des Steckbriefs (P7b)', (
         // Kein Knopf, der nichts bewirken kann.
         await expect(beide.locator('[data-forge-pr-diff-start]')).toHaveCount(0)
 
-        // Der Vorschlag MIT Commit und ohne Vergleichspunkt steht auf derselben
-        // Seite — beide Sätze lassen sich also im selben Lauf gegeneinander
-        // halten, ohne zweimal zu laden.
+        // Der Vorschlag MIT Commit und ohne Vergleichspunkt hat seit P1 eine
+        // EIGENE Seite — zwei Navigationen im selben Lauf, Login EINMAL (ein
+        // zweites `loginNsec` träfe die Authed-Weiterleitung und fände das
+        // Formular nie wieder).
+        await oeffnePull(page, prIds[PR_NUR_C], naddr, true)
         const nurC = prBlock(page, PR_NUR_C)
-        await nurC.getByRole('button').first().click()
         const satzNurC = (await nurC.locator('[data-forge-pr-diff-hinweis]').innerText()).trim()
 
         // **Das ist die Zusage.** Ein gemeinsamer Satz für zwei verschiedene
@@ -556,23 +572,13 @@ async function verdrahteGit(page: Page): Promise<{ anfragen: number }> {
     return zaehler
 }
 
-/** Die Detailseite des Git-Repos öffnen, mit verdrahteter Gegenstelle. */
+/** Die Einzelansicht des Git-PRs öffnen, mit verdrahteter Gegenstelle. */
 async function oeffneGitRepo(page: Page, prId: string): Promise<{ anfragen: number }> {
     await useZooid(page)
     await zeigeWorkspaceAufZooid(page)
     const zaehler = await verdrahteGit(page)
-    await loginNsec(page, NSEC)
-    await page.goto(`/forge/${gitNaddr}?pr=${prId}`)
-    await page.waitForFunction(
-        () => {
-            const el = document.querySelector('[x-data^="nostrForgeRepo"]')
-            const A = (window as unknown as { Alpine?: { $data(e: Element): { view?: unknown } } }).Alpine
-
-            return !!el && !!A && !!A.$data(el).view
-        },
-        undefined,
-        { timeout: 30_000 },
-    )
+    // Login besorgt `oeffnePull` — ein zweites hier träfe die Authed-Weiterleitung.
+    await oeffnePull(page, prId, gitNaddr)
 
     return zaehler
 }
