@@ -88,6 +88,11 @@ RATELIMITS
 # reine Logik-Specs, die nie einen Relay anfassen (die Seite selbst kam nicht hoch).
 # global-setup.ts loescht die Marker zu Lauf-Beginn.
 RUNMARK="/tmp/e2e-buzz-$BUZZ_PORT.run"
+# Herzschlag wie bei zooid (siehe dort) — bei JEDEM Aufruf berührt, unabhängig vom
+# `flock` weiter unten (der serialisiert nur den AUFBAU mehrerer Worker, nicht den
+# Herzschlag selbst).
+ALIVE="/tmp/e2e-buzz-$BUZZ_PORT.alive"
+touch "$ALIVE"
 
 # AUFBAU SERIALISIEREN. Vier Worker starten ihre Stacks gleichzeitig — das sind vier
 # Postgres-Initialisierungen, vier MinIO-Buckets und vier Relay-Migrationen auf einmal.

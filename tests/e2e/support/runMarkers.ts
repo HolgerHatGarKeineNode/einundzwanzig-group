@@ -68,3 +68,20 @@ export function ownedRunMarkerPaths(scope: RunMarkerScope): string[] {
 export function ownsRunMarker(scope: RunMarkerScope, path: string): boolean {
     return ownedRunMarkerPaths(scope).includes(path)
 }
+
+/** Ein Teardown-Ziel: ein Relay-Arm auf einem konkreten Port. */
+export type TeardownTarget = { mode: 'zooid' | 'buzz'; port: number }
+
+/**
+ * Alle Stacks, die DIESER Lauf am Ende abräumen darf — dieselbe Slot-Menge wie
+ * {@link ownedRunMarkerPaths}, nur als (Modus, Port)-Paare statt Dateipfade, für
+ * `global-teardown.ts` (das `teardown-stack.sh` je Ziel aufruft statt nur Marker zu
+ * löschen). Beide Arme je Slot, aus demselben Grund wie dort: ein Slot kann aus einem
+ * früheren Lauf im jeweils ANDEREN Modus noch Reste tragen.
+ */
+export function ownedTeardownTargets(scope: RunMarkerScope): TeardownTarget[] {
+    return ownedSlots(scope).flatMap((slot) => [
+        { mode: 'buzz' as const, port: BUZZ_BASE_PORT + slot },
+        { mode: 'zooid' as const, port: ZOOID_BASE_PORT + slot },
+    ])
+}

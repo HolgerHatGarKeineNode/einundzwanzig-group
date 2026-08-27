@@ -99,6 +99,11 @@ export default defineConfig({
           : 6,
     reporter: [['list']],
     globalSetup: './tests/e2e/support/global-setup.ts',
+    // Räumt am Laufende die EIGENEN Slots vollständig ab (Prozesse, Docker-Container/
+    // -Netze/-Volumes, Marker) — läuft nachweislich auch nach einfachem Ctrl-C
+    // (graceful SIGINT), siehe Kopfkommentar in global-teardown.ts. Gegen den Rest-Fall
+    // (SIGKILL, Absturz) steht reap-stale-teststacks.sh, verdrahtet in global-setup.ts.
+    globalTeardown: './tests/e2e/support/global-teardown.ts',
     use: {
         // baseURL setzt das workerBackend-Fixture pro Worker (worker-eigener serve-Port).
         trace: 'on-first-retry',
