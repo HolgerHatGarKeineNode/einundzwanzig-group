@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import type { FullConfig } from '@playwright/test'
 import { ownedRunMarkerPaths } from './runMarkers'
-import { SOURCES_HASH_CMD, SOURCES_STAMP, sourcesHash } from './sourcesStamp'
+import { SOURCES_STAMP, sourcesHash } from './sourcesStamp'
 import { pruefeTestschluessel } from './keys.ts'
 
 /**
@@ -15,7 +15,7 @@ import { pruefeTestschluessel } from './keys.ts'
  */
 
 const MANIFEST = 'public/build/manifest.json'
-// `SOURCES_STAMP`, `SOURCES_HASH_CMD` und `sourcesHash()` wohnen seit dem Bundle-Riegel
+// `SOURCES_STAMP` und `sourcesHash()` wohnen seit dem Bundle-Riegel
 // in `./sourcesStamp` — dieselbe Frage („ist der Build aktuell?") darf nicht zwei
 // Antworten haben. Die Begründung für Content statt mtime steht dort.
 
