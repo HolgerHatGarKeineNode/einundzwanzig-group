@@ -13,6 +13,7 @@ import { loginNsec } from './support/login'
 import { spawnSync } from 'node:child_process'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { nsecEncode } from 'nostr-tools/nip19'
+import { measure } from './support/contrast'
 
 /**
  * P3/N1 — der **Forum-Modus** eines Buzz-Kanals, an der echten Fläche gegen einen
@@ -213,6 +214,17 @@ const topicButton = (page: Page, forum: ForumFixture) =>
     page.getByRole('button', { name: new RegExp(`Thema ${forum.topicTitle.slice(0, 20)}`) })
 const joinButton = (page: Page) => page.getByRole('button', { name: 'Beitreten' })
 const composer = (page: Page) => page.getByPlaceholder('Nachricht schreiben…')
+
+/**
+ * Der Auslöser einer der beiden Themen-Bauformen.
+ *
+ * Über `data-`-Haken und nicht über die Beschriftung: die zwei Formen heißen
+ * bewusst verschieden („Neues Thema" in der Leiste, „Neues Thema verfassen …" am
+ * Listenkopf), und `getByRole({name})` matcht als TEILZEICHENKETTE — „Neues
+ * Thema" träfe beide. Ein Fall, der die AUSSCHLIESSLICHKEIT der zwei Formen
+ * misst, darf sich auf so etwas nicht stützen.
+ */
+const trigger = (page: Page, form: 'kopf' | 'leiste') => page.locator(`[data-forum-topic-trigger="${form}"]`)
 const gate = (page: Page) => page.getByTestId('room-gate-restricted')
 
 /** Forum-Raum öffnen und auf die Themenliste warten. */
@@ -258,7 +270,27 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
                 await expect(page.getByRole('log', { name: 'Chat-Verlauf' })).toBeHidden()
             })
 
-            test(`im Forum (${forum.lage}) steht kein Themen-Composer, sondern der Satz, der gilt`, async ({ page }) => {
+            /**
+             * **Der Weg zum neuen Thema steht — in GENAU EINER Bauform.**
+             *
+             * Hier stand bis zum 2026-08-27 die Zusage „es gibt keinen Themen-Composer,
+             * sondern den Satz, der gilt" (`Neue Themen werden hier noch nicht verfasst
+             * — Antworten in einem Thema schon.`). Der Satz ist ersatzlos gefallen, weil
+             * seine Aussage nicht mehr stimmt.
+             *
+             * Was an seine Stelle tritt, ist keine Umformulierung, sondern eine härtere
+             * Zusage: es gibt ZWEI Bauformen (Knopf am Listenkopf am Desktop, Knopf in
+             * der unteren Leiste auf dem Telefon), und es steht immer nur EINE davon.
+             * Die Ausschließlichkeit ist das eigentliche Produktversprechen — zwei
+             * sichtbare Auslöser für dieselbe Handlung wären schlimmer als ein schlecht
+             * platzierter. Sie ist in `js/forumWriteModels.ts` als EINE Funktion mit
+             * EINEM Rückgabewert gebaut (`topicComposerZiel`) und hier am DOM gemessen.
+             *
+             * **Der Buzz-Arm fährt auf 1279 px** — einen Pixel unter `xl`, also im
+             * Mobil-Chassis. Die Desktop-Hälfte setzt ihren Viewport deshalb selbst,
+             * wie die Rail-Fälle weiter unten.
+             */
+            test(`im Forum (${forum.lage}) steht GENAU EINE Bauform für ein neues Thema`, async ({ page }) => {
                 await openForum(page, forum)
 
                 // Beitreten, damit die Composer-Zone überhaupt ihren Mitglieder-Zustand
@@ -269,13 +301,148 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
                 if (await joinButton(page).isVisible()) {
                     await joinButton(page).click()
                 }
-                await expect(
-                    page.getByText('Neue Themen werden hier noch nicht verfasst — Antworten in einem Thema schon.'),
-                ).toBeVisible({ timeout: 30_000 })
 
-                // Ein kind-9-Composer im Forum schriebe eine Wurzel, die weder wir noch
-                // Buzz Desktop je auflisten (beide listen 45001) — er darf nicht da sein.
+                // Mobil-Chassis (Projektvorgabe 1279 px): die untere Leiste, sonst nichts.
+                await expect(trigger(page, 'leiste'), 'der Auslöser der unteren Leiste')
+                    .toBeVisible({ timeout: 30_000 })
+                await expect(trigger(page, 'kopf'), 'der Listenkopf-Auslöser gehört NICHT ins Mobil-Chassis')
+                    .toHaveCount(0)
+
+                // Desktop-Chassis: genau umgekehrt. `setViewportSize` sticht die
+                // Projektvorgabe; `topicComposerZiel` liest die Breite reaktiv aus dem
+                // `$store.viewport`, der an derselben Media-Query hängt wie die Rail.
+                await page.setViewportSize({ width: 1440, height: 900 })
+                await expect(trigger(page, 'kopf'), 'der Listenkopf-Auslöser am Desktop')
+                    .toBeVisible({ timeout: 30_000 })
+                await expect(trigger(page, 'leiste'), 'die untere Leiste gehört NICHT ins Desktop-Chassis')
+                    .toHaveCount(0)
+
+                // Und der Chat-Composer bleibt in BEIDEN Chassis weg: er schriebe eine
+                // kind-9-Wurzel, und die listet weder unsere Fläche noch Buzz Desktop
+                // je als Thema (beide listen 45001).
                 await expect(composer(page)).toBeHidden()
+            })
+
+            /**
+             * ══ DIE ZUSAGE DES AUFTRAGS ═══════════════════════════════════════════
+             * Ein Thema anlegen, es in der Liste wiederfinden — und danach BELEGEN,
+             * dass am Relay wirklich ein `45001` mit `["h",<uuid>]` und **keinem
+             * Titel-Tag** liegt.
+             *
+             * Der Fall ist bewusst dreistufig, weil jede Stufe etwas anderes misst:
+             *
+             *   1. **Sofort sichtbar.** `publishThunk` legt das Ereignis synchron in
+             *      den `repository` — die Zeile steht, bevor der Relay geantwortet hat.
+             *      Das allein beweist NICHTS über den Relay; es beweist nur, dass der
+             *      optimistische Weg funktioniert.
+             *   2. **Nach dem Neuladen noch da.** Erst hier ist bewiesen, dass das
+             *      Ereignis den Relay erreicht hat und aus ihm zurückkommt. Ohne diese
+             *      Stufe wäre der Fall auch dann grün, wenn `publish` still scheitert.
+             *   3. **Die richtige FORM.** `nak` liest das Ereignis zurück und der Fall
+             *      vergleicht die Tags gegen `build_forum_post`
+             *      (`crates/buzz-sdk/src/builders.rs:284`): genau ein `h`, sonst nichts.
+             *      Ein Thema mit einem erfundenen `subject`-Tag käme durch Stufe 1 und
+             *      2 und wäre in Buzz Desktop trotzdem titellos.
+             *
+             * **Der Fall sät selbst und räumt selbst auf.** Er hängt an keiner Fixture
+             * des Seeds: der Marker trägt `Date.now()`, ist also je Lauf eindeutig, und
+             * am Ende räumt ein `kind 9005` (NIP-29, Owner-Schlüssel) ihn wieder ab —
+             * derselbe Weg, den die Live-Fälle darunter schon benutzen. Ohne das
+             * Aufräumen wüchse die Themenliste mit jedem Lauf, und der Zähler-Fall
+             * dieser Datei misst dann gegen einen Zustand, den niemand hergestellt hat.
+             *
+             * `nak` läuft überall mit `--auth`: ohne AUTH quittiert der Relay ein
+             * Lösch-Event mit `auth-required` statt `success` und räumt nichts ab.
+             */
+            test(`ein Thema anlegen (${forum.lage}) — es steht in der Liste und trägt am Relay die Buzz-Form`, async ({ page }) => {
+                const marke = `E2E-Neues-Thema-${Date.now()}`
+                const rumpf = `${marke}\nZweite Zeile — sie gehoert in die Vorschau, nicht in den Titel.`
+                let neueId = ''
+
+                await openForum(page, forum)
+                if (await joinButton(page).isVisible()) {
+                    await joinButton(page).click()
+                }
+
+                try {
+                    await trigger(page, 'leiste').click()
+
+                    // Das Blatt ist ein echter Dialog — `role`/`aria-modal` stehen im
+                    // Markup, nicht erst nach dem Öffnen per JS.
+                    const blatt = page.getByRole('dialog', { name: 'Neues Thema' })
+                    await expect(blatt).toBeVisible({ timeout: 15_000 })
+
+                    // EIN Feld. Kein Titelfeld — es gibt kein Titel-Tag, und ein Feld,
+                    // dessen Inhalt in Buzz Desktop niemand sieht, wäre gelogen.
+                    await expect(blatt.getByLabel('Thema')).toBeVisible()
+                    await expect(blatt.getByLabel('Titel'), 'ein 45001 trägt keinen Titel — also gibt es kein Titelfeld')
+                        .toHaveCount(0)
+
+                    await blatt.getByLabel('Thema').fill(rumpf)
+
+                    // Die Fläche sagt dem Verfasser, was aus der ersten Zeile wird —
+                    // gerechnet mit DERSELBEN Funktion, aus der die Liste ihren Titel
+                    // baut (`forumTopicTitle`). Das ist die ehrliche Abbildung dessen,
+                    // was das Ereignis wirklich trägt.
+                    await expect(page.locator('[data-forum-topic-titelvorschau]')).toContainText(marke)
+
+                    await blatt.getByRole('button', { name: 'Thema anlegen' }).click()
+
+                    // Stufe 1 — optimistisch. Das Blatt schließt, die Zeile steht.
+                    await expect(blatt).toBeHidden({ timeout: 30_000 })
+                    const zeile = page.getByRole('button', { name: new RegExp(`Thema ${marke}`) })
+                    await expect(zeile, 'die neue Zeile steht sofort (optimistisch)').toBeVisible({ timeout: 30_000 })
+
+                    // Kein Fehlerkasten: der Ausgang ist sichtbar und er ist Erfolg.
+                    // (Der andere sichtbare Ausgang — Ablehnung oder ausbleibendes `OK`
+                    // beim Ratenbegrenzer — steht in `[data-forum-topic-error]`.)
+                    await expect(page.locator('[data-forum-topic-error]')).toHaveCount(0)
+
+                    // Stufe 2 — nach dem Neuladen. Jetzt kommt die Zeile aus dem RELAY.
+                    await page.reload()
+                    await expect(zeile, 'nach dem Neuladen kommt das Thema aus dem Relay').toBeVisible({ timeout: 30_000 })
+                    // Titel = erste Zeile, Vorschau = Rest. Dieselbe Anzeige-Regel wie
+                    // beim geseedeten Thema, jetzt an einem selbst verfassten belegt.
+                    await expect(
+                        page.getByText('Zweite Zeile — sie gehoert in die Vorschau, nicht in den Titel.', { exact: true }),
+                    ).toBeVisible()
+
+                    // Stufe 3 — die FORM am Relay, gegen Buzz' eigenen Builder.
+                    const roh = query(['-k', '45001', '-t', `h=${forum.h}`, '-l', '30'])
+                        .split('\n')
+                        .find((row) => row.includes(marke))
+                    expect(roh, 'das Thema liegt nicht am Relay').toBeTruthy()
+                    const ereignis = JSON.parse(roh as string) as {
+                        id: string
+                        kind: number
+                        content: string
+                        tags: string[][]
+                    }
+                    neueId = ereignis.id
+
+                    expect(ereignis.kind, 'ein Thema ist ein 45001 (KIND_FORUM_POST, buzz-core/src/kind.rs:550)').toBe(45001)
+                    // `build_forum_post` baut `["h", uuid]` und danach NUR `p` (Erwähnungen)
+                    // und `imeta` (Anhänge). Dieser Entwurf hat weder das eine noch das
+                    // andere — es darf also genau ein Tag dastehen.
+                    expect(ereignis.tags, 'Tags eines 45001 ohne Erwähnung/Anhang: nur `h`').toEqual([['h', forum.h]])
+                    // Und der Inhalt ist der GETRIMMTE Rumpf, wie in Buzz Desktop
+                    // (`commands/messages.rs:515`, `content.trim()`).
+                    expect(ereignis.content).toBe(rumpf)
+                } finally {
+                    if (neueId) {
+                        expect(
+                            publish(BUZZ_OWNER_SEC_HEX, ['-k', '9005', '-t', `h=${forum.h}`, '-t', `e=${neueId}`]),
+                            'das selbst angelegte Thema konnte nicht abgeräumt werden — die Liste wüchse mit jedem Lauf',
+                        ).toContain('success')
+                        // Und nachsehen, dass es wirklich weg ist: ein `OK true` ist bei
+                        // Buzz kein Wirkungsnachweis (auf dem `a`-Weg quittiert der Relay
+                        // sogar Löschungen nie existierender Ziele mit `success`).
+                        expect(
+                            query(['-k', '45001', '-t', `h=${forum.h}`, '-l', '30']).includes(marke),
+                            'das Thema steht nach dem Aufräumen noch am Relay',
+                        ).toBe(false)
+                    }
+                }
             })
 
             test(`der Thread eines Themas (${forum.lage}) trägt BEIDE Antwortformen — 45003 und kind 9`, async ({ page }) => {
@@ -290,6 +457,43 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
                 // Die Wurzel steht als Zitat-Anker über den Antworten — ein 45001 wird per
                 // id aufgelöst, nicht über den Raumfilter (der kennt den Kind nicht).
                 await expect(thread.getByText(forum.topicTitle, { exact: false })).toBeVisible()
+            })
+
+            /**
+             * **Der Riegel, den der RELAY nicht stellt.**
+             *
+             * `crates/buzz-relay/src/handlers/ingest.rs` kennt für ein 45001 **kein**
+             * `content.is_empty()`-Gate — ein Thema ohne jeden Text nähme der Relay an,
+             * und es stünde danach als titellose Zeile in jeder Forum-Liste, unserer
+             * wie der von Buzz Desktop. Der Riegel muss im Client stehen, und bei Buzz
+             * steht er ebenfalls dort (`ForumComposer.tsx:221`, `contentRef.current.trim()`).
+             *
+             * Gemessen wird `disabled`, nicht ein Klick: `flux:button` rendert ein
+             * echtes `disabled`-Attribut (kein `aria-disabled`), ein `click()` liefe
+             * sonst in einen 30-s-Timeout und der Fall stünde als „flaky" da.
+             */
+            test(`ein Thema ohne Text laesst sich nicht abschicken (${forum.lage})`, async ({ page }) => {
+                await openForum(page, forum)
+                if (await joinButton(page).isVisible()) {
+                    await joinButton(page).click()
+                }
+                await trigger(page, 'leiste').click()
+
+                const blatt = page.getByRole('dialog', { name: 'Neues Thema' })
+                await expect(blatt).toBeVisible({ timeout: 15_000 })
+                const knopf = blatt.getByRole('button', { name: 'Thema anlegen' })
+                await expect(knopf, 'ein leerer Entwurf ist kein Thema').toBeDisabled()
+
+                // Auch NUR Weißraum ist kein Thema — der Inhalt geht getrimmt auf den
+                // Draht (`normalizeTopicContent`, wie Buzz' `content.trim()`), es bliebe
+                // also wörtlich nichts übrig.
+                await blatt.getByLabel('Thema').fill('   \n\t  ')
+                await expect(knopf, 'nur Weißraum bleibt getrimmt nichts').toBeDisabled()
+
+                // Und mit Text ist er bedienbar — ohne diese Gegenprobe wäre der Fall
+                // auch dann grün, wenn der Knopf immer inert wäre.
+                await blatt.getByLabel('Thema').fill('Ein Satz reicht.')
+                await expect(knopf).toBeEnabled()
             })
 
             /**
@@ -397,6 +601,106 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
                         .toContain('success')
                 }
             })
+        })
+    }
+
+    /**
+     * ══ KONTRAST DER NEUEN FLÄCHE — gemessen, nicht gerechnet ═══════════════════
+     *
+     * **Warum dieser Fall hier steht und nicht in `a11y-contrast.spec.ts`:** die
+     * Kontrast-Suite fährt gegen **zooid** (`useZooid`), und auf zooid gibt es
+     * keine Foren. Die neue Fläche ist dort per Konstruktion unerreichbar; ohne
+     * diesen Fall wäre sie von der Kontrastmessung des Hauses schlicht nicht
+     * gedeckt, ohne dass irgendwo etwas rot würde.
+     *
+     * **Und das ist keine theoretische Lücke.** Beim Bau stand an der
+     * „Wird gesendet …"-Marke zuerst `text-brand-600`: #e87706 auf der weissen
+     * `surface-card` hält **2,97:1**, WCAG 1.4.3 verlangt 4,5:1. Aufgefallen ist
+     * es beim Nachrechnen von Hand, nicht durch einen Test — genau der Zustand,
+     * den dieser Fall beendet. Ebenso die gestrichelte Kante des Desktop-Knopfes:
+     * `border-zinc-300` hielt gegen `bg-zinc-50` **1,42:1** gegen die 3:1 aus
+     * 1.4.11.
+     *
+     * Gemessen wird am GERENDERTEN Baum über `support/contrast.ts` — ein
+     * `getComputedStyle` liefert in diesem Stylesheet `oklab(...)`, und ein
+     * Zahlen-Regex darauf erfände Farben. Der Helfer ist fail-closed: ein
+     * Selektor ohne Treffer erscheint als eigener Eintrag mit `ratio: 0`.
+     */
+    for (const theme of ['light', 'dark'] as const) {
+        test(`die Fläche fürs neue Thema hält WCAG-Kontrast (${theme})`, async ({ page }) => {
+            // Ein Test JE Theme und nicht eine Schleife in einem: `addInitScript`
+            // greift nur auf der nächsten Navigation, und ein zweiter Login in
+            // derselben Seite läuft in eine bereits angemeldete Sitzung. Zwei
+            // Tests bekommen zwei frische Kontexte — das ist hier die billigere
+            // Wahrheit.
+            await page.addInitScript((t) => {
+                try {
+                    localStorage.setItem('flux.appearance', t as string)
+                } catch {
+                    /* kein localStorage → gemessen wird dann das Default-Theme */
+                }
+            }, theme)
+
+            // Desktop-Chassis: nur dort steht der gestrichelte Streifen.
+            await page.setViewportSize({ width: 1440, height: 900 })
+            await useBuzz(page)
+            await loginNsec(page, BUZZ_USER_NSEC)
+            await page.goto(`/rooms/${BUZZ_ROOM_FORUM}`)
+            await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*\bdark\b).*$/, {
+                timeout: 15_000,
+            })
+            await expect(topicButton(page, FORUMS[0])).toBeVisible({ timeout: 30_000 })
+            if (await joinButton(page).isVisible()) {
+                await joinButton(page).click()
+            }
+            await expect(trigger(page, 'kopf')).toBeVisible({ timeout: 30_000 })
+
+            const messungen = await measure(page, [
+                { selector: '[data-forum-topic-trigger="kopf"]', label: 'Neues Thema (Beschriftung)', kind: 'text' },
+                {
+                    selector: '[data-forum-topic-trigger="kopf"]',
+                    label: 'Neues Thema (gestrichelte Kante)',
+                    kind: 'graphic',
+                    prop: 'borderTopColor',
+                },
+            ])
+            const eigene = messungen.filter((m) => m.label.startsWith('Neues Thema'))
+
+            // POSITIVKONTROLLE: ohne sie wäre „alle über der Schwelle" auch wahr,
+            // wenn gar nichts gemessen wurde. `measure` meldet einen verfehlten
+            // Selektor mit `ratio: 0` — beides ist damit abgedeckt.
+            expect(eigene, `[${theme}] beide Stellen gemessen`).toHaveLength(2)
+            for (const m of eigene) {
+                expect(m.ratio, `[${theme}] ${m.label}: ${m.fg} auf ${m.bg}`).toBeGreaterThanOrEqual(m.min)
+            }
+            // eslint-disable-next-line no-console
+            console.log(`KONTRAST-FORUM[${theme}] ` + JSON.stringify(eigene))
+
+            // Und die „Wird gesendet …"-Marke. Sie steht nur, solange ein Thema
+            // fliegt — für eine Messung ist dieser Moment zu kurz und zu wackelig.
+            // Also wird der Zustand HERGESTELLT: `topicSending` bekommt die id des
+            // geseedeten Themas, und die Marke rendert danach an ihrem echten Ort,
+            // in ihrem echten Stil, auf ihrem echten Untergrund. Das ist kein
+            // Nachbau — es ist derselbe Zweig, den ein echter Flug auslöst.
+            await page.evaluate(() => {
+                const el = document.querySelector('[x-data^="nostrRoomChat"]') as
+                    (HTMLElement & { _x_dataStack?: { topics: { id: string }[]; topicSending: string[] }[] }) | null
+                const state = el?._x_dataStack?.[0]
+                if (state && state.topics.length > 0) {
+                    state.topicSending = [state.topics[0].id]
+                }
+            })
+            const markeSichtbar = page.locator('[data-forum-topic-pending]').first()
+            await expect(markeSichtbar, 'der hergestellte Zustand rendert die Marke').toBeVisible({ timeout: 10_000 })
+
+            const markeMessung = await measure(page, [
+                { selector: '[data-forum-topic-pending]', label: 'Wird gesendet (Marke)', kind: 'text' },
+            ])
+            const marke = markeMessung.filter((m) => m.label === 'Wird gesendet (Marke)')
+            expect(marke, `[${theme}] die Marke wurde gemessen`).toHaveLength(1)
+            expect(marke[0].ratio, `[${theme}] ${marke[0].fg} auf ${marke[0].bg}`).toBeGreaterThanOrEqual(marke[0].min)
+            // eslint-disable-next-line no-console
+            console.log(`KONTRAST-FORUM-MARKE[${theme}] ` + JSON.stringify(marke))
         })
     }
 
@@ -542,6 +846,13 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
         await expect(page.getByText(privat.reply45003, { exact: false })).toHaveCount(0)
         await expect(page.getByText(privat.replyKind9, { exact: false })).toHaveCount(0)
         await expect(composer(page)).toBeHidden()
+        // Und KEIN Weg, ein Thema anzulegen — in keiner der beiden Bauformen. Der
+        // Relay verlangt für ein 45001 `Scope::MessagesWrite` am Kanal
+        // (`crates/buzz-relay/src/handlers/ingest.rs:390-392`), also
+        // Kanalmitgliedschaft. Ein Auslöser hier führte garantiert in eine
+        // Ablehnung; `topicComposerZiel(…, joined=false)` liefert deshalb `'keins'`.
+        await expect(trigger(page, 'leiste'), 'ohne Mitgliedschaft gibt es keinen Weg zum Thema').toHaveCount(0)
+        await expect(trigger(page, 'kopf'), 'auch nicht am Listenkopf').toHaveCount(0)
         // Ein Beitreten-Knopf führte hier ins Leere: der Relay lehnt den
         // Selbstbeitritt (9021) in einen privaten Kanal mit `channel is private` ab.
         await expect(joinButton(page), 'ein Beitreten-Knopf führte von hier ins Leere').toHaveCount(0)

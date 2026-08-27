@@ -445,7 +445,41 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // den Ortskarten oben). Ihr Riegel ist eine Verhaltenszusage im E2E-Arm, nicht
     // diese Zählung — wer sie hier sucht, sucht am falschen Ort.
     $expected = [
-        'room' => 38,
+        // **Themen anlegen (2026-08-27): 38 → 37.** Multiset-Diff
+        // (`array_count_values`, `git show HEAD:…⚡room.blade.php` gegen den
+        // Arbeitsbaum) ist EINSEITIG: eine einzige veränderte Zeichenkette,
+        // `aria-hidden="true"` von 4 auf 3, **keine Addition**.
+        //
+        // Der eine ist das `flux:icon.information-circle` der Hinweiszeile
+        // „Neue Themen werden hier noch nicht verfasst — Antworten in einem
+        // Thema schon.". Die Zeile ist ersatzlos gefallen, weil ihre Aussage
+        // nicht mehr gilt: Themen (kind 45001) lassen sich seit diesem Commit
+        // anlegen. Ein Hinweis, der das Gegenteil des Gebauten behauptet, ist
+        // schlimmer als keiner.
+        //
+        // **Die neue Fläche bringt sehr wohl Träger mit — sie stehen nur nicht
+        // in dieser Datei**, und das ist Absicht, nicht ein Versteck:
+        //   `components/forum-topic-blatt.blade.php`   role="dialog",
+        //                                             aria-modal="true",
+        //                                             aria-haspopup="dialog",
+        //                                             ::aria-expanded
+        //   `components/forum-topic-inline.blade.php`  aria-haspopup="false",
+        //                                             x-bind:aria-expanded
+        //   `partials/forum-topic-felder.blade.php`    role="alert",
+        //                                             role="status",
+        //                                             aria-live="polite"
+        // Komponenten und Partials führt diese Liste grundsätzlich nicht —
+        // dieselbe Regel und derselbe Grund wie beim Lightbox-Overlay, den
+        // Ortskarten, der Ansichts-Steuerung und dem Status-Badge weiter unten:
+        // eine Datei, die von mehreren Stellen eingebunden wird, wäre hier
+        // mehrfach zu führen.
+        //
+        // **Der Riegel für die neue Fläche ist deshalb eine Verhaltenszusage,
+        // keine Zählung** (`tests/e2e/buzz-forum.spec.ts`: ein Thema anlegen und
+        // in der Liste wiederfinden, in offenem UND privatem Forum, plus die
+        // Ausschließlichkeit der zwei Bauformen). Wer die Träger hier sucht,
+        // sucht am falschen Ort.
+        'room' => 37,
         'directory' => 3,
         'spaces' => 9,
         // **P1 des Gitea-Sprache-Plans (2026-08-26): 20 → 16.** Multiset-Diff
