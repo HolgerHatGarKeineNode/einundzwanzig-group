@@ -125,6 +125,59 @@ describe('Bundle-Grenze: der Renderer bleibt aus dem Boot-Pfad', () => {
         assert.ok(mitRenderer.length > 0, 'markdown-it steckt in KEINEM Chunk — dann misst der Riegel unten nichts.')
     })
 
+    /**
+     * **Die Zahl der Boot-Chunks ist eine Zusage, keine Beobachtung.**
+     *
+     * Jeder Chunk im Boot-Pfad ist eine eigene HTTP-Anfrage auf **jeder** Seite, in
+     * beiden Hosts (Web-Portal und WebView der Companion-App). P1 des welshman-Sprungs
+     * hat sie von 6 auf 5 gebracht, indem die Adapter `js/welshman*.ts` per
+     * `manualChunks`-Regel (`vite.config.js`, Host-Repo) in den Vendor-Chunk gelegt
+     * wurden — sie werden vom Boot- UND vom Lazy-Graph geteilt und bilden sonst einen
+     * eigenen sechsten Chunk.
+     *
+     * **Warum eine EXAKTE Zahl und nicht „möglichst wenige":** eine Obergrenze („höchstens
+     * 5") liesse den Rückfall auf 6 rot werden, aber nicht auffallen, wenn Rolldown die
+     * Aufteilung ganz anders schneidet und dabei zufällig unter der Marke bleibt. Die
+     * Zahl ist das Ergebnis einer bewussten Entscheidung; wer sie ändert, soll sie
+     * ändern müssen. Ohne diese Zusage fällt der P1-Gewinn beim nächsten
+     * Rolldown-Update lautlos zurück — es wird nichts rot, die Seiten laden nur eine
+     * Anfrage mehr.
+     *
+     * **P3 darf sie ändern — bewusst.** Dort werden die Adapter gelöscht und die
+     * `manualChunks`-Regel für `js/welshman*.ts` entfernt (so steht es im Plan,
+     * `docs/plans/2026-08-28T1950-welshman-0-9-sprung.md`, „Aus der P1-Nachbesserung").
+     * Erwartet wird dann **6**. Dieser Fall wird an dem Tag rot; die richtige Reaktion
+     * ist, die Konstante auf den neuen, gemessenen Wert zu setzen und den Grund
+     * danebenzuschreiben — nicht, die Zusage in eine Obergrenze aufzuweichen.
+     *
+     * Der Riegel ist fail-closed: `manifest()` wirft ohne Build und ohne frischen Stamp.
+     */
+    test('BOOT-CHUNKS: es bleiben genau 5', () => {
+        const BOOT_CHUNKS = 5
+        const mf = manifest()
+        const chunks = bootChunks(mf)
+
+        assert.equal(
+            chunks.length,
+            BOOT_CHUNKS,
+            `Der Boot-Pfad besteht aus ${chunks.length} Chunks statt ${BOOT_CHUNKS} (${chunks.join(', ')}). ` +
+                'Jeder davon ist eine HTTP-Anfrage auf jeder Seite in beiden Hosts. Mehr geworden? Sieh in ' +
+                '`vite.config.js` nach der `manualChunks`-Regel — sie legt `node_modules/@welshman/**`, ' +
+                '`node_modules/nostr-tools/**` und `js/welshman*.ts` in EINEN Vendor-Chunk. Weniger geworden? ' +
+                'Dann prüfe, ob dabei etwas in den app-Chunk gerutscht ist, das dort nicht hingehört.',
+        )
+
+        // Und die Gegenprobe zur Zahl: sie soll nicht durch eine ganz andere Aufteilung
+        // zufällig erreicht werden. Der Vendor-Chunk ist der Zweck der Regel, also muss
+        // er im Boot-Pfad liegen — genau einmal.
+        //
+        // Das Muster verlangt den Bindestrich direkt hinter `welshman`: so heisst NUR der
+        // Vendor-Chunk. Ohne ihn zählte ein herausgefallener Adapter (`welshmanKinds-…js`,
+        // genau der sechste Chunk aus der Kalibrierung) mit und die Gegenprobe bliebe grün.
+        const vendor = chunks.filter((datei) => /welshman-[^/]*\.js$/.test(datei))
+        assert.equal(vendor.length, 1, `Erwartet genau EINEN welshman-Vendor-Chunk im Boot-Pfad, gefunden: ${vendor.join(', ') || 'keinen'}`)
+    })
+
     test('KERNBEWEIS: markdown-it liegt in KEINEM Chunk des Boot-Pfads', () => {
         const mf = manifest()
         const treffer = bootChunks(mf)
