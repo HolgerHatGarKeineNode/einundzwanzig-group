@@ -732,6 +732,108 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
     }
 
     /**
+     * ── DEN BAUM ZÄHLEN, NICHT DIE AUSWAHL ABFRAGEN ───────────────────────────
+     *
+     * `feldmatrix` oben fragt FÜNF bekannte Klassen ab. Am 2026-08-28 nachgemessen:
+     * ein sechstes direktes Kind OHNE `grid-area` in die Issue-Zeile gehängt —
+     * **beide Fassungen blieben grün**. Ein zweites dazu erzeugte eine echte dritte
+     * Rasterspur (`92px 32px 16px` schmal, `48px 16px 16px` breit), also genau den
+     * Fehler, den die Zusage ausschliesst — und der Riegel blieb **weiter grün**.
+     * Eine Sonde über eine feste Selektorliste kann jeden Rang aus einem Element,
+     * das nicht auf der Liste steht, prinzipiell nicht sehen.
+     *
+     * Deshalb hier zwei GESTAFFELTE Aussagen über den gerenderten Baum:
+     *
+     *   1. **Kinder** — jedes Rasterkind trägt ein BENANNTES Feld
+     *      (`gridRowStart !== 'auto'`). Fällt beim ERSTEN fremden Kind, bevor daraus
+     *      ein Rang wird.
+     *   2. **Spuren** — `gridTemplateRows` hat höchstens zwei Werte. Fällt, sobald
+     *      ein drittes Band tatsächlich entsteht, egal woher.
+     *
+     * Beide sind einzeln gegengeprüft (`KONTROLLE: die Rang-Sonde sieht ein fremdes
+     * Kind`): unbenanntes Kind → nur (1) rot; dritte Zeile in der Vorlage bei lauter
+     * benannten Kindern → nur (2) rot.
+     *
+     * **Warum die naheliegende Erklärung falsch war:** ich hatte angenommen, schon
+     * das erste unbenannte Kind lande in einer impliziten dritten Zeile. Beide
+     * Fassungen lassen eine Zelle frei (`'. meta leute'`), und die Auto-Platzierung
+     * füllt zuerst diese Lücke — Grid öffnet eine implizite Zeile erst, wenn alle
+     * Zellen der benannten Vorlage belegt sind. Mit nur (2) wäre der Riegel also
+     * genauso blind geblieben.
+     *
+     * `display: contents` löst die Box auf: solche Kinder sind KEINE Rasterkinder,
+     * ihre Kinder sind es (deshalb die Rekursion). `<template>`-Knoten sind
+     * `display: none` und erzeugen gar keine Box — sie werden mitgeschrieben, aber
+     * nicht eingefordert. Und ein blosser TEXTKNOTEN im Raster erzeugt ein anonymes
+     * Rasterkind, das über `children` unsichtbar ist; er wird eigens gezählt.
+     */
+    type Rasterbefund = {
+        kinder: { marke: string; klasse: string; feld: string; sichtbar: boolean }[]
+        ohneFeld: string[]
+        spuren: string[]
+        textknoten: number
+    }
+
+    async function rasterbefund(page: Page, wurzel: string): Promise<Rasterbefund> {
+        return page.evaluate((w) => {
+            const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement | null
+            if (!zeile) {
+                return { kinder: [], ohneFeld: ['KEINE ZEILE GEFUNDEN'], spuren: [], textknoten: 0 }
+            }
+
+            const kinder: { marke: string; klasse: string; feld: string; sichtbar: boolean }[] = []
+            const sammle = (el: Element): void => {
+                for (const k of Array.from(el.children)) {
+                    const cs = getComputedStyle(k)
+                    if (cs.display === 'contents') {
+                        sammle(k)
+                        continue
+                    }
+                    kinder.push({
+                        marke: k.tagName.toLowerCase(),
+                        klasse: (k.getAttribute('class') ?? '').split(/\s+/).slice(0, 2).join(' '),
+                        feld: cs.gridRowStart,
+                        sichtbar: (k as HTMLElement).checkVisibility(),
+                    })
+                }
+            }
+            sammle(zeile)
+
+            const textknoten = Array.from(zeile.childNodes).filter(
+                (n) => n.nodeType === 3 && (n.textContent ?? '').trim().length > 0,
+            ).length
+
+            return {
+                kinder,
+                ohneFeld: kinder.filter((k) => k.sichtbar && k.feld === 'auto').map((k) => `${k.marke}.${k.klasse}`),
+                spuren: getComputedStyle(zeile).gridTemplateRows.split(/\s+/).filter(Boolean),
+                textknoten,
+            }
+        }, wurzel)
+    }
+
+    /**
+     * Ein Rang ist eine Stufe der HIERARCHIE, nicht eine Zeile im Umbruch: er trägt
+     * Größe, Gewicht, Farbe (Refactoring UI). Die Bänderzahl allein könnte auch bei
+     * zwei typografisch identischen Streifen grün sein — das war der Zustand VOR
+     * P3 („vier Blockzeilen, keine davon als Rang ausgezeichnet"). Deshalb wird das
+     * Registerpaar mitgemessen: Titel schwerer UND größer als die Metazeile.
+     */
+    const register = async (page: Page, wurzel: string) =>
+        page.evaluate((w) => {
+            const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement | null
+            const lies = (sel: string) => {
+                const el = zeile?.querySelector(sel) as HTMLElement | null
+                if (!el) return null
+                const cs = getComputedStyle(el)
+
+                return { px: parseFloat(cs.fontSize), gewicht: parseInt(cs.fontWeight, 10), farbe: cs.color }
+            }
+
+            return { titel: lies('.forge-vz-name'), meta: lies('.forge-vz-meta') }
+        }, wurzel)
+
+    /**
      * Zwei verschiedene Fragen, die beide „Rang" heissen — und nur eine davon
      * ist eine ZUSAGE.
      *
@@ -795,12 +897,23 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
      * dieselbe Zeile in einer schmalen Spur und steht deshalb bei 1280 px Fenster
      * in der SCHMALEN Fassung — gemessen, nicht vermutet. Ein Riegel, der die
      * Fassung aus der Fensterbreite ableitet, prüft die falsche Grösse.
+     *
+     * **Und es ist die CONTENT-Breite, nicht die Aussenkante.** `container-type:
+     * inline-size` fragt die Inline-Grösse des INHALTS ab; Rand und Innenabstand
+     * sind da schon abgezogen. Der Zeilenkopf trägt `p-3`/`p-4` — gemessen am
+     * 2026-08-28: Aussenkante 454 px, Inhalt 430 px auf der Workspace-Liste bei
+     * 1280 px Fenster. Zwischen 480 und 512 px Aussenkante liegen die beiden
+     * Antworten auseinander, und dort hätte die alte Ableitung die falsche
+     * Fassung erwartet und die richtige Zeile als Fehler gemeldet.
      */
     const containerBreite = async (page: Page, wurzel: string): Promise<number> =>
         page.evaluate((w) => {
             const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement | null
             const box = zeile?.closest('.forge-vorgangskopf') as HTMLElement | null
-            return box ? Math.round(box.getBoundingClientRect().width) : 0
+            if (!box) return 0
+            const cs = getComputedStyle(box)
+
+            return Math.round(box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight))
         }, wurzel)
 
     /**
@@ -826,11 +939,29 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
         }, wurzel)
 
 
-    for (const [fassung, breite] of [
-        ['schmal', 390],
-        ['breit', 1280],
+    /**
+     * DREI Läufe, nicht zwei — und der dritte ist keine Dopplung.
+     *
+     * Die Fassung hängt an der CONTENT-Breite des Zeilenkopfs, nicht am Fenster.
+     * Auf `/forge` liegt die workspace-weite Sammelform in einer Spur, die sich ab
+     * 1280 px die Fläche mit der Desktop-Rail teilt: gemessen am 2026-08-28
+     * (Sweep über 390 … 2560 px) misst die Region dort **456 px**, bei 1024 px
+     * Fenster dagegen 640 px — die Breite ist NICHT monoton zur Fensterbreite.
+     * Abzüglich Rand und `p-3` bleiben 430 px Inhalt, und damit stand die
+     * Sammelform in BEIDEN bisherigen Läufen in der schmalen Fassung. Ihre breite
+     * Fassung war nie gemessen, obwohl die Zusage sie ausdrücklich mit einschliesst.
+     *
+     * Ab 1440 px Fenster misst dieselbe Region 608 px und die Zeile kippt. Der
+     * dritte Lauf ist deshalb der einzige, in dem die vierte Vorgangsart in ihrer
+     * breiten Fassung überhaupt vorkommt — und er verlangt das am Ende ausdrücklich,
+     * damit er nicht still zum Duplikat des zweiten wird.
+     */
+    for (const [fassung, titel, breite] of [
+        ['schmal', 'die schmale Fassung', 390],
+        ['breit', 'die breite Fassung', 1280],
+        ['breit-1440', 'die breite Fassung auf 1440 px (dort erst kippt die Sammelform)', 1440],
     ] as const) {
-        test(`DoD P3: die ${fassung}e Fassung ist gesetzt — über alle Vorgangsarten`, async ({ page }) => {
+        test(`DoD P3: ${titel} ist gesetzt — über alle Vorgangsarten`, async ({ page }) => {
             await page.setViewportSize({ width: breite, height: 1100 })
             await oeffneForge(page)
 
@@ -929,6 +1060,7 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
                 ]
 
                 let leuteBelegt = 0
+                const gemessen: Record<string, string> = {}
 
                 for (const { name, wurzel, labels } of arten) {
                     await arten.find((x) => x.name === name)!.hin()
@@ -949,6 +1081,43 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
                         `${name}: das Raster legt ${felderStreifen} Bänder an statt zwei. Matrix: ${JSON.stringify(m)}`,
                     ).toBeLessThanOrEqual(2)
 
+                    // ── Zusage 1b: der BAUM, nicht die Auswahl ────────────────
+                    // Die Feldmatrix oben fragt fünf bekannte Klassen ab und ist für
+                    // jedes andere Kind blind (gemessen, siehe `rasterbefund`).
+                    const rb = await rasterbefund(page, wurzel)
+                    console.log(
+                        `[p3-baum] ${fassung} ${name}: ${rb.kinder.length} Rasterkinder ` +
+                            `[${rb.kinder.map((k) => `${k.klasse || k.marke}→${k.feld}${k.sichtbar ? '' : ' (aus)'}`).join(', ')}] · ` +
+                            `Spuren ${JSON.stringify(rb.spuren)} · Textknoten ${rb.textknoten}`,
+                    )
+                    expect(rb.kinder.length, `${name}: gar keine Rasterkinder gefunden — die Sonde misst nichts`).toBeGreaterThan(0)
+                    expect(
+                        rb.ohneFeld,
+                        `${name}: ${rb.ohneFeld.length} Rasterkind(er) ohne benanntes Feld — auto-platziert, und damit ein Rang, den die Vorlage nicht vorsieht`,
+                    ).toEqual([])
+                    expect(
+                        rb.textknoten,
+                        `${name}: freier Text direkt im Raster erzeugt ein anonymes Rasterkind`,
+                    ).toBe(0)
+                    expect(
+                        rb.spuren.length,
+                        `${name}: das Raster hat ${rb.spuren.length} Zeilenspuren (${rb.spuren.join(' ')}) statt höchstens zwei`,
+                    ).toBeLessThanOrEqual(2)
+
+                    // ── Zusage 1c: zwei REGISTER, nicht zwei gleiche Streifen ──
+                    const reg = await register(page, wurzel)
+                    console.log(`[p3-register] ${fassung} ${name}: ${JSON.stringify(reg)}`)
+                    expect(reg.titel, `${name}: kein Titeltext gefunden`).toBeTruthy()
+                    expect(reg.meta, `${name}: keine Metazeile gefunden`).toBeTruthy()
+                    expect(
+                        reg.titel!.px,
+                        `${name}: Titel ${reg.titel!.px} px ist nicht größer als die Metazeile ${reg.meta!.px} px — zwei Bänder, aber ein Register`,
+                    ).toBeGreaterThan(reg.meta!.px)
+                    expect(
+                        reg.titel!.gewicht,
+                        `${name}: Titel ${reg.titel!.gewicht} ist nicht schwerer als die Metazeile ${reg.meta!.gewicht}`,
+                    ).toBeGreaterThan(reg.meta!.gewicht)
+
                     // ── Zusage 2: die Labels liegen IM Titelfeld ──────────────
                     // Ohne sie wäre Zusage 1 blind: ein Labelband, das als eigenes
                     // Rasterfeld zurückkehrt, hat diese Zeile schon einmal auf drei
@@ -968,7 +1137,8 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
                     // richtigen Rasterfeld, aber der Leser sieht davon nichts.
                     const cb = await containerBreite(page, wurzel)
                     const erwartet = cb >= 480 ? 'breit' : 'schmal'
-                    console.log(`[p3-fassung] ${fassung} ${name}: Container ${cb} px → ${erwartet}`)
+                    gemessen[name] = erwartet
+                    console.log(`[p3-fassung] ${fassung} ${name}: Container ${cb} px (Inhalt) → ${erwartet}`)
                     if (m.leute && (await leuteGefuellt(page, wurzel))) {
                         leuteBelegt++
                         if (erwartet === 'schmal') {
@@ -995,6 +1165,17 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
                     leuteBelegt,
                     'keine einzige Zeile trug sichtbare Gesichter oder Zahlen — die Fassungs-Zusage lief leer',
                 ).toBeGreaterThan(0)
+
+                // Fail-closed für den dritten Lauf: er existiert NUR, um die
+                // Sammelform einmal in ihrer breiten Fassung zu sehen. Steht sie
+                // auch hier schmal, ist er ein Duplikat des zweiten Laufs und
+                // muss das sagen, statt grün zu bleiben.
+                if (fassung === 'breit-1440') {
+                    expect(
+                        gemessen['Workspace-Liste'],
+                        `auf 1440 px muss die Sammelform in der BREITEN Fassung stehen — gemessen: ${gemessen['Workspace-Liste']}. Sonst prüft dieser Lauf nichts, was der 1280er nicht schon geprüft hat`,
+                    ).toBe('breit')
+                }
             } finally {
                 loesche(prKommentarId)
                 loesche(kommentarId)
@@ -1003,6 +1184,108 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
             }
         })
     }
+
+    /**
+     * KONTROLLE — sieht die Rang-Sonde einen dritten Rang überhaupt?
+     *
+     * Vier Mutationen an der GERENDERTEN Zeile, und jede muss genau die Aussage
+     * umwerfen, für die sie gebaut ist. Fällt bei einer Mutation keine, ist die
+     * Sonde Dekoration; fallen bei jeder alle, prüft sie nur eine Sache doppelt.
+     *
+     *   A  ein fremdes Kind          → Kinder rot, Spuren GRÜN (Auto-Platzierung
+     *                                  füllt zuerst die freie Zelle `'. meta leute'`)
+     *   B  zwei fremde Kinder        → Kinder rot, Spuren rot (echte dritte Spur)
+     *   C  dritte Zeile in der Vorlage, lauter benannte Kinder
+     *                                → Kinder GRÜN, Spuren rot
+     *   D  ein Textknoten im Raster  → Textknotenzähler rot (über `children`
+     *                                  prinzipiell unsichtbar)
+     *
+     * Mitprotokolliert wird jedes Mal, was die ALTE Feldmatrix gemeldet hätte: in
+     * A, B und D bleibt sie bei zwei Bändern. Genau das ist der Grund für diesen
+     * Umbau — sie fragt fünf bekannte Klassen ab und kann einen Rang aus einem
+     * sechsten Element nicht sehen.
+     */
+    test('KONTROLLE: die Rang-Sonde sieht ein fremdes Kind, eine dritte Spur und einen Textknoten', async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 1100 })
+        await oeffnePatches(page)
+
+        const WURZEL = '[data-forge-patch]'
+        const vorher = await rasterbefund(page, WURZEL)
+        expect(vorher.ohneFeld, 'Ausgangszustand ist schon rot — die Kontrolle kann so nichts zeigen').toEqual([])
+        expect(vorher.spuren.length, 'Ausgangszustand hat schon mehr als zwei Spuren').toBeLessThanOrEqual(2)
+
+        /** Fremde Kinder an die erste Vorgangszeile hängen. */
+        const haengeAn = async (n: number): Promise<void> => {
+            await page.evaluate(
+                ([w, anzahl]) => {
+                    const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement
+                    for (let i = 0; i < (anzahl as number); i++) {
+                        const s = document.createElement('span')
+                        s.className = 'kontroll-eindringling'
+                        s.textContent = 'Eindringling'
+                        zeile.appendChild(s)
+                    }
+                },
+                [WURZEL, n] as const,
+            )
+        }
+        const raeumAuf = async (): Promise<void> => {
+            await page.evaluate(() => {
+                document.querySelectorAll('.kontroll-eindringling').forEach((e) => e.remove())
+                const z = document.querySelector('.forge-vorgangszeile') as HTMLElement
+                z.style.removeProperty('grid-template-areas')
+                Array.from(z.childNodes).forEach((n) => {
+                    if (n.nodeType === 3 && (n.textContent ?? '').trim()) n.remove()
+                })
+            })
+        }
+
+        // ── A: EIN fremdes Kind ───────────────────────────────────────────────
+        await haengeAn(1)
+        const a = await rasterbefund(page, WURZEL)
+        const aAlt = streifen(Object.values(await feldmatrix(page, WURZEL)).filter(Boolean).map((f) => f!.y))
+        console.log(`[kontrolle A] ohneFeld ${JSON.stringify(a.ohneFeld)} · Spuren ${JSON.stringify(a.spuren)} · alte Feldmatrix ${aAlt} Bänder`)
+        expect(a.ohneFeld, 'A: ein fremdes Rasterkind wird nicht gemeldet').toHaveLength(1)
+        expect(a.spuren.length, 'A: die Spurenzahl reagiert schon auf EIN fremdes Kind — dann ist die Kinder-Aussage überflüssig').toBe(vorher.spuren.length)
+        expect(aAlt, 'A: die alte Feldmatrix sieht das fremde Kind plötzlich doch — dann war der Umbau unnötig').toBeLessThanOrEqual(2)
+
+        // ── B: ZWEI fremde Kinder → echte dritte Spur ─────────────────────────
+        await haengeAn(1)
+        const b = await rasterbefund(page, WURZEL)
+        const bAlt = streifen(Object.values(await feldmatrix(page, WURZEL)).filter(Boolean).map((f) => f!.y))
+        console.log(`[kontrolle B] ohneFeld ${JSON.stringify(b.ohneFeld)} · Spuren ${JSON.stringify(b.spuren)} · alte Feldmatrix ${bAlt} Bänder`)
+        expect(b.ohneFeld, 'B: beide fremden Kinder müssen gemeldet sein').toHaveLength(2)
+        expect(b.spuren.length, 'B: zwei fremde Kinder erzeugen keine dritte Spur — dann prüft die Spurenzahl nichts').toBeGreaterThan(2)
+        expect(bAlt, 'B: die alte Feldmatrix sieht die dritte Spur — dann war der Umbau unnötig').toBeLessThanOrEqual(2)
+        await raeumAuf()
+
+        // ── C: dritte Zeile in der VORLAGE, alle Kinder benannt ───────────────
+        await page.evaluate((w) => {
+            const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement
+            zeile.style.gridTemplateAreas = "'glyphe titel zustand' '. meta leute' '. labels labels'"
+        }, WURZEL)
+        const c = await rasterbefund(page, WURZEL)
+        console.log(`[kontrolle C] ohneFeld ${JSON.stringify(c.ohneFeld)} · Spuren ${JSON.stringify(c.spuren)}`)
+        expect(c.ohneFeld, 'C: alle Kinder sind benannt — die Kinder-Aussage darf hier NICHT anschlagen').toEqual([])
+        expect(c.spuren.length, 'C: eine dritte Zeile in der Vorlage wird nicht als dritte Spur gemeldet').toBeGreaterThan(2)
+        await raeumAuf()
+
+        // ── D: ein blosser Textknoten im Raster ───────────────────────────────
+        await page.evaluate((w) => {
+            const zeile = document.querySelector(`${w} .forge-vorgangszeile`) as HTMLElement
+            zeile.appendChild(document.createTextNode('anonymes Rasterkind'))
+        }, WURZEL)
+        const d = await rasterbefund(page, WURZEL)
+        const dAlt = streifen(Object.values(await feldmatrix(page, WURZEL)).filter(Boolean).map((f) => f!.y))
+        console.log(`[kontrolle D] Textknoten ${d.textknoten} · Kinder ${d.kinder.length} · Spuren ${JSON.stringify(d.spuren)} · alte Feldmatrix ${dAlt} Bänder`)
+        expect(d.textknoten, 'D: ein Textknoten im Raster wird nicht gezählt — er ist über `children` unsichtbar').toBe(1)
+        expect(d.ohneFeld, 'D: der Textknoten taucht als Element auf — dann misst die Sonde etwas anderes als gedacht').toEqual([])
+        await raeumAuf()
+
+        const nachher = await rasterbefund(page, WURZEL)
+        expect(nachher.ohneFeld, 'Aufräumen hat nicht gegriffen').toEqual([])
+        expect(nachher.spuren.length, 'Aufräumen hat nicht gegriffen').toBeLessThanOrEqual(2)
+    })
 
 
     /**
