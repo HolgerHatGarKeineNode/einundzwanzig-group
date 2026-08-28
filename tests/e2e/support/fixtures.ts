@@ -3,6 +3,13 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { erlaubteHerkuenfte, herkunft, verstoesse, verstossMeldung, type Herkunft } from './relayGuard'
 import { LOOPBACK_HOSTS, MELDE_BINDUNG, SPERR_MARKE, istLoopbackHerkunft, sperrVermerk, wrapperQuelle } from './hermetik'
 import { testServerEnv } from './serverEnv'
+import {
+    ERLAUBNISLISTE,
+    istRauschen,
+    pageFehlerMeldung,
+    verstoesse as pageFehlerVerstoesse,
+    type PageFehler,
+} from './pageErrorGuard'
 
 /**
  * Pro-Worker-Backend-Isolation für echte Parallelität (§Test-Speed): jeder Playwright-
@@ -70,7 +77,7 @@ const waitForHttp = async (url: string, timeoutMs = 60_000): Promise<void> => {
  * Umweg wird gebraucht, weil die Beobachtung an einem WORKER-Objekt hängt (`browser`),
  * das Urteil aber zu einem TEST gehört.
  */
-type Aufzeichnung = { gesehen: string[]; zusaetzlich: Herkunft[]; quittiert: string[] }
+type Aufzeichnung = { gesehen: string[]; zusaetzlich: Herkunft[]; quittiert: string[]; pageFehler: PageFehler[] }
 
 let aufzeichnung: Aufzeichnung | null = null
 
@@ -175,6 +182,25 @@ const sichere = async (context: BrowserContext): Promise<void> => {
          * also genau die Hälfte, die einem sagt, dass etwas zu reparieren ist.
          */
         page.on('websocket', (ws) => aufzeichnung?.gesehen.push(ws.url()))
+        /**
+         * **Der Laufzeit-Wächter (`pageErrorGuard.ts`) — derselbe blinde Fleck wie oben,
+         * bewusst geteilt.** `aufzeichnung?.` verwirft still, außerhalb eines Tests; siehe
+         * Begründung am WebSocket-Listener direkt darüber.
+         *
+         * `pageerror` ist die primäre Quelle: Alpine fängt einen Ausdrucksfehler
+         * (`x-text`, `x-on:…`) selbst ab, meldet ihn per `console.warn` UND wirft ihn
+         * bewusst erneut in einem `setTimeout` — genau DAS wird hier zur uncaught
+         * exception und damit zu diesem Ereignis (Beleg im Kopf von `pageErrorGuard.ts`).
+         * `console.error` wird zusätzlich beobachtet und dabei um bekanntes Netzwerk-/
+         * Werkzeug-Rauschen bereinigt ({@link istRauschen}) — sonst überwiegt in der
+         * Aufzeichnung sofort die Menge der absichtlich provozierten Netzwerkfehler.
+         */
+        page.on('pageerror', (err) => aufzeichnung?.pageFehler.push({ quelle: 'pageerror', text: err.message }))
+        page.on('console', (msg) => {
+            if (msg.type() === 'error' && !istRauschen(msg.text())) {
+                aufzeichnung?.pageFehler.push({ quelle: 'console', text: msg.text() })
+            }
+        })
     }
     context.pages().forEach(anSeite)
     context.on('page', anSeite)
@@ -187,7 +213,16 @@ const sichere = async (context: BrowserContext): Promise<void> => {
     })
 }
 
-export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBackend: void }>({
+/**
+ * Introspektion für den Selbstnachweis des Laufzeit-Wächters (`page-error-guard.spec.ts`),
+ * genau wie `RelayWaechter.gesehen()` — Begründung dort: ein negativer Nachweis (Test wird
+ * rot) lässt sich nicht dauerhaft grün in der Suite halten, ein positiver schon.
+ */
+export type PageErrorWaechter = {
+    gesehen: () => readonly PageFehler[]
+}
+
+export const test = base.extend<{ relayWaechter: RelayWaechter; pageErrorWaechter: PageErrorWaechter }, { workerBackend: void }>({
     // Worker-scoped + auto: läuft EINMAL je Worker vor dessen Tests. Seedet die worker-
     // eigene zooid-Instanz (blockierend, race-frei) und startet den worker-eigenen serve.
     workerBackend: [
@@ -294,7 +329,7 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
      */
     relayWaechter: [
         async ({}, use, testInfo) => {
-            const lauf: Aufzeichnung = { gesehen: [], zusaetzlich: [], quittiert: [] }
+            const lauf: Aufzeichnung = { gesehen: [], zusaetzlich: [], quittiert: [], pageFehler: [] }
             aufzeichnung = lauf
             const erlaubt = (): Herkunft[] => [
                 ...erlaubteHerkuenfte({ slot: testInfo.parallelIndex + SLOT_OFFSET }),
@@ -356,12 +391,35 @@ export const test = base.extend<{ relayWaechter: RelayWaechter }, { workerBacken
                 lauf.gesehen.filter((eintrag) => !lauf.quittiert.includes(eintrag)),
                 erlaubt(),
             )
+            // Der Titelpfad (Projekt + Datei + Test), NICHT nur `testInfo.title`: die
+            // Erlaubnisliste unterscheidet u. a. zwei gleichnamige Tests in zwei Dateien
+            // (`page-error-guard.spec.ts`), und ein Muster gegen den nackten Titel könnte
+            // beide zugleich treffen.
+            const pageTitel = testInfo.titlePath.join(' > ')
+            const pageTreffer = pageFehlerVerstoesse(lauf.pageFehler, pageTitel, ERLAUBNISLISTE)
+
+            // Beide Urteile werden VOR dem ersten Wurf berechnet und, falls nötig, in
+            // EINER Meldung zusammengeführt — sonst verdeckt ein früher Wurf den zweiten
+            // Befund, und der nächste Lauf entdeckt ihn erst nach dem Beheben des ersten.
+            const meldungen: string[] = []
             if (treffer.length > 0) {
-                throw new Error(verstossMeldung(testInfo.title, treffer, erlaubt()))
+                meldungen.push(verstossMeldung(testInfo.title, treffer, erlaubt()))
+            }
+            if (pageTreffer.length > 0) {
+                meldungen.push(pageFehlerMeldung(pageTitel, pageTreffer))
+            }
+            if (meldungen.length > 0) {
+                throw new Error(meldungen.join('\n\n'))
             }
         },
         { auto: true },
     ],
+
+    // Rein lesend, siehe {@link PageErrorWaechter}. Kein `auto`, keine Ordnungs-Abhängigkeit
+    // nötig: der Zugriff passiert im Testrumpf, wenn `aufzeichnung` längst gesetzt ist.
+    pageErrorWaechter: async ({}, use) => {
+        await use({ gesehen: () => [...(aufzeichnung?.pageFehler ?? [])] })
+    },
 
     /**
      * Nur zur Reihenfolge: erzwingt, dass `relayWaechter` fertig ist, bevor der Kontext
