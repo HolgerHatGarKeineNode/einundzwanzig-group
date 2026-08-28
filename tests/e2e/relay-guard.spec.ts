@@ -134,8 +134,19 @@ test('Der eigene Relay steht auf der Erlaubnisliste — kein Fehlalarm', async (
     // Wächter diesen Test im Abbau rot — und das wäre die Regression, die jeden anderen
     // Test der Suite mitrisse.
     //
-    // Die Port-Reihe ausgeschrieben, je Arm: zooid 33xx, Buzz 30xx. Ohne diese Zeile
-    // prüfte der Fall die Konstante gegen sich selbst und bliebe grün, wenn `ZOOID_WS`
-    // eines Tages auf einen fremden Host zeigte.
-    expect(eigenerRelay.ws).toMatch(process.env.E2E_RELAY === 'buzz' ? /^ws:\/\/localhost:30\d\d$/ : /^ws:\/\/localhost:33\d\d$/)
+    // Die BASIS ausgeschrieben, je Arm: zooid 3335, Buzz 3001 — plus die Slot-Nummer.
+    // Ohne diese Zeile prüfte der Fall die Konstante gegen sich selbst und bliebe grün,
+    // wenn `ZOOID_WS` eines Tages auf einen fremden Host zeigte.
+    //
+    // Hier stand bis zum 2026-08-28 eine Portreihe als Muster (`33\d\d` / `30\d\d`).
+    // Das trug nur bis `E2E_SLOT_OFFSET` 64: ab 65 ist der zooid-Port 3400 und die
+    // Zusage fiel, obwohl nichts kaputt war. Genau dieser Fehlschlag ist an einem Tag
+    // mit 27 verschiedenen Offsets (bis 90) zweimal aufgetreten und hat Fehlersuche
+    // gekostet — der Offset-Mechanismus ist ausdrücklich dafür gebaut, dass mehrere
+    // Agenten gleichzeitig messen, und eine Zusage darüber muss das aushalten.
+    // Die Basis bleibt die festgehaltene Zahl: zeigte das Modul auf einen fremden
+    // Host oder auf den Mitschau-zooid (:3334), fällt der Test weiterhin.
+    const slot = Number(process.env.TEST_PARALLEL_INDEX ?? '0') + Number(process.env.E2E_SLOT_OFFSET ?? '0')
+    const basis = process.env.E2E_RELAY === 'buzz' ? 3001 : 3335
+    expect(eigenerRelay.ws).toBe(`ws://localhost:${basis + slot}`)
 })
