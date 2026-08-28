@@ -13,8 +13,13 @@
 # LÄNGST beendeten, fremden Läufen sind hier explizit das Ziel), aber niemals gegen
 # einen Slot, der gerade aktiv benutzt wird.
 #
-# "Aktiv benutzt" heißt: sein Herzschlag (`/tmp/e2e-{zooid,buzz}-<port>.alive`, von den
-# Server-Skripten bei JEDEM Aufruf berührt) ist jünger als `E2E_STACK_MAX_AGE_SEC`
+# "Aktiv benutzt" heißt: `/tmp/e2e-{zooid,buzz}-<port>.alive` ist jünger als
+# `E2E_STACK_MAX_AGE_SEC`. ACHTUNG, hier stand bis zum 2026-08-28 "Herzschlag, von den
+# Server-Skripten bei JEDEM Aufruf berührt" — das ist FALSCH und war die Ursache eines
+# Vorfalls: `zooid-testserver.sh:58` setzt die Datei EINMAL beim Start und danach nie
+# wieder. Sie ist ein START-Zeitstempel, kein Herzschlag. Bei der Default-Grenze von 3 h
+# fällt das nicht auf (ein Lauf dauert Minuten); bei kleiner Grenze schon — siehe
+# `E2E_REAP_ONLY_PORTS` unten
 # (Default 3 h). Ein einzelner Testlauf dauert Minuten, keine Stunden — 3 h Toleranz
 # ist damit kein Kompromiss zwischen "räumt zu früh" und "räumt zu spät", sondern ein
 # Vielfaches der tatsächlichen Laufzeit, das trotzdem eine liegengelassene Nacht
@@ -28,6 +33,42 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZOOID_DIR=/home/user/Code/zooid
 MAX_AGE="${E2E_STACK_MAX_AGE_SEC:-10800}" # 3h
 NOW=$(date +%s)
+
+# Optionale WHITELIST von Ports (Komma-Liste aus Einzelports und `von-bis`-Bereichen).
+# Leer = alles betrachten, also unverändertes Verhalten für den Normalbetrieb.
+#
+# Warum es sie gibt (Vorfall 2026-08-28): `teststackLifecycle.nodetest.ts` ruft dieses
+# Skript REAL auf, dreimal mit `E2E_STACK_MAX_AGE_SEC` auf 1 oder 5 Sekunden. Da unten
+# systemweit über `/tmp/e2e-*` geglobbt wird und `.alive` nur den START-Zeitpunkt trägt
+# (siehe Kopf), galt jeder gleichzeitig laufende E2E-Lauf nach fünf Sekunden als
+# verwaist: sechs zooid-Instanzen wurden mitten im Lauf eingerissen, sieben Tests fielen
+# kollateral mit "connection refused" auf ALLEN Ports zugleich.
+#
+# Der Nodetest arbeitet ausschliesslich auf 399xx und setzt die Whitelist deshalb auf
+# genau diesen Bereich. Damit kann er per KONSTRUKTION nichts Fremdes mehr anfassen —
+# das ist der Punkt: die Trennung hängt nicht mehr daran, dass die Grenze gross genug
+# gewählt ist.
+REAP_ONLY="${E2E_REAP_ONLY_PORTS:-}"
+
+port_erlaubt() { # $1 = Port -> rc=0 wenn betrachtet werden darf
+    [ -z "$REAP_ONLY" ] && return 0
+    local eintrag von bis
+    IFS=',' read -ra _eintraege <<<"$REAP_ONLY"
+    for eintrag in "${_eintraege[@]}"; do
+        eintrag="${eintrag// /}"
+        case "$eintrag" in
+            *-*)
+                von="${eintrag%%-*}"
+                bis="${eintrag##*-}"
+                [ "$1" -ge "$von" ] && [ "$1" -le "$bis" ] && return 0
+                ;;
+            *)
+                [ "$1" = "$eintrag" ] && return 0
+                ;;
+        esac
+    done
+    return 1
+}
 
 age_of() { # $1 = Datei -> Alter in Sekunden auf stdout, rc=1 wenn nicht vorhanden
     local mtime
@@ -54,6 +95,7 @@ newest_file_mtime_marker() {
 # $1 = mode (zooid|buzz), $2 = port, $3 = Herzschlag-Datei, $4 = Fallback-Zeitdatei
 reap_if_stale() {
     local mode="$1" port="$2" alive="$3" fallback="$4" age
+    port_erlaubt "$port" || return 0
     if age=$(age_of "$alive"); then
         :
     elif age=$(age_of "$fallback"); then

@@ -37,6 +37,18 @@ const REAP = join(REPO, 'tests/e2e/support/reap-stale-teststacks.sh')
 const reapEnv = (extra: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
     ...process.env,
     ...testServerEnv({ slot: 0 }),
+    // Der Reaper darf in diesen Tests NUR den eigenen 399xx-Bereich sehen.
+    //
+    // Ohne diese Zeile globbt er systemweit über `/tmp/e2e-*`, und weil `.alive` nur den
+    // START-Zeitpunkt trägt (kein Herzschlag, siehe Kopf von `reap-stale-teststacks.sh`),
+    // gilt bei den `E2E_STACK_MAX_AGE_SEC`-Werten 1 und 5 unten JEDER gleichzeitig
+    // laufende E2E-Lauf nach Sekunden als verwaist. Am 2026-08-28 real passiert: sechs
+    // zooid-Instanzen eines parallelen Vollaufs mitten im Lauf eingerissen, sieben Tests
+    // fielen kollateral mit "connection refused" auf allen Ports zugleich.
+    //
+    // Die Whitelist ist der Riegel dafür, nicht eine grössere Altersgrenze: die hier
+    // gefahrenen Sekundenwerte SIND der Prüfgegenstand und dürfen nicht weicher werden.
+    E2E_REAP_ONLY_PORTS: '39990-39999',
     ...extra,
 })
 
