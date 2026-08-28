@@ -511,8 +511,19 @@ test.describe('Forge: die Desktop-Bühne', () => {
         await expect(page.locator('[data-forge-repo]')).toHaveCount(0)
 
         // Vorbedingung 2: die überlange Beschreibung steht wirklich auf DIESER Seite.
+        //
+        // **Nicht mehr ein bloßes `p.forge-mass`.** Seit der GitHub-Parität trägt
+        // die Repo-Detailseite eine ZWEITE Fläche mit derselben Klasse: die
+        // Aktivitätszeile eines Patches (`x-text="row.body"`,
+        // `⚡forge-repo.blade.php`) zeigt hier zufällig denselben Text — dieses
+        // Fixture-Repository hat eine Commit-Beschreibung, die mit der
+        // Repo-Beschreibung übereinstimmt. `.first()` traf dort die
+        // `x-show`-verborgene Zeile statt die „Über"-Spur (Locator löste zwar
+        // auf, `toBeVisible()` schlug fehl). Auf `[data-forge-spur="ueber"]`
+        // verankert — genau der Abschnitt, der die Beschreibung TRÄGT
+        // (`aside.forge-repo-spur`, Abschnitt „1. Über").
         await expect(
-            page.locator('p.forge-mass').filter({ hasText: /Das Chat-, Artikel- und Forge-Paket/ }).first(),
+            page.locator('[data-forge-spur="ueber"] p').filter({ hasText: /Das Chat-, Artikel- und Forge-Paket/ }).first(),
         ).toBeVisible({ timeout: 30_000 })
 
         const laengste = await laengsteZeile(page)

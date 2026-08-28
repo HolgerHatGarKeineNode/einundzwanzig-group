@@ -665,7 +665,18 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // Wer die Differenz nachrechnet, findet sie 1:1 in denen wieder;
         // geblieben sind die Träger der Liste (Zeilen sind Links — kein
         // `aria-expanded` je Issue/PR-Zeile mehr, nur die drei der Patches).
-        'forge-repo' => 21,
+        //
+        // **Layout-Umbau (`9fa0216`/`120634f`, 2026-08-28): 21 → 24.** Multiset-Diff
+        // einseitig, wieder nur ADDITIONEN — gemessen per `ariaCarriersFromSource()`
+        // direkt gegen den Arbeitsstand (`array_count_values`):
+        //
+        //     aria-hidden="true"   6 → 8   (+2: der „·"-Trenner im verschweißten
+        //                                    Commit-Kopf UND der Skeleton-Platzhalter
+        //                                    beim Laden — beide dekorativ, kein Text)
+        //     role="list"          0 → 1   (+1: die Themen-Pillen der Über-Karte)
+        //
+        // 21 + 2 + 1 = 24, exakt der neue Gesamtwert.
+        'forge-repo' => 24,
         // **Neu mit P1 (2026-08-27), von Anfang an kalibriert.** Die
         // Einzelansichten tragen: je 1 `aria-current` (Breadcrumb), je 3–4
         // `role="alert"`/`role="status"`, die `::aria-disabled` der Riegel

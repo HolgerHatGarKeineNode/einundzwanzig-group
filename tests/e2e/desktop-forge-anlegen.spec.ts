@@ -120,6 +120,20 @@ async function repo(page: Page, dtag: string): Promise<void> {
         undefined,
         { timeout: 30_000 },
     )
+    // Seit der GitHub-Parität (2026-08-27) ist `code` der STARTWERT der Route
+    // (`forge.ts: tabFromLocation()`), nicht mehr `issues`. Der Anlege-Knopf
+    // und die Filterleiste, in der er steht (`partials/forge-detail-suche.blade.php`),
+    // blenden sich aber nur auf `issues`/`pulls`/`patches` ein — auf `code`
+    // und `activity` bleiben sie unsichtbar. Dieser Helfer landet für ALLE
+    // Tests der Datei auf der Issue-Liste, deshalb hier und nicht in jedem
+    // einzelnen Test.
+    // KEIN `exact: true`: der Reiter trägt bei nichtleerem Bestand einen
+    // `flux:badge`-Zähler im eigenen Text („Issues 1") — derselbe Grund, aus
+    // dem der Haus-Klick auf „Pull Requests" weiter unten ohne `exact` steht.
+    await page.getByRole('tab', { name: 'Issues' }).click()
+    await expect(page.locator('[data-forge-issue], [data-forge-empty="issues"]').first()).toBeVisible({
+        timeout: 30_000,
+    })
 }
 
 /**
