@@ -319,7 +319,7 @@ test('genau drei Views fahren die breite Bühne — die übrigen bleiben auf dem
     }
 });
 
-test('genau drei Views übergeben eine width-Prop — belegt am Quelltext, nicht an der Antwort', function () {
+test('genau fünf Views übergeben eine width-Prop — belegt am Quelltext, nicht an der Antwort', function () {
     $wurzel = __DIR__.'/../../packages/einundzwanzig-group/resources/views';
     $treffer = [];
     foreach (glob($wurzel.'/*.blade.php') ?: [] as $datei) {
@@ -329,12 +329,19 @@ test('genau drei Views übergeben eine width-Prop — belegt am Quelltext, nicht
     }
     sort($treffer);
 
-    // Die Zahl „13 unangetastete Views" aus dem Plan ist am heutigen Baum nicht
-    // reproduzierbar: 13 ist die GESAMTZAHL der Views in diesem Verzeichnis, davon
-    // rendern 8 eine `app-shell` (Stand 2026-08-21). Die prüfbare Zusage ist deshalb
-    // diese: genau drei Dateien reichen überhaupt eine `width` durch.
-    expect($treffer)->toBe(['⚡articles.blade.php', '⚡forge-repo.blade.php', '⚡forge.blade.php']);
-    expect(count(glob($wurzel.'/*.blade.php') ?: []))->toBe(13);
+    // Die prüfbare Zusage: genau FÜNF Dateien reichen eine `width` durch —
+    // seit der GitHub-Parität (2026-08-27) kommen die beiden EINZELANSICHTEN
+    // eines Vorgangs hinzu (`⚡forge-issue`, `⚡forge-pull`): dieselbe dichte
+    // Fläche wie die Repo-Seite, deshalb deren breite Bühne.
+    expect($treffer)->toBe([
+        '⚡articles.blade.php',
+        '⚡forge-issue.blade.php',
+        '⚡forge-pull.blade.php',
+        '⚡forge-repo.blade.php',
+        '⚡forge.blade.php',
+    ]);
+    // Stand 2026-08-27: 15 Views im Verzeichnis (13 + die zwei neuen).
+    expect(count(glob($wurzel.'/*.blade.php') ?: []))->toBe(15);
 });
 
 // ── Der Einstieg in die Autorenseite (Schritt 25a) ──────────────────────────────────

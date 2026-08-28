@@ -157,3 +157,45 @@ test('Ab 1280 px zeigt die Bühne die Raumliste nicht mehr — die Rail trägt s
     )
     expect(borderTop, 'kein Strich am oberen Rand der Karte').toBe('0px')
 })
+
+/**
+ * Der Lupenknopf am Gruppenkopf — `scopeToGroup()`.
+ *
+ * Bis 2026-08-27 hatte er **keinen einzigen** E2E-Anker (`grep scopeToGroup
+ * tests/e2e/*.spec.ts` = 0), obwohl er eines von zwei Bedienelementen ist, die
+ * `flux:navlist.group` unmöglich machen — also genau das, was ein künftiger
+ * Umbau auf die Flux-Komponente stillschweigend verlöre.
+ *
+ * Gemessen wird die WIRKUNG, nicht das Vorhandensein: `scopeToGroup` setzt
+ * `scope` UND ruft `focusPrompt()` (`js/rail.ts:693-696`). Beide Hälften stehen
+ * hier, weil ein Anker auf nur eine von ihnen die andere stillschweigend
+ * freigäbe. Die Filterwirkung ist die dritte Zusage — ohne sie bliebe der Test
+ * grün, wenn `scope` zwar gesetzt würde, die Liste aber nicht darauf hörte.
+ */
+test('Lupe am Gruppenkopf: Scope gesetzt, Fokus im Feld, Liste gefiltert', async ({ page }) => {
+    await openApp(page)
+
+    // Ausgangslage festhalten — sonst prüft der Test unten gegen sich selbst.
+    await expect(rail(page).getByRole('button', { name: /Willkommen/ }).first())
+        .toBeVisible({ timeout: 20_000 })
+    expect(await prompt(page).getAttribute('placeholder')).toBe('Raum springen')
+
+    await rail(page).getByRole('button', { name: 'In Meetups suchen' }).click()
+
+    // 1. Der Scope steht — sichtbar am gewechselten Platzhalter und am Chip,
+    //    nicht an einer Alpine-Variable: der Nutzer sieht das Markup, nicht `scope`.
+    await expect(prompt(page)).toHaveAttribute('placeholder', 'Filtern…')
+    await expect(rail(page).getByRole('button', { name: /Suchbereich aufheben/ }))
+        .toBeVisible({ timeout: 10_000 })
+
+    // 2. Der Fokus liegt im Feld. Das ist die halbe Funktion — wer die Lupe
+    //    drückt, will tippen, nicht danach noch einmal klicken.
+    await expect(prompt(page)).toBeFocused()
+
+    // 3. Und der Scope WIRKT: „Willkommen" gehört zur Gruppe „Räume" und ist
+    //    jetzt draußen, ein Meetup ist drin. Ohne diese Zusage bliebe der Test
+    //    grün, wenn `scope` gesetzt würde und die Liste ihn ignorierte.
+    await expect(rail(page).getByRole('button', { name: /Meetup Berlin/ }).first())
+        .toBeVisible({ timeout: 20_000 })
+    await expect(rail(page).getByRole('button', { name: /Willkommen/ })).toHaveCount(0)
+})

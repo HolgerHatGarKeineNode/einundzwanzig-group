@@ -442,4 +442,97 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
         await page.keyboard.press('Alt+ArrowDown')
         await page.waitForURL(`**/rooms/${BUZZ_ROOM_WELCOME}*`, { timeout: 20_000 })
     })
+
+    /**
+     * Der Gruppenkopf als Sprungziel — `data-rail-gruppenkopf`.
+     *
+     * Bis 2026-08-27 ohne jeden E2E-Anker (`grep data-rail-gruppenkopf
+     * tests/e2e/*.spec.ts` = 0). Er ist das zweite von zwei Bedienelementen, die
+     * `flux:navlist.group` unmöglich machen — ein Umbau auf die Flux-Komponente
+     * verlöre ihn stillschweigend, und mit ihm den einzigen Weg, mit dem die
+     * Forge-Bühne ab `xl` überhaupt noch auf ihre Kanäle zeigen kann (dort gibt
+     * es keinen Kanäle-Tab mehr).
+     *
+     * Der Weg ist ECHT, kein von Hand gefeuertes CustomEvent: `/forge?tab=workspaces`
+     * setzt `_tabAusAdresse`, `_springZuRegion()` (`js/forge.ts:2438-2448`) sieht
+     * `tab === 'workspaces'` und schickt `forge-zeige-kanaele`; der Zuhörer sitzt
+     * in `desktop-rail.blade.php:41-48`. Ein `dispatchEvent` aus dem Test prüfte
+     * nur den Zuhörer und ließe einen abgerissenen Auslöser durchgehen.
+     */
+    test('`/forge?tab=workspaces` springt in die Rail — Gruppe auf, Fokus auf dem Kopf', async ({ page }) => {
+        // ── Der Sprung war bis 2026-08-27 wirkungslos, seit es ihn gab ──────
+        // Dieser Test hat es aufgedeckt: das Ereignis `forge-zeige-kanaele` kam an,
+        // aber `document.querySelectorAll('[data-rail-gruppenkopf]').length` war in
+        // diesem Moment **0** — und zwei `requestAnimationFrame` später noch immer.
+        // Der Kopf hängt an `<template x-if="hasWorkspaceSection">`; die Bedingung
+        // wird erst wahr, wenn die Workspace-Daten da sind. `focus()` lief auf
+        // `undefined`. Unsichtbar blieb es, weil `toggleGroup` kein DOM braucht und
+        // die Gruppe trotzdem aufging — der Sprung SAH funktionierend aus.
+        //
+        // Behoben durch Merker + `x-effect` (`js/rail.ts zeigeKanaele`,
+        // `desktop-rail.blade.php`). Dieser Test ist der Träger dafür: fällt der
+        // Effect weg, ist er wieder rot.
+
+        await bootRail(page)
+
+        // Gruppe bewusst ZUklappen: der Sprung muss sie SELBST öffnen. Bei schon
+        // offener Gruppe wäre die halbe Zusage („öffnet, falls zu") ungeprüft.
+        await setExpanded(groupToggle(page, 'workspace'), false)
+        await expect(workspacePanel(page)).toBeHidden()
+
+        await page.goto('/forge?tab=workspaces')
+        await expect(rail(page)).toBeVisible({ timeout: 20_000 })
+
+        // 1. Die Gruppe steht offen — `toggleGroup` lief, und zwar bedingt.
+        await expect(workspacePanel(page)).toBeVisible({ timeout: 20_000 })
+
+        // 2. Und der Kopf hat den Fokus. Das ist der Zweck des Sprungs: die
+        //    Tastatur landet dort, wo die Kanäle stehen. `toBeFocused` und nicht
+        //    `toBeVisible` — ein sichtbarer Kopf ohne Fokus erfüllt nichts.
+        await expect(rail(page).locator('[data-rail-gruppenkopf="workspace"]'))
+            .toBeFocused({ timeout: 20_000 })
+    })
+
+    /**
+     * Die Zahl am Reiter „Kanäle" (Restposten B aus dem Gitea-Plan).
+     *
+     * Der Riegel im Paket ist eine QUELLTEXT-Sonde plus eine separate
+     * Alpine-Beobachtung — beide prüfen die Verdrahtung, keiner das gerenderte
+     * Produkt. Das hier ist der fehlende Laufzeit-Anker.
+     *
+     * Gemessen wird gegen die LISTE, nicht gegen die Variable, aus der die Ziffer
+     * stammt: `kanalbestand` gegen `kanalbestand` zu prüfen hielte keinen Wert
+     * fest. Die Zusage lautet „die Zahl am Reiter sagt, wie viele Kanäle die Liste
+     * führt" — also stehen hier beide Seiten, jede über ihren eigenen Render-Weg
+     * (Reiterstreifen-Insel gegen `nostrWorkspaceRooms`).
+     */
+    test('Der Kanäle-Reiter trägt die Zahl seiner Liste', async ({ page }) => {
+        // KEIN `bootRail` — das setzt 1440 px, und dort gibt es den Reiterstreifen
+        // nicht: er trägt `xl:hidden` (`⚡forge.blade.php:359`), weil ab xl die Rail
+        // die Kanäle führt. Der Zähler ist also ausdrücklich eine Sache der
+        // schmalen Ansicht, und genau dort muss er gemessen werden.
+        await page.setViewportSize({ width: 1279, height: 900 })
+        await useBuzz(page)
+        await page.addInitScript((url) => {
+            ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
+        }, BUZZ_URL)
+        await loginNsec(page, BUZZ_USER_NSEC)
+        await page.goto('/forge?tab=workspaces')
+
+        const sektion = page.locator('[data-forge-workspaces]')
+        await expect(sektion).toBeVisible({ timeout: 20_000 })
+
+        // Gezählt über `data-forge-kanalzeile` — die Zeile ist ein `button` ohne
+        // eigene Kennung, ein Klassen-Locator bräche beim nächsten Layout-Feinschliff.
+        const zeilen = sektion.locator('[data-forge-kanalzeile]')
+        await expect(zeilen.first()).toBeVisible({ timeout: 20_000 })
+        const bestand = await zeilen.count()
+        expect(bestand, 'der Buzz-Seed muss mindestens einen Kanal führen').toBeGreaterThan(0)
+
+        // Und der Reiter sagt dieselbe Zahl. Der Reiter ist eine ANDERE Insel als
+        // die Liste; dass beide übereinstimmen, ist die eigentliche Zusage.
+        const reiter = page.locator('[data-forge-tabs] a[href*="tab=workspaces"], [data-forge-tabs] button')
+            .filter({ hasText: 'Kanäle' })
+        await expect(reiter.first()).toContainText(String(bestand), { timeout: 20_000 })
+    })
 })

@@ -128,38 +128,29 @@ async function useWorkspace(page: Page): Promise<void> {
 }
 
 /**
- * Den Steckbrief aufziehen.
+ * Der Weg zur Issue-Liste — nötig, seit `code` (2026-08-27, GitHub-Parität)
+ * der STARTWERT der Route ist, nicht mehr `issues` (`forge.ts:
+ * tabFromLocation()`).
  *
- * Seit P4 (2026-08-24, Plan `2026-08-24T1810-forge-navigation-buzz-vorbild.md`)
- * ist der Repo-Kopf — Beschreibung, Clone-Befehl, Branches, Schutzregeln,
- * Maintainer, README — ein `<details>` und startet in der schmalen Form
- * **geschlossen**. Das ist die Absicht, nicht ein Versehen: der Kopf stand bis
- * dahin in voller Breite über der Reiterleiste, auf dem Telefon vier
- * Bildschirmhöhen vor dem ersten Issue.
- *
- * Die Zusagen darunter bleiben damit unverändert bestehen — sie prüfen weiterhin,
- * dass Branch-Zustand, Schutzregel, Maintainer und Clone-Zeile **da und sichtbar**
- * sind. Nur der Weg dorthin hat einen Schritt mehr, und der Schritt selbst wird
- * hier mitgeprüft: ohne ein `open` am `<details>` läuft jede folgende Zusicherung
- * in ihren Timeout, statt stillschweigend zu verschwinden.
- *
- * **Formbewusst, nicht breitenbewusst.** In der zweispaltigen Form (ab 65 rem
- * Container, `theme.css`) ist die Zusammenfassung `display: none` und der Rumpf
- * steht ohnehin offen; dann gibt es nichts zu klicken. Der Buzz-Arm misst bei
- * 1279 px, also immer in der schmalen Form — die Abfrage steht trotzdem hier,
- * damit derselbe Helfer im `desktop-`-Arm nicht in einen 30-s-Timeout läuft.
+ * **`oeffneSteckbrief` (bis P4/2026-08-24 hier stehend) entfällt ersatzlos.**
+ * Der Repo-Kopf — Beschreibung, Clone-Befehl, Branches, Schutzregeln,
+ * Maintainer, README — war ein `<details data-forge-steckbrief>` und startete
+ * in der schmalen Form geschlossen; mit der GitHub-Parität ist daraus die
+ * IMMER offene „Über"-Spur geworden (`⚡forge-repo.blade.php`,
+ * `aside.forge-repo-spur`), ein Geschwister der Reiter-Werkbank statt ihr
+ * Aufklapper — sie rendert sichtbar auf JEDEM Reiter, ohne Klick. Branch-
+ * Zustand, Schutzregel, Maintainer und Clone-Zeile brauchen deshalb keinen
+ * Helfer mehr. Nur die Issue-/PR-/Patch-Listen bleiben Reiter-Inhalt
+ * (`x-show="tab === '…'"`) — dafür steht dieser Helfer.
  */
-async function oeffneSteckbrief(page: Page): Promise<void> {
-    const steckbrief = page.locator('[data-forge-steckbrief]')
-    const schalter = page.locator('[data-forge-steckbrief-schalter]')
-    await expect(steckbrief).toHaveCount(1, { timeout: 30_000 })
-    if (!(await schalter.isVisible())) {
-        return
-    }
-    if ((await steckbrief.getAttribute('open')) === null) {
-        await schalter.click()
-    }
-    await expect(steckbrief).toHaveAttribute('open', /.*/)
+async function oeffneIssues(page: Page): Promise<void> {
+    // KEIN `exact: true`: der Reiter trägt bei nichtleerem Bestand einen
+    // `flux:badge`-Zähler im eigenen Text („Issues 2") — derselbe Grund, aus
+    // dem der Haus-Klick auf „Pull Requests" weiter unten ohne `exact` steht.
+    await page.getByRole('tab', { name: 'Issues' }).click()
+    await expect(page.locator('[data-forge-issue], [data-forge-empty="issues"]').first()).toBeVisible({
+        timeout: 30_000,
+    })
 }
 
 test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
@@ -418,7 +409,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
 
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
-        await oeffneSteckbrief(page)
+        // Die „Über"-Spur ist reiterunabhängig sichtbar — kein Aufklapper mehr.
         await expect(page.locator('[data-forge-clone]')).toContainText('example.invalid')
 
         // Punkt 2 — der Branch-Zustand steht mit Kurzhash da.
@@ -438,18 +429,43 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await expect(page.locator('[data-forge-person]').first()).toBeVisible({ timeout: 30_000 })
 
         // Punkt 3 — zwei Statusereignisse auf dasselbe Issue, der neuere gewinnt.
+        // Die Issue-Liste IST Reiter-Inhalt (anders als die „Über"-Spur oben) —
+        // erst auf „Issues" wechseln, sonst ist sie unsichtbar und der Klick
+        // unten liefe in den Timeout.
+        await oeffneIssues(page)
         const offen = page.locator('[data-forge-issue]').filter({ hasText: ISSUE_OPEN }).first()
-        const zu = page.locator('[data-forge-issue]').filter({ hasText: ISSUE_CLOSED }).first()
         await expect(offen).toHaveAttribute('data-status', 'open')
+
+        // **Kein Akkordeon mehr.** Seit P1 der GitHub-Parität ist die ganze
+        // Zeile ein `<a wire:navigate data-forge-vorgang-link>` auf die EIGENE
+        // Route (`/forge/{naddr}/issues/{id}`) — kein `button`, kein Rumpf, der
+        // sich inline öffnet (`⚡forge-repo.blade.php`, Kommentar an
+        // `data-forge-issue`). Rendertest des Markdown-Rumpfs deshalb auf der
+        // Einzelansicht, nicht mehr an der Zeile.
+        await offen.getByRole('link').click()
+        // `[data-forge-einzel-titel]` statt `getByRole('heading', …)`: der
+        // App-Kopf trägt EBENFALLS einen `<h1>` mit demselben Text plus
+        // Kurz-Id (Seitentitel „#kurzId Titel") — zwei `level:1`-Treffer, ein
+        // Strict-Mode-Verstoß. Der Anker der Einzelansicht ist eindeutig.
+        await expect(page.locator('[data-forge-einzel-titel]')).toContainText(ISSUE_OPEN, { timeout: 30_000 })
+        await expect(page.locator('.article-content strong')).toHaveText('Testissue')
+
+        // Zurück zur Repo-Detailseite und auf „geschlossen" umschalten
+        // (`[data-forge-zustand]`, `partials/forge-detail-suche.blade.php`),
+        // sonst filtert `sichtbareIssues()` das geschlossene Issue aus dem DOM.
+        await page.goBack()
+        await oeffneIssues(page)
+        await page.locator('[data-forge-zustand="geschlossen"]').click()
+        const zu = page.locator('[data-forge-issue]').filter({ hasText: ISSUE_CLOSED }).first()
         await expect(zu).toHaveAttribute('data-status', 'closed')
         await expect(zu).toContainText('Geschlossen')
 
-        // Der Rumpf öffnet sich und ist gerendertes Markdown, kein Rohtext.
-        await offen.getByRole('button').click()
-        await expect(offen.locator('.article-content strong')).toHaveText('Testissue')
-
         // Der PR-Tab trägt den Vorschlag samt Kurzhash und Quell-Branch.
+        // `zustand` ist EIN Zustand für Issues UND Pulls (`forge.ts:
+        // sichtbarePulls()`) — auf „offen" zurück, sonst filtert derselbe
+        // Umschalter den offenen PR aus der Liste, die er eben für Issues geleert hat.
         await page.getByRole('tab', { name: 'Pull Requests' }).click()
+        await page.locator('[data-forge-zustand="offen"]').click()
         const pr = page.locator('[data-forge-pr]').filter({ hasText: PR_SUBJECT }).first()
         await expect(pr).toBeVisible({ timeout: 30_000 })
         await expect(pr).toHaveAttribute('data-status', 'open')
@@ -464,6 +480,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await page.locator('[data-forge-repo]').filter({ hasText: EMPTY_REPO_D }).first().click()
 
         await expect(page.getByRole('heading', { level: 1, name: EMPTY_REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+        await oeffneIssues(page)
 
         const issues = page.locator('[data-forge-empty="issues"]')
         await expect(issues).toBeVisible()
@@ -507,7 +524,6 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
 
-        await oeffneSteckbrief(page)
         const zeile = page.locator('[data-forge-clone]')
         const knopf = page.locator('[data-forge-clone-copy]')
         await expect(zeile).toContainText('example.invalid')
@@ -552,7 +568,6 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await ohne.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(ohne.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
 
-        await oeffneSteckbrief(ohne)
         await expect(ohne.locator('[data-forge-clone]')).toContainText('example.invalid')
         await expect(ohne.locator('[data-forge-clone]')).toHaveClass(/select-all/)
         await expect(ohne.locator('[data-forge-clone-copy]')).toHaveCount(0)
@@ -574,6 +589,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+        await oeffneIssues(page)
         // Erst wenn die Liste steht, ist das Abo aufgezogen — vorher gemessen
         // hieße „noch nicht da" auch bei einem funktionierenden Abo.
         await expect(page.locator('[data-forge-issue]').first()).toBeVisible()
@@ -595,7 +611,21 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
             publish(BUZZ_OWNER_SEC_HEX, ['-k', '1632', '--tag', `e=${liveId};;root`, '-t', `a=${address}`]),
         ).toContain('success')
 
-        await expect(zeile).toHaveAttribute('data-status', 'closed', { timeout: 30_000 })
+        // Der Zustands-Umschalter (P4) filtert `sichtbareIssues()` als `x-for` —
+        // ein Issue, das live auf „geschlossen" wechselt, verschwindet damit aus
+        // der standardmäßig gezeigten „offen"-Liste, es aktualisiert sein
+        // `data-status` nicht mehr IN DERSELBEN Zeile (die verlässt das DOM).
+        // Das ist weiterhin der Beweis für „ohne Reload nachgezogen": ohne
+        // funktionierendes Live-Abo bliebe die Zeile stehen.
+        await expect(zeile).toHaveCount(0, { timeout: 30_000 })
+
+        // Und auf „geschlossen" umgeschaltet steht sie dort — mit demselben `data-id`,
+        // also wirklich dasselbe Issue und keine zweite Zeile.
+        await page.locator('[data-forge-zustand="geschlossen"]').click()
+        const zuGeschlossen = page.locator('[data-forge-issue]').filter({ hasText: marke }).first()
+        await expect(zuGeschlossen).toBeVisible({ timeout: 30_000 })
+        await expect(zuGeschlossen).toHaveAttribute('data-status', 'closed')
+        await expect(zuGeschlossen).toHaveAttribute('data-id', liveId)
     })
 
     /**
@@ -624,6 +654,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+        await oeffneIssues(page)
         await expect(page.locator('[data-forge-issue]').first()).toBeVisible()
 
         expect(
@@ -698,7 +729,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
-        await expect(page.locator('[data-forge-issue]').first()).toBeVisible()
+        await oeffneIssues(page)
 
         const counts = await page.evaluate(() => (window as unknown as { __reqFilterCounts: number[] }).__reqFilterCounts)
         expect(counts.length).toBeGreaterThan(0)

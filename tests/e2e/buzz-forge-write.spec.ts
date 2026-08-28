@@ -138,6 +138,9 @@ async function openRepo(page: Page): Promise<void> {
     await page.getByRole('tab', { name: 'Repositories' }).click()
     await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
     await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
+    // Seit der GitHub-Parität startet die Repo-Seite auf CODE — die Schreib-
+    // tests leben von der Issue-Liste (und ihr zustand-Ausschnitt).
+    await page.getByRole('tab', { name: /^Issues/ }).click()
 }
 
 test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () => {
@@ -257,15 +260,21 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
 
         const issueId = amRelay[0].id
 
-        // ── Kommentieren ────────────────────────────────────────────────────
-        await zeile.getByRole('button').first().click()
-        const form = zeile.locator('[data-forge-comment-form]')
+        // ── Kommentieren — seit P1 auf der EIGENEN Seite des Issues ────────
+        // (GitHub-Parität: die Zeile ist ein LINK, kein Akkordeon; Kommentar,
+        // Status und Zuweisung wohnen auf `/forge/{naddr}/issues/{id}`.)
+        await zeile.locator('a[data-forge-vorgang-link]').click()
+        const blatt = page.locator('[data-forge-einzel-blatt]')
+        await expect(blatt).toBeVisible({ timeout: 30_000 })
+        await expect(blatt.locator('h1')).toContainText(marke)
+
+        const form = page.locator('[data-forge-comment-form]')
         await expect(form).toBeVisible()
         await form.getByLabel('Kommentar').fill(kommentar)
         await form.getByRole('button', { name: 'Kommentieren' }).click()
 
-        // Erst optimistisch — die Zeile steht, bevor der Relay geantwortet hat.
-        await expect(zeile).toContainText(kommentar, { timeout: 30_000 })
+        // Erst optimistisch — der Kommentar steht, bevor der Relay geantwortet hat.
+        await expect(page.locator('[data-forge-einzel-kommentare]')).toContainText(kommentar, { timeout: 30_000 })
         // …und DANN das Ende des Fluges abwarten, bevor am Relay nachgesehen
         // wird. Ohne diesen Schritt misst der `nak req` das offene Zeitfenster
         // zwischen optimistischer Anzeige und `OK` — und liest null Ereignisse,
@@ -281,12 +290,15 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
         expect(kommentare[0].tags.some((tag) => tag[0] === 'e' && tag[1] === issueId && tag[3] === 'root')).toBe(true)
 
         // ── Punkt 3: Status setzen, und die Faltung zieht nach ───────────────
-        const statusleiste = zeile.locator('[data-forge-status-actions]')
+        // GitHub-Form: EIN Hauptwort am Zustand („Issue schließen"), nicht drei
+        // Optionen — der Ankündigung halber trägt der Knopf `data-forge-status-ziel`.
+        const statusleiste = page.locator('[data-forge-status-actions]')
         await expect(statusleiste).toBeVisible()
-        await statusleiste.locator('[data-forge-status-option="closed"]').click()
+        await statusleiste.locator('[data-forge-status-ziel="closed"]').click()
 
-        await expect(zeile).toHaveAttribute('data-status', 'closed', { timeout: 30_000 })
-        await expect(zeile).toContainText('Geschlossen')
+        const pille = blatt.locator('[data-forge-status]')
+        await expect(pille).toHaveAttribute('data-status', 'closed', { timeout: 30_000 })
+        await expect(blatt).toContainText('Geschlossen')
 
         // **Gepollt, und das ist beim Zehnfach-Lauf gemessen worden (P4).**
         // `data-status` kippt OPTIMISTISCH — die Zeile steht auf „Geschlossen",
@@ -335,14 +347,18 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
 
         const zeile = page.locator('[data-forge-pr]').filter({ hasText: 'P8 Zwergotter PR' }).first()
         await expect(zeile).toBeVisible({ timeout: 30_000 })
-        await zeile.getByRole('button').first().click()
+        // Seit P1 (GitHub-Parität): die Zeile linkt auf die EIGENE Seite des
+        // Vorschlags — kein Akkordeon mehr.
+        await zeile.locator('a[data-forge-vorgang-link]').click()
+        const blatt = page.locator('[data-forge-einzel-blatt]')
+        await expect(blatt).toBeVisible({ timeout: 30_000 })
 
-        const form = zeile.locator('[data-forge-comment-form]')
+        const form = page.locator('[data-forge-comment-form]')
         await expect(form).toBeVisible()
         await form.getByLabel('Kommentar').fill(kommentar)
         await form.getByRole('button', { name: 'Kommentieren' }).click()
 
-        await expect(zeile).toContainText(kommentar, { timeout: 30_000 })
+        await expect(page.locator('[data-forge-einzel-kommentare]')).toContainText(kommentar, { timeout: 30_000 })
         await expect(form.getByLabel('Kommentar')).toHaveValue('', { timeout: 30_000 })
 
         const kommentare = events(['-k', '1', '-t', `a=${address}`]).filter(
@@ -406,23 +422,35 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
         await useWorkspace(page)
         await openRepo(page)
 
+        // Das Issue ist „Erledigt" — im Offen-Ausschnitt der Liste (GH-Form)
+        // steht es nicht; erst der Umschalter holt es hervor.
+        await page.locator('[data-forge-zustand="geschlossen"]').click()
         const zeile = page.locator('[data-forge-issue]').filter({ hasText: marke }).first()
         await expect(zeile).toBeVisible({ timeout: 30_000 })
         await expect(zeile).toHaveAttribute('data-status', 'resolved')
-        await zeile.getByRole('button').first().click()
 
-        await zeile.locator('[data-forge-status-option="closed"]').click()
+        // Seit P1 (GitHub-Parität) auf der eigenen Seite. Der Knopf bietet bei
+        // „Erledigt" das Wiederöffnen an (GitHub-Form: EIN Verb je Zustand) —
+        // dieselbe Faltungs-Falle: unser 1630 verliert gegen den future-stempel-
+        // ten 1631 des Eigentümers.
+        await zeile.locator('a[data-forge-vorgang-link]').click()
+        const blatt = page.locator('[data-forge-einzel-blatt]')
+        await expect(blatt).toBeVisible({ timeout: 30_000 })
+        await expect(blatt.locator('[data-forge-status]')).toHaveAttribute('data-status', 'resolved')
+
+        await page.locator('[data-forge-status-ziel="open"]').click()
 
         // Die Fläche sagt, dass es nicht gewirkt hat — und lässt den echten
         // Zustand stehen, statt den gewünschten vorzugaukeln.
-        const fehler = zeile.locator('[data-forge-write-failed="root"]')
+        const fehler = page.locator('[data-forge-write-failed="root"]')
         await expect(fehler).toBeVisible({ timeout: 30_000 })
         await expect(fehler).toContainText('durchgesetzt')
-        await expect(zeile).toHaveAttribute('data-status', 'resolved')
+        await expect(blatt.locator('[data-forge-status]')).toHaveAttribute('data-status', 'resolved')
 
         // Und das eigene Ereignis liegt trotzdem am Relay — `OK true` war
-        // wahr, es war nur nicht das, was der Nutzer wollte.
-        const eigene = events(['-k', '1632', '-t', `a=${address}`]).filter(
+        // wahr, es war nur nicht das, was der Nutzer wollte. (1630 = wieder
+        // offen, seit diesem Umbau das angebotene Verb am erledigten Issue.)
+        const eigene = events(['-k', '1630', '-t', `a=${address}`]).filter(
             (event) => event.pubkey === BUZZ_USER_PUB && event.tags.some((tag) => tag[0] === 'e' && tag[1] === issueId),
         )
         expect(eigene).toHaveLength(1)
@@ -611,6 +639,46 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
     })
 
     /**
+     * P4 (GitHub-Parität): der Zustands-Umschalter der Liste — „N offen /
+     * M geschlossen". Der Relay liefert beides, die Liste zeigt seit P4 nur
+     * den gewählten Ausschnitt. Ohne diesen Test wäre der Umschalter eine
+     * Zierde, die auch nichts tut.
+     */
+    test('der Zustands-Umschalter der Issue-Liste zeigt offen und geschlossen getrennt', async ({ page }) => {
+        const offen = `P4 Offen ${randomUUID().slice(0, 8)}`
+        const zu = `P4 Zu ${randomUUID().slice(0, 8)}`
+        expect(
+            publish(BUZZ_USER_NSEC, ['-k', '1621', '-t', `a=${address}`, '-t', `p=${owner}`, '-t', `subject=${offen}`, '-c', 'Offen.']),
+        ).toContain('success')
+        expect(
+            publish(BUZZ_USER_NSEC, ['-k', '1621', '-t', `a=${address}`, '-t', `p=${owner}`, '-t', `subject=${zu}`, '-c', 'Wird zu.']),
+        ).toContain('success')
+        const frischZu = events(['-k', '1621', '-t', `a=${address}`]).find((e) => tagValue(e.tags, 'subject') === zu)?.id
+        expect(frischZu).toHaveLength(64)
+        expect(
+            publish(BUZZ_USER_NSEC, ['-k', '1632', '--tag', `e=${frischZu};;root`, '-t', `a=${address}`]),
+        ).toContain('success')
+
+        await useWorkspace(page)
+        await openRepo(page)
+
+        // Offen (Startwert): das offene Issue steht, das geschlossene nicht.
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: offen })).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: zu })).toHaveCount(0)
+
+        // Der Umschalter benennt BEIDE Zahlen — ungesucht, wie bei GitHub.
+        await expect(page.locator('[data-forge-zustand-wahl]')).toContainText('1')
+
+        await page.locator('[data-forge-zustand="geschlossen"]').click()
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: zu })).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: offen })).toHaveCount(0)
+
+        await page.locator('[data-forge-zustand="offen"]').click()
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: offen })).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('[data-forge-issue]').filter({ hasText: zu })).toHaveCount(0)
+    })
+
+    /**
      * Der zweite Riegel, und der wichtigere: den Status eines FREMDEN Issues
      * darf man nicht setzen. Er ist deshalb wichtiger, weil der Relay hier
      * **gar nichts** prüft — am Teststack gemessen quittiert er ein 1632 eines
@@ -635,15 +703,17 @@ test.describe('Buzz-Workspace: Forge schreiben (E2E, nur E2E_RELAY=buzz)', () =>
 
         const zeile = page.locator('[data-forge-issue]').filter({ hasText: fremd }).first()
         await expect(zeile).toBeVisible({ timeout: 30_000 })
-        await zeile.getByRole('button').first().click()
+        await zeile.locator('a[data-forge-vorgang-link]').click()
+        const blatt = page.locator('[data-forge-einzel-blatt]')
+        await expect(blatt).toBeVisible({ timeout: 30_000 })
 
         // Kein Statusknopf — stattdessen der Grund.
-        await expect(zeile.locator('[data-forge-status-actions]')).toHaveCount(0)
-        const hinweis = zeile.locator('[data-forge-status-hint]')
+        await expect(page.locator('[data-forge-status-actions]')).toHaveCount(0)
+        const hinweis = page.locator('[data-forge-status-hint]')
         await expect(hinweis).toBeVisible()
         await expect(hinweis).toContainText('Repository')
 
         // Kommentieren darf man trotzdem — die beiden Rechte sind nicht dasselbe.
-        await expect(zeile.locator('[data-forge-comment-form]')).toBeVisible()
+        await expect(page.locator('[data-forge-comment-form]')).toBeVisible()
     })
 })
