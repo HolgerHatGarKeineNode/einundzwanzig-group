@@ -55,7 +55,47 @@ RUNMARK=/tmp/e2e-zooid-$ZOOID_PORT.run
 # hat einen frischen Herzschlag vom Start dieses Laufs und bleibt unangetastet, auch
 # wenn der Lauf selbst lange dauert (siehe teardown-stack.sh + reap-stale-teststacks.sh).
 ALIVE=/tmp/e2e-zooid-$ZOOID_PORT.alive
+HEARTBEAT_PID=/tmp/e2e-zooid-$ZOOID_PORT.hb
 touch "$ALIVE"
+
+# Der Herzschlag schlägt ab jetzt WIRKLICH, nicht nur beim Start (2026-08-28).
+#
+# Der Absatz darüber beschreibt, wie es bis heute war: EIN `touch` je Skriptaufruf. Das
+# trägt bei der Default-Grenze von 3 h mühelos — ein Lauf dauert Minuten. Es trägt NICHT
+# bei kleinen Grenzen, und genau die fährt `teststackLifecycle.nodetest.ts` (1 und 5
+# Sekunden). Am 2026-08-28 riss ein solcher Lauf sechs zooid-Instanzen eines parallelen
+# Vollaufs mitten heraus; sieben Tests fielen mit „connection refused" auf allen Ports.
+# Der tragende Riegel dagegen ist die Port-Whitelist im Reaper (`E2E_REAP_ONLY_PORTS`);
+# der Herzschlag hier ist der zweite, der auch einen Reaper-Aufruf VON HAND mit kurzer
+# Grenze überlebt.
+#
+# ── Warum er an der Server-PID hängt und nicht einfach läuft ──────────────────────────
+# Ein Herzschlag, der den Server überlebt, wäre SCHLIMMER als keiner: er hielte einen
+# toten Slot für immer „frisch" und machte den Reaper genau für den Fall blind, für den
+# es ihn gibt. Die Schleife prüft deshalb bei jedem Durchgang, ob der Server-Prozess
+# noch lebt — stirbt er (auch per `kill -9`), endet sie von selbst.
+# Zweite Abbruchbedingung ist das Verschwinden der Datei: `teardown-stack.sh` killt erst
+# und löscht danach die Marker; ohne diese Prüfung legte der nächste Durchgang eine
+# verwaiste `.alive` NACH dem Aufräumen wieder an.
+# Restrisiko, benannt statt behauptet: zwischen Prüfung und `touch` bleibt ein Fenster
+# von Millisekunden, in dem ein gleichzeitiger Teardown eine 0-Byte-Datei zurücklassen
+# kann. Sie kostet nichts und wird vom Reaper nach der Default-Grenze eingesammelt.
+starte_herzschlag() { # $1 = PID des Servers
+    # Einen Herzschlag aus einem früheren Aufruf beenden (Wiederverwendung des Slots),
+    # sonst sammeln sich über viele Läufe Schleifen auf derselben Datei.
+    if [ -f "$HEARTBEAT_PID" ]; then
+        kill "$(cat "$HEARTBEAT_PID")" 2>/dev/null || true
+        rm -f "$HEARTBEAT_PID"
+    fi
+    setsid bash -c '
+        server_pid="$1"; alive="$2"
+        while kill -0 "$server_pid" 2>/dev/null && [ -f "$alive" ]; do
+            sleep 5
+            kill -0 "$server_pid" 2>/dev/null && [ -f "$alive" ] && touch "$alive" 2>/dev/null || break
+        done
+    ' _ "$1" "$ALIVE" </dev/null >/dev/null 2>&1 &
+    echo "$!" >"$HEARTBEAT_PID"
+}
 DATA=./data-test-$ZOOID_PORT
 CONFIG=./config-test-$ZOOID_PORT
 LOG=/tmp/e2e-zooid-$ZOOID_PORT.log
@@ -181,7 +221,9 @@ rm -f "$DATA/db" "$DATA/db-shm" "$DATA/db-wal"
 # DETACHED starten (eigene Session, /dev/null-stdin) → überlebt das Skript-Ende, sodass
 # der nächste Lauf ihn per Guard wiederverwenden kann. Kein `wait`, kein Trap.
 setsid env PORT="$ZOOID_PORT" DATA="$DATA" CONFIG="$CONFIG" ./bin/zooid </dev/null >"$LOG" 2>&1 &
-echo "$!" > "$PIDFILE"
+ZOOID_PID=$!
+echo "$ZOOID_PID" > "$PIDFILE"
+starte_herzschlag "$ZOOID_PID"
 
 # Auf NIP-11 warten (Relay oben)
 for _ in $(seq 1 40); do

@@ -49,7 +49,15 @@ zooid)
     # NUR dieser eine Port — niemals ein Port außerhalb des übergebenen Slots.
     fuser -k "$PORT/tcp" 2>/dev/null || true
 
-    rm -f "$PIDFILE" "/tmp/e2e-zooid-$PORT.run" "/tmp/e2e-zooid-$PORT.alive" "/tmp/e2e-zooid-$PORT.log"
+    # Den Herzschlag VOR den Markern beenden (seit 2026-08-28, `zooid-testserver.sh`):
+    # er hängt zwar ohnehin an der Server-PID und liefe von selbst aus, würde in den
+    # bis zu fünf Sekunden bis zu seinem nächsten Durchgang aber eine verwaiste
+    # `.alive` neu anlegen können — also erst stillstellen, dann aufräumen.
+    HBFILE="/tmp/e2e-zooid-$PORT.hb"
+    if [ -f "$HBFILE" ]; then
+        kill "$(cat "$HBFILE")" 2>/dev/null || true
+    fi
+    rm -f "$PIDFILE" "$HBFILE" "/tmp/e2e-zooid-$PORT.run" "/tmp/e2e-zooid-$PORT.alive" "/tmp/e2e-zooid-$PORT.log"
     rm -rf "/home/user/Code/zooid/data-test-$PORT" "/home/user/Code/zooid/config-test-$PORT"
     ;;
 buzz)
