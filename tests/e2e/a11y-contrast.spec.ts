@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 import { measure, type Measured } from './support/contrast'
+import { awaitNextSecond } from './support/zeit'
 
 /**
  * A11y-Anker: misst den TATSÄCHLICH gerenderten Kontrast aller Brand-Textfarben
@@ -504,6 +505,16 @@ const SEARCH = `${PICKER} input[type=search]`
  *
  * ── Und warum es NICHT wirft ──────────────────────────────────────────────────────
  *
+ * ── Kalibriert am 2026-08-29 ─────────────────────────────────────────────────────
+ *
+ * Ein erster Anlauf blieb ohne Nachweis: in drei Läufen (einer unter Last) kehrte der
+ * Helfer jedes Mal in Runde 1 mit Deckkraft 1,0 zurück — die Transition liess sich nicht
+ * herbeiführen, und ein Wait, der nie wartet, beweist nichts. Nachgeholt mit einer
+ * INJIZIERTEN Transition (ein gemessener Träger auf `opacity: 0.3`, nach 800 ms zurück
+ * auf 1): der Helfer sah die 0,3, pollte **9 Runden über 866 bzw. 874 ms** und kehrte erst
+ * bei voller Deckkraft zurück — in beiden Themes, Test grün. Ohne ihn hätte `measure()`
+ * gegen 0,3 gemessen, und der Guard unten verlangt `opacity === 1`.
+ *
  * Läuft die Zeit ab, kehrt der Helfer still zurück und überlässt das Urteil dem Guard.
  * Ein `expect.poll` hier ersetzte dessen präzise Meldung („welches Label, welches
  * Verhältnis, welche Deckkraft") durch ein nacktes Poll-Timeout. Der Helfer nimmt das
@@ -729,6 +740,14 @@ for (const theme of ['light', 'dark'] as const) {
         // Sekunde wie `all`, und `created_at > watermark` ist knapp falsch: der Punkt
         // bliebe aus, ohne dass irgendetwas kaputt wäre.
         await expect(page.getByRole('button', { name: /Punktprobe/ })).toBeVisible({ timeout: 20_000 })
+        // **Nicht in der Boot-Sekunde senden.** Ein frischer Account bekommt beim Login
+        // `all = nowSec()` (`readState.ts:852`), und `created_at > watermark` ist dann knapp
+        // falsch — der Punkt bleibt völlig korrekt aus. Gemessen am 2026-08-29 an genau
+        // dieser Stelle, beide Themes in EINEM Lauf: light `created_at=1787997217` gegen
+        // `all=1787997217` → Delta 0 → Punkt FEHLT; dark Delta 1 → Punkt steht. Das war der
+        // „Ungelesen-Punkt-Flake" (3 von 5 Läufen), und er hat ausserdem die Kalibrierung
+        // des Deckkraft-Waits weiter unten blockiert. Siehe {@link awaitNextSecond}.
+        await awaitNextSecond(page)
         execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=punkt', '-c', `A11y-${Date.now()}`, ZOOID_WS])
         await expect(page.locator('span.size-2.rounded-full').first()).toBeVisible({ timeout: 20_000 })
         // Zweiter, EIGENER Beleg: seit P6 trägt die Raum-Zeile eine Zähler-Pille statt

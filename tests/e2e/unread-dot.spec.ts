@@ -1,6 +1,7 @@
 import { test, expect, type Page } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
 import { useZooid, ZOOID_PORT, ZOOID_URL, ZOOID_WS } from './support/zooid'
+import { awaitNextSecond } from './support/zeit'
 import { loginNsec } from './support/login'
 
 /**
@@ -43,29 +44,6 @@ function publish(content: string): void {
 }
 
 const marker = (prefix: string): string => `${prefix}-${Math.floor(Math.random() * 1e9)}`
-
-/**
- * Wartet, bis die Wanduhr eine ganze Sekunde weitergerückt ist.
- *
- * KEIN „warte mal kurz". Alles hier rechnet in Unix-SEKUNDEN: das Wasserzeichen
- * (`setRead` → `Math.floor(Date.now()/1000)`) und das `created_at` der Nachricht. Die
- * Ungelesen-Regel ist bewusst `created_at > watermark` und nicht `>=` — NIP-01-`since`
- * ist inklusiv, sonst wäre das gerade Quittierte sofort wieder ungelesen
- * (`unread.ts`, Regel 3). Quittieren und Publizieren in DERSELBEN Sekunde ergibt also
- * völlig korrekt „gelesen".
- *
- * Genau daran ist die Gegenprobe unter voller Parallellast einmal gescheitert
- * (gemessen: `createdAt=1784800753` gegen `watermark=1784800752` — eine Sekunde
- * Abstand, und in einem Lauf eben null). Der Test wartet deshalb auf eine
- * NACHPRÜFBARE Bedingung (die Sekunde ist umgesprungen), statt auf eine geratene
- * Dauer — und die App bleibt unangetastet.
- */
-async function awaitNextSecond(page: Page): Promise<void> {
-    const start = Math.floor(Date.now() / 1000)
-    while (Math.floor(Date.now() / 1000) <= start) {
-        await page.waitForTimeout(100)
-    }
-}
 
 /** `created_at` einer per Content-Marker eindeutigen Nachricht, direkt vom Relay. */
 function createdAt(content: string): number {
@@ -245,6 +223,11 @@ test('Anker 1: Punkt steht beim Kaltstart aus dem Cache — Relay blockiert', as
     await expect(roomDot(page)).toHaveCount(0) // Ausgangslage: nichts ungelesen
 
     const cold = marker('Kalt')
+    // **Nicht in der Boot-Sekunde senden.** Ein frischer Account bekommt beim Login
+    // `all = nowSec()`; `created_at > watermark` ist dann knapp falsch und der Punkt
+    // bleibt völlig korrekt aus. Gemessen am 2026-08-29 (Delta 0 → kein Punkt,
+    // Delta 1 → Punkt, ein Lauf, beide Ergebnisse). Siehe {@link awaitNextSecond}.
+    await awaitNextSecond(page)
     publish(cold)
     await expect(roomDot(page)).toBeVisible({ timeout: 20_000 })
 
@@ -305,6 +288,11 @@ test('Anker 2: Lesen löscht den Punkt — hochgescrollt verlassen lässt ihn st
 
     // ── Teil 1: gelesen ⇒ weg ────────────────────────────────────────────────
     const seen = marker('Gelesen')
+    // **Nicht in der Boot-Sekunde senden.** Ein frischer Account bekommt beim Login
+    // `all = nowSec()`; `created_at > watermark` ist dann knapp falsch und der Punkt
+    // bleibt völlig korrekt aus. Gemessen am 2026-08-29 (Delta 0 → kein Punkt,
+    // Delta 1 → Punkt, ein Lauf, beide Ergebnisse). Siehe {@link awaitNextSecond}.
+    await awaitNextSecond(page)
     publish(seen)
     await expect(roomDot(page)).toBeVisible({ timeout: 20_000 })
 
@@ -394,6 +382,11 @@ test('Anker 3: zweiter Tab verliert den Punkt ohne Reload', async ({ page, conte
     })
 
     const shared = marker('ZweiTabs')
+    // **Nicht in der Boot-Sekunde senden.** Ein frischer Account bekommt beim Login
+    // `all = nowSec()`; `created_at > watermark` ist dann knapp falsch und der Punkt
+    // bleibt völlig korrekt aus. Gemessen am 2026-08-29 (Delta 0 → kein Punkt,
+    // Delta 1 → Punkt, ein Lauf, beide Ergebnisse). Siehe {@link awaitNextSecond}.
+    await awaitNextSecond(page)
     publish(shared)
     await expect(roomDot(page)).toBeVisible({ timeout: 20_000 })
     await expect(roomDot(tabB)).toBeVisible({ timeout: 20_000 })
