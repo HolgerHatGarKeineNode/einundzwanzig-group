@@ -466,6 +466,14 @@ test('M5: eigene Nachricht löschen', async ({ page }) => {
  * ihn für trivial hält, führe `Math.max(jetzt, ziel + 1)` in `deleteRoomMessage` wieder
  * ein und sehe ihn rot werden.
  *
+ * **Diese Einladung hat bis zum 2026-08-29 NICHT getragen — nachgemessen.** Mit
+ * `created_at: now() + 1` in `deleteRoomMessage` blieb der Fall **grün**: die obere
+ * Schranke war die Sekunde nach dem `await`, und zwischen Stempel und Rückkehr liegt das
+ * Publizieren samt Relay-Verdikt. Dieser Abstand ist unbegrenzt und deckte den Defekt zu.
+ * Seit der Umstellung auf das Stempel-Fenster (siehe unten) ist die Probe wieder scharf:
+ * dieselbe Mutation ergab `created_at=1788019400` gegen ein Fenster `…399/…399` — rot,
+ * um exakt eins.
+ *
  * Geprüft wird am Draht, nicht im DOM: der Tombstone selbst, sein `created_at` gegen die
  * Sekunde, in der der Aufruf zurückkam. Eine DOM-Prüfung wäre hier blind — lokal blendet
  * das Repository die Nachricht in jedem Fall aus, auch wenn der Relay den Tombstone
@@ -483,13 +491,40 @@ test('M5: der Tombstone einer soeben gesendeten Nachricht liegt nicht in der Zuk
     await expect.poll(() => (msg = queryRelayEvent((e) => e.content === marker, 'mod')) !== undefined, { timeout: 15_000 }).toBe(true)
     const ziel = msg as RelayEvent
 
-    // Löschen, während die Nachricht noch „von eben" ist.
-    await page.evaluate(async (id: string) => {
+    /*
+     * **Die Grenzen liegen um den STEMPELMOMENT, nicht um das Publizieren — gemessen
+     * am 2026-08-29, und die Messung hat eine erste, falsche Reparatur kassiert.**
+     *
+     * Zwei Befunde stecken darin:
+     *
+     * 1. welshman stempelt mit `now()`, und das ist `Math.round(Date.now() / 1000)`
+     *    (`@welshman/lib` `Tools.js:188`) — kaufmännisch gerundet, nicht abgeschnitten.
+     *    Ein Tombstone, der bei `x,7` entsteht, trägt legitim `x+1`. Die Vergleichssekunde
+     *    mit `Math.floor` zu bilden meldete deshalb einen Zukunftsstempel, den es nicht
+     *    gab (`created_at=1788013110` gegen `nachAufruf=1788013109`, Vollauf).
+     * 2. Die Sekunde NACH dem `await` ist die falsche Grenze. Zwischen Stempel und
+     *    Rückkehr liegt das Publizieren samt Relay-Verdikt, und dieser Abstand ist
+     *    unbegrenzt: dauert er über eine Sekunde, deckt er einen `+1`-Stempel zu.
+     *    **Nachgemessen:** mit `created_at: now() + 1` in `deleteRoomMessage` blieb der
+     *    Fall grün. Die naheliegende Reparatur (nur `floor` → `round`) hätte den Flake
+     *    beseitigt und die Zusage dabei stillgelegt.
+     *
+     * Deshalb wird der Aufruf nur GESTARTET und die Uhr sofort gelesen: `makeEvent` läuft
+     * synchron im ersten Tick von `deleteRoomMessage` (es steht im Argument von
+     * `publish`, vor jedem `await`). `vor` und `nach` klammern den Stempel damit auf
+     * Millisekunden genau ein, und ein um eins verschobener Stempel fällt zwangsläufig
+     * heraus. Gerundet wird auf beiden Seiten wie `now()` — und mit derselben Uhr, denn
+     * beides läuft im Browser.
+     */
+    const fenster = await page.evaluate(async (id: string) => {
         const el = document.querySelector('[x-data^="nostrRoomChat"]')!
         const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
-        await (data.remove as (i: string) => Promise<void>)(id)
+        const vor = Math.round(Date.now() / 1000)
+        const lauf = (data.remove as (i: string) => Promise<void>)(id)
+        const nach = Math.round(Date.now() / 1000)
+        await lauf
+        return { vor, nach }
     }, ziel.id)
-    const nachAufruf = Math.floor(Date.now() / 1000)
 
     let grab: RelayEvent | undefined
     await expect
@@ -498,12 +533,17 @@ test('M5: der Tombstone einer soeben gesendeten Nachricht liegt nicht in der Zuk
         })
         .toBe(true)
 
-    expect(
-        (grab as RelayEvent).created_at,
-        `Der Tombstone trägt created_at=${(grab as RelayEvent).created_at}, die Sekunde nach dem Aufruf war ${nachAufruf}. ` +
-            'Ein in die Zukunft datierter Tombstone darf von Relays mit Zukunftsgrenze abgelehnt werden — die Löschung ' +
-            'verpufft dann still. Siehe den Kopf dieses Falls; der Grund für den alten `+1` ist gemessen entfallen.',
-    ).toBeLessThanOrEqual(nachAufruf)
+    const meldung =
+        `Der Tombstone trägt created_at=${(grab as RelayEvent).created_at}, gestempelt wurde er zwischen ` +
+        `${fenster.vor} und ${fenster.nach} (beide mit \`Math.round\`, wie \`now()\` es tut, und mit derselben Uhr). ` +
+        'Ein in die Zukunft datierter Tombstone darf von Relays mit Zukunftsgrenze abgelehnt werden — die Löschung ' +
+        'verpufft dann still. Siehe den Kopf dieses Falls; der Grund für den alten `+1` ist gemessen entfallen.'
+
+    expect((grab as RelayEvent).created_at, meldung).toBeLessThanOrEqual(fenster.nach)
+    // Die Untergrenze gehört dazu: ohne sie wäre ein Tombstone aus der VERGANGENHEIT
+    // unauffällig, und der träfe die Zusage genauso — er sortiert dann vor die Nachricht,
+    // die er löschen soll.
+    expect((grab as RelayEvent).created_at, meldung).toBeGreaterThanOrEqual(fenster.vor)
 })
 
 /**
