@@ -1232,9 +1232,135 @@ function publishToScroll(content: string): void {
 }
 
 /**
+ * Ein `REQ`-Frame, der eine ÄLTERE Seite des Raums `h` anfordert.
+ *
+ * `until` ist die Signatur der Pagination und nur ihrer: `loadRoomMessages(url, h)`
+ * (initiales Laden, `js/bridge.ts:5995`) schickt keinen, `loadRoomMessages(url, h, oldest)`
+ * aus `loadOlder` (`:6086`) schickt einen. Zusammen mit `#h` ist der Frame damit eindeutig
+ * dem Nachladen DIESES Raums zugeordnet — kein anderer Aufrufer im Paket setzt `until`
+ * neben ein `#h` (paketweit gesucht: `spaceSearch.ts` und `forgeAbfragen.ts` sind die
+ * einzigen weiteren `until`-Träger, beide ohne Raum-Tag).
+ *
+ * **Geparst statt gemustert.** Ein `/"until"/` über die Nutzlast hinge an der
+ * Schlüsselreihenfolge von `JSON.stringify` und ginge bei der nächsten Filter-Ergänzung
+ * still daneben.
+ */
+function istSeitenNachladung(payload: string, h: string): boolean {
+    if (!payload.startsWith('["REQ"')) {
+        return false
+    }
+    try {
+        const [, , ...filter] = JSON.parse(payload) as [string, string, ...Record<string, unknown>[]]
+
+        return filter.some((f) => typeof f.until === 'number' && Array.isArray(f['#h']) && (f['#h'] as string[]).includes(h))
+    } catch {
+        return false
+    }
+}
+
+/**
+ * Schneidet ab sofort jede `REQ` mit und trennt die Seiten-Nachladungen des Raums `h`
+ * heraus. Muss VOR dem Öffnen laufen.
+ *
+ * **`alle` ist die Positivkontrolle, nicht Beiwerk.** „Null Nachladungen" ist nur dann
+ * eine Aussage über den Scroller, wenn der Mitschnitt überhaupt etwas gesehen hat — ein
+ * Listener, der zu spät hängt oder an einer Socket-Umstellung vorbeigreift, liefert
+ * ebenfalls null und sähe wie ein bestandener Test aus.
+ */
+function schneideNachladungenMit(page: Page, h: string): { alle: string[]; nachladungen: string[] } {
+    const alle: string[] = []
+    const nachladungen: string[] = []
+    page.on('websocket', (ws) => {
+        ws.on('framesent', (frame) => {
+            const payload = typeof frame.payload === 'string' ? frame.payload : frame.payload.toString()
+            if (!payload.startsWith('["REQ"')) {
+                return
+            }
+            alle.push(payload)
+            if (istSeitenNachladung(payload, h)) {
+                nachladungen.push(payload)
+            }
+        })
+    })
+
+    return { alle, nachladungen }
+}
+
+/**
+ * D1 (kein Vorabladen) — **dieser Fall steht ROT, und das ist seine Aufgabe.**
+ *
+ * ── Was er festhält ───────────────────────────────────────────────────────────────
+ *
+ * Beim blossen Öffnen eines Raums darf der Verlauf KEINE ältere Seite anfordern. Der
+ * Nutzer hat nicht gescrollt; jede Seite, die trotzdem fliegt, ist eine Anfrage, ein
+ * Relay-Roundtrip und ein Stück Verlauf, das niemand angefordert hat.
+ *
+ * ── Warum er rot ist, seit wann, und wer ihn grün macht ───────────────────────────
+ *
+ * **Der Defekt ist echt und älter als der welshman-Sprung** (gemessen am 2026-08-29,
+ * beide Stände in eigenen frischen Slots): `loadOlder` feuert beim Öffnen **1× unter
+ * 0.8.16 und 2× unter 0.9.5**. Die Ursache ist Geometrie, nicht Timing — der Log ist
+ * `flex-col-reverse` (`⚡room.blade.php:420`), also ist `scrollTop: 0` das ENDE. Der
+ * Scroller hält den frisch geöffneten Raum trotzdem für „nahe am ältesten Rand", weil
+ * seine Nähe-Prüfung bedeutungslos ist, solange der Verlauf den Viewport nicht füllt:
+ * dann ist man am neuesten UND am ältesten Rand zugleich.
+ *
+ * **Der Guard gehört in `createScroller`** („erst prüfen, wenn der Log überhaupt
+ * scrollbar ist", `scrollHeight > clientHeight + Schwelle`) und ist als **P4** eingeplant
+ * (`docs/plans/2026-08-28T1950-welshman-0-9-sprung.md`, vierter Erntepunkt). Er ist
+ * bewusst nicht im Sprung gebaut worden: ein Guard im rAF-Scroller berührt jede
+ * Chat-Fläche.
+ *
+ * ── Warum er nicht übersprungen und nicht `test.fail()` ist ───────────────────────
+ *
+ * Ein `skip` oder ein `test.fail()` machte die Suite grün und den Befund unsichtbar —
+ * und ein Guard, der in P4 gebaut, aber falsch verdrahtet wird, fiele niemandem auf.
+ * **Ein rotes Ergebnis mit Datum, Ursache und benanntem Zuständigen ist ehrlicher als
+ * ein grünes, das nichts misst.** Nach dem P4-Guard wird dieser Fall von selbst grün;
+ * tut er das nicht, greift der Guard nicht.
+ *
+ * ── Und warum `REQ`-Frames statt einer DOM-Zählung ───────────────────────────────
+ *
+ * Hier stand `await expect(page.getByText('Zeile 1')).toHaveCount(0)`. Das behauptete
+ * „nicht geladen" und mass „noch nicht gerendert" — ein Zeitfenster, das 0.9.5 nur
+ * zugedrückt hat (die nachgeladene Seite ist jetzt nach 15 ms im DOM statt nach 363 ms).
+ * Dieselbe Zusage am Draht gemessen ist von der Uhr unabhängig und bleibt es auch nach
+ * dem Guard.
+ */
+test('D1: das blosse Öffnen lädt KEINE ältere Seite nach', async ({ page }) => {
+    test.setTimeout(90_000)
+    // Der Mitschnitt muss vor `openRoom` stehen: der Prefetch feuert beim Aufbau des
+    // Verlaufs, also noch während `goto` läuft.
+    const { alle, nachladungen } = schneideNachladungenMit(page, 'scroll')
+
+    await openRoom(page, 'scroll')
+    // Erst wenn der Verlauf wirklich steht, ist eine Null eine Aussage über den Scroller
+    // und nicht über eine Seite, die noch gar nichts getan hat.
+    await expect(page.getByText('Zeile 60', { exact: true })).toBeVisible({ timeout: 15_000 })
+    // Und der Mitschnitt hat gearbeitet — sonst prüfte die Zeile darunter die leere Menge.
+    expect(alle.length, 'kein einziger REQ-Frame mitgeschnitten — der Mitschnitt greift nicht, die Null unten wäre wertlos').toBeGreaterThan(0)
+
+    expect(
+        nachladungen,
+        `Beim Öffnen von „scroll" sind ${nachladungen.length} Seiten-Nachladungen rausgegangen, ohne dass jemand gescrollt hat. ` +
+            'Das ist der bekannte Scroller-Defekt (Geometrie, nicht Timing) — er wird mit dem P4-Guard in `createScroller` ' +
+            'behoben und NICHT durch Lockern dieser Zusage. Siehe den Kopf dieses Falls.',
+    ).toHaveLength(0)
+})
+
+/**
  * D1 (Auto-Load-Older) — „scroll" hat 60 Nachrichten, initial werden nur die
  * jüngsten 50 geladen (Zeile 11–60). Am oberen Rand lädt der Verlauf die ältere
  * Seite automatisch nach; „Zeile 1" erscheint, ohne den Button zu klicken.
+ *
+ * **Die Grenze dieses Falls, ausdrücklich:** solange der Fall darüber rot ist, lädt der
+ * Verlauf schon beim Öffnen vor — „Zeile 1" kann hier also auch ohne das Scrollen
+ * erscheinen, und dann belegt der Fall nur, dass die zweite Seite ÜBERHAUPT ankommt,
+ * nicht, dass der obere Rand sie auslöst. Er ist erst nach dem P4-Guard ein
+ * vollwertiger Nachweis. Die alte Vorbedingung („Zeile 1 steht noch nicht im DOM") ist
+ * bewusst NICHT durch eine schärfere ersetzt worden: jede Formulierung davon misst
+ * heute den Defekt mit, und dafür ist der Fall darüber da — eine Zusage, zwei Fälle,
+ * statt eines Falls, dessen Rot beide Aussagen verdeckt.
  */
 test('D1: Ältere laden automatisch beim Hochscrollen', async ({ page }) => {
     // Der teuerste Fall der Datei: 50 Nachrichten laden, an den oberen Rand scrollen,
@@ -1247,9 +1373,6 @@ test('D1: Ältere laden automatisch beim Hochscrollen', async ({ page }) => {
     test.setTimeout(90_000)
     await openRoom(page, 'scroll')
     await expect(page.getByText('Zeile 60', { exact: true })).toBeVisible({ timeout: 15_000 })
-
-    // Älteste Nachricht ist initial nicht geladen (jenseits des 50er-Limits).
-    await expect(page.getByText('Zeile 1', { exact: true })).toHaveCount(0)
 
     // Wiederholt an den oberen Rand scrollen, bis die ältere Seite nachgeladen ist.
     // (toPass fängt den seltenen Fall ab, dass ein Live-Emit im 50-ms-Scroll-Debounce
