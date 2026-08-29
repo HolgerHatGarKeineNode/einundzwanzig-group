@@ -438,6 +438,75 @@ test('M5: eigene Nachricht löschen', async ({ page }) => {
 })
 
 /**
+ * M5 (Löschen, Zeitstempel) — **der Tombstone einer gerade eben entstandenen Nachricht
+ * darf nicht in der Zukunft liegen.**
+ *
+ * ── Was hier gemessen wird und warum es nicht der Test darüber tut ───────────────
+ *
+ * `deleteRoomMessage` setzte bis P4 des 0.9.5-Sprungs
+ * `created_at: Math.max(jetzt, ziel + 1)`. Der Summand stammte aus einer Repository-Regel
+ * von 0.8.16, die es nicht mehr gibt (`isDeletedById` vergleicht kein `created_at` — am
+ * Paket gemessen wirkt die Löschung sogar eine Sekunde früher datiert). Übrig blieb eine
+ * Nebenwirkung: **wird die Nachricht in derselben Sekunde gelöscht, in der sie entstand,
+ * datiert `ziel + 1` den Tombstone in die Zukunft.** Ein Relay mit Zukunftsgrenze darf
+ * ihn dafür ablehnen, und eine abgelehnte Löschung verpufft still — der Nutzer sieht
+ * seine Nachricht weiter.
+ *
+ * Der M5-Test darüber trifft diese Lage nicht: er geht über Zeilen-Tap, Menü und
+ * Bestätigungs-Modal, und bis der Tombstone entsteht, sind Sekunden vergangen — dann ist
+ * `jetzt` ohnehin grösser als `ziel + 1` und der Fehler unsichtbar. Deshalb ruft dieser
+ * Fall `remove()` auf der Insel direkt auf, unmittelbar nachdem die Nachricht am Relay
+ * steht: exakt die Lage „gerade eben gesendet, sofort gelöscht".
+ *
+ * **Kalibriert, und wie:** gegen den Stand VOR dem Ausbau — dort reichte `remove()` noch
+ * einen `createdAt` bis in `deleteRoomMessage` durch, der Fall wurde mit der laufenden
+ * Sekunde aufgerufen und war rot (`created_at=…629` gegen Aufrufsekunde `…628`). Mit dem
+ * Ausbau ist der Parameter verschwunden; die Lage lässt sich seither nur noch durch eine
+ * **Wiedereinführung** der Rechnung erzeugen — und genau dagegen steht dieser Fall. Wer
+ * ihn für trivial hält, führe `Math.max(jetzt, ziel + 1)` in `deleteRoomMessage` wieder
+ * ein und sehe ihn rot werden.
+ *
+ * Geprüft wird am Draht, nicht im DOM: der Tombstone selbst, sein `created_at` gegen die
+ * Sekunde, in der der Aufruf zurückkam. Eine DOM-Prüfung wäre hier blind — lokal blendet
+ * das Repository die Nachricht in jedem Fall aus, auch wenn der Relay den Tombstone
+ * verworfen hat.
+ */
+test('M5: der Tombstone einer soeben gesendeten Nachricht liegt nicht in der Zukunft', async ({ page }) => {
+    await openRoom(page, 'mod')
+
+    const marker = `DelTs-${Math.floor(Math.random() * 1e9)}`
+    await page.getByPlaceholder('Nachricht schreiben…').fill(marker)
+    await page.getByRole('button', { name: 'Senden' }).click()
+    await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 })
+
+    let msg: RelayEvent | undefined
+    await expect.poll(() => (msg = queryRelayEvent((e) => e.content === marker, 'mod')) !== undefined, { timeout: 15_000 }).toBe(true)
+    const ziel = msg as RelayEvent
+
+    // Löschen, während die Nachricht noch „von eben" ist.
+    await page.evaluate(async (id: string) => {
+        const el = document.querySelector('[x-data^="nostrRoomChat"]')!
+        const data = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine.$data(el)
+        await (data.remove as (i: string) => Promise<void>)(id)
+    }, ziel.id)
+    const nachAufruf = Math.floor(Date.now() / 1000)
+
+    let grab: RelayEvent | undefined
+    await expect
+        .poll(() => (grab = queryRelayEvent((e) => e.tags.some((t) => t[0] === 'e' && t[1] === ziel.id), 'mod', 5)) !== undefined, {
+            timeout: 15_000,
+        })
+        .toBe(true)
+
+    expect(
+        (grab as RelayEvent).created_at,
+        `Der Tombstone trägt created_at=${(grab as RelayEvent).created_at}, die Sekunde nach dem Aufruf war ${nachAufruf}. ` +
+            'Ein in die Zukunft datierter Tombstone darf von Relays mit Zukunftsgrenze abgelehnt werden — die Löschung ' +
+            'verpufft dann still. Siehe den Kopf dieses Falls; der Grund für den alten `+1` ist gemessen entfallen.',
+    ).toBeLessThanOrEqual(nachAufruf)
+})
+
+/**
  * M5 (Join/Leave) — echte, relay-seitige NIP-29-Mitgliedschaft (39002). „dev" ist
  * ein Raum, dem der User nicht beigetreten ist: Beitreten-Hinweis + kein Composer.
  * Nach Beitreten (kind 9021, auto-approve) erscheint der Composer, die Mitglied-
