@@ -275,8 +275,27 @@ export function publishCommentRootOnly(relayWs: string, sec: string, adresse: st
  * aufgelösten Zapper, Signer gegen dessen `nostrPubkey`). Ein naiv zusammengebautes
  * Ereignis zählt deshalb **null**, und der Test wäre aus dem falschen Grund rot.
  *
- * Genutzt wird hier der Zweig „`p` === Signer der Quittung" (`Zaps.js`): welshman hält
- * ihn ohne aufgelösten Zapper für legitim. Damit braucht der Test keinen LNURL-Server.
+ * **Hier stand bis zum 2026-08-29: „Genutzt wird der Zweig `p` === Signer der Quittung
+ * (`Zaps.js`): welshman hält ihn ohne aufgelösten Zapper für legitim. Damit braucht der
+ * Test keinen LNURL-Server." Das war ein Weg an einem SICHERHEITSRIEGEL vorbei, kein
+ * Kunstgriff.** 0.8.16 übersprang die Signaturprüfung, sobald `p === Signierer` —
+ * `zapFromEvent` gab dann ohne jeden Vergleich gegen `zapper.nostrPubkey` ein gültiges
+ * Zap zurück. Die Fixture nutzte genau diesen Kurzschluss: sie signierte mit dem
+ * EMPFÄNGER und legte dem Autor gar keinen Zapper an. Der Test war grün, weil er den
+ * Anti-Spoof-Riegel umging.
+ *
+ * **0.9.5 hat den Kurzschluss geschlossen** (`domain/src/other/Zapper.js:47`, unbedingtes
+ * `receipt.event.pubkey !== this.nostrPubkey`), und die Fixture fiel durch — richtig so.
+ * Wer eine ZÄHLENDE Quittung braucht, baut sie jetzt so, wie ein echter Zap aussieht:
+ * ein kind 0 mit `lud16` am Autor, eine lnurl-pay-Antwort mit `allowsNostr` und
+ * `nostrPubkey` (im Test per `page.route` gestellt), und eine Quittung, die von **genau
+ * diesem `nostrPubkey`** signiert ist. `sec` ist damit der Schlüssel des LNURL-Servers,
+ * nicht der des Empfängers. Der Docblock in `js/longformFeed.ts:358` sagte das die ganze
+ * Zeit: „Ohne ihn zählt `summiereZaps` null … das ist der Anti-Spoof-Riegel und keine
+ * Hürde, die man umgeht."
+ *
+ * Eine Quittung, die von einem ANDEREN Schlüssel signiert ist, zählt nicht — und genau
+ * das ist seit dem 2026-08-29 ein eigener Negativfall in `article-metrics.spec.ts`.
  *
  * **`empfaengerPub` ist zugleich der Riegel und die Falle.** Seit dem Sicherheitsbefund
  * verwirft `summiereZaps` jede Quittung, deren `p`-Tag nicht der Artikel-AUTOR ist —
@@ -296,6 +315,17 @@ export function publishZapReceipt(
     empfaenger: string | string[],
     adresse: string,
     msats: number,
+    /**
+     * Pubkey des ZAHLENDEN im eingebetteten 9734. Ohne Angabe der letzte `p`-Wert —
+     * die historische Form, die die Angriffsfälle unverändert lässt.
+     *
+     * **Wozu er gebraucht wird:** `Zapper.validate` verwirft einen Selbst-Zap
+     * (`request.pubkey === zapper.pubkey`). Eine lnurl-pay-Antwort trägt zwar kein
+     * `pubkey`, sodass der Zweig heute nicht greift — aber eine Fixture, die den
+     * Empfänger als Zahlenden ausgibt, ist schlicht kein Bild eines echten Zaps, und
+     * genau daran ist die vorige gescheitert.
+     */
+    absender?: string,
 ): void {
     // **`empfaenger` darf eine LISTE sein**, und das ist kein Komfort: Nostr verbietet
     // doppelte Tags nicht, Relays deduplizieren sie nicht, und genau daran ist der erste
@@ -304,7 +334,7 @@ export function publishZapReceipt(
     const pListe = Array.isArray(empfaenger) ? empfaenger : [empfaenger]
     const request = JSON.stringify({
         kind: 9734,
-        pubkey: pListe[pListe.length - 1],
+        pubkey: absender ?? pListe[pListe.length - 1],
         tags: [...pListe.map((wert) => ['p', wert]), ['amount', String(msats)], ['a', adresse]],
         content: '',
     })
