@@ -1,5 +1,6 @@
 import { test, expect } from './support/fixtures'
-import { getLnUrl, type TrustedEvent, type Zapper } from '@welshman/util'
+import { getLnUrl, type TrustedEvent } from '@welshman/util'
+import { type Zapper } from '../../packages/einundzwanzig-group/js/welshmanZap'
 import { memoedToChatMessage, evictChatMsgCache, type ChatBuildCtx } from '../../packages/einundzwanzig-group/js/feeds'
 
 /**

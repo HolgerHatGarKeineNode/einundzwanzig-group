@@ -1,5 +1,7 @@
 import { test, expect } from './support/fixtures'
-import { type SignedEvent, type Zapper } from '@welshman/util'
+import { type SignedEvent } from '@welshman/util'
+// `Zapper` ist mit welshman 0.9.5 nach `@welshman/domain` gewandert; der Adapter führt ihn.
+import { type Zapper } from '../../packages/einundzwanzig-group/js/welshmanZap'
 import {
     canZap,
     invoiceRequestError,

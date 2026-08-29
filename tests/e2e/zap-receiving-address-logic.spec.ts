@@ -1,5 +1,7 @@
 import { test, expect } from './support/fixtures'
-import type { Profile } from '@welshman/util'
+// 0.9.5 hat keinen `Profile`-DATENtyp mehr (dort ein Reader/Writer-Paar); unser
+// Wertebild führt `js/welshmanProfile.ts`.
+import type { Profile } from '../../packages/einundzwanzig-group/js/welshmanProfile'
 import { buildReceivingAddressEvent, summarizePublishResults } from '../../packages/einundzwanzig-group/js/profiles'
 
 /**

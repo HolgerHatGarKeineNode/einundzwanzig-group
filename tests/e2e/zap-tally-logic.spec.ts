@@ -1,5 +1,6 @@
 import { test, expect } from './support/fixtures'
-import { fromMsats, type TrustedEvent, type Zapper } from '@welshman/util'
+import { fromMsats, type TrustedEvent } from '@welshman/util'
+import { type Zapper } from '../../packages/einundzwanzig-group/js/welshmanZap'
 import { aggregateZaps } from '../../packages/einundzwanzig-group/js/feeds'
 
 /**

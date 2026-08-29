@@ -143,17 +143,36 @@ describe('Bundle-Grenze: der Renderer bleibt aus dem Boot-Pfad', () => {
      * Rolldown-Update lautlos zurück — es wird nichts rot, die Seiten laden nur eine
      * Anfrage mehr.
      *
-     * **P3 darf sie ändern — bewusst.** Dort werden die Adapter gelöscht und die
-     * `manualChunks`-Regel für `js/welshman*.ts` entfernt (so steht es im Plan,
-     * `docs/plans/2026-08-28T1950-welshman-0-9-sprung.md`, „Aus der P1-Nachbesserung").
-     * Erwartet wird dann **6**. Dieser Fall wird an dem Tag rot; die richtige Reaktion
-     * ist, die Konstante auf den neuen, gemessenen Wert zu setzen und den Grund
-     * danebenzuschreiben — nicht, die Zusage in eine Obergrenze aufzuweichen.
+     * **Mit dem welshman-0.9.5-Sprung ist sie von 5 auf 6 gegangen** — gemessen, und die
+     * Zahl steht hier, weil die Entscheidung dahinter nicht selbstverständlich ist.
+     *
+     * Der Plan sah vor, die `manualChunks`-Regel für `js/welshman*.ts` bei dieser
+     * Gelegenheit zu ENTFERNEN, mit der Erwartung „dann 6". Die Prämisse dafür war, dass
+     * die Adapter beim Sprung „größtenteils gelöscht" werden. **Das ist nicht
+     * eingetreten:** sie sind von 5 auf 9 Dateien gewachsen und tragen jetzt eigene Logik
+     * (App-Instanz und Identitätswechsel, Netz-Kontext, Relay-Auswahl, Zap-API,
+     * Listen/Räume). Drei Varianten gegen das gebaute Artefakt gemessen:
+     *
+     * | Variante | Boot-Chunks | Vendor-Chunk gzip |
+     * |---|---|---|
+     * | Regel behalten (Adapter im Vendor-Chunk) | **6** | 349,11 kB, ganz |
+     * | Adapter in einen EIGENEN Chunk | 7 | 36,48 kB — zerrissen |
+     * | Regel entfernt | 8 | 345,12 kB |
+     *
+     * Ohne Regel schneidet Rolldown die Adapter in drei Boot-Chunks (`welshmanApp`,
+     * `nip98`, `publishResult`); ein eigener Chunk für sie zieht das halbe SDK mit hinaus
+     * und entwertet den Vendor-Chunk. **Die Regel bleibt deshalb.** Ihr Preis ist
+     * unverändert benannt: ein Adapter-Deploy invalidiert den Vendor-Chunk. Er ist jetzt
+     * der kleinere — die Adapter ändern sich nach dem Sprung selten, drei zusätzliche
+     * Anfragen fallen auf JEDER Seite in BEIDEN Hosts an.
+     *
+     * Die 6. Anfrage ist der Sprung selbst: `publishResult` und `nip98` hängen beide
+     * direkt am Entry, wo vorher einer von beiden im App-Chunk aufging.
      *
      * Der Riegel ist fail-closed: `manifest()` wirft ohne Build und ohne frischen Stamp.
      */
-    test('BOOT-CHUNKS: es bleiben genau 5', () => {
-        const BOOT_CHUNKS = 5
+    test('BOOT-CHUNKS: es bleiben genau 6', () => {
+        const BOOT_CHUNKS = 6
         const mf = manifest()
         const chunks = bootChunks(mf)
 

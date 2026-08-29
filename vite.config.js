@@ -35,21 +35,26 @@ export default defineConfig({
                 // in einen eigenen, cache-stabilen Vendor-Chunk trennen, damit ein
                 // App-Code-Deploy nicht das ganze SDK neu ausliefert (Cache-Hit).
                 //
-                // Die `js/welshman*.ts`-Adapter des Pakets liegen bewusst MIT darin,
-                // obwohl sie unser Code sind. Grund: sie werden per Konstruktion vom
-                // Boot- UND vom Lazy-Graph geteilt (das ist ihr Zweck), und Rolldown
-                // zieht so etwas sonst als eigenen Chunk heraus — gemessen 2026-08-28:
-                // ohne diese Regel 6 statt 5 Boot-Chunks, also eine zusätzliche
-                // Anfrage auf JEDER Seite, in beiden Hosts. Sie einzeln zuzuordnen
-                // hilft nicht: nimmt man `welshmanKinds` heraus, rückt `welshmanApp`
-                // als nächster Chunk nach. `experimentalMinChunkSize` ignoriert
-                // Rolldown, und der Chunk-Name 'app' kollidiert mit dem Entry und
-                // zerriss den Vendor-Chunk (517 kB + ein zweiter app-Chunk).
+                // **Die Adapter liegen seit dem 0.9.5-Sprung in einem EIGENEN Chunk,
+                // nicht mehr im Vendor-Chunk.** Bis dahin lagen sie mit darin, und das
+                // lief seinem Zweck zuwider: ein Adapter-Deploy invalidierte das ganze
+                // SDK. Vertretbar war es nur, solange die Adapter reine Umbau-Hüllen für
+                // den anstehenden Sprung waren — inzwischen tragen sie eigene Logik
+                // (App-Instanz und Identitätswechsel, Netz-Kontext, Relay-Auswahl,
+                // Zap-API, Listen/Räume) und ändern sich mit dem App-Code.
                 //
-                // Der Preis ist benannt, nicht verschwiegen: ein Adapter-Deploy
-                // invalidiert damit den Vendor-Chunk. Das trifft P3 (die Adapter
-                // werden dort umgebaut und größtenteils gelöscht) und endet mit ihm —
-                // danach gehört diese Regel entfernt.
+                // **Warum ein eigener Chunk und nicht gar keine Regel:** gemessen. Ohne
+                // jede Regel schneidet Rolldown sie in DREI Boot-Chunks
+                // (`welshmanApp`, `nip98`, `publishResult`) — 8 statt 5 Anfragen auf
+                // jeder Seite, in beiden Hosts. Ein gemeinsamer Chunk macht daraus eine.
+                // Die Ursache ist strukturell und bleibt: die Adapter werden vom Boot-
+                // UND vom Lazy-Graph geteilt, das ist ihr Zweck; nimmt man einen einzeln
+                // heraus, rückt der nächste nach.
+                //
+                // Der Name trägt bewusst KEIN `welshman-`-Präfix: der Riegel in
+                // `tests/e2e/support/bundleGrenze.nodetest.ts` zählt über
+                // `/welshman-[^/]*\.js$/` genau EINEN Vendor-Chunk im Boot-Pfad, und ein
+                // zweiter Treffer würde diese Gegenprobe still entwerten.
                 manualChunks(id) {
                     if (id.includes('/node_modules/@welshman/') || id.includes('/node_modules/nostr-tools/')) {
                         return 'welshman';

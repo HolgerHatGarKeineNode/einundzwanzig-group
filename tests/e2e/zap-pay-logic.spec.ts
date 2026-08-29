@@ -1,6 +1,11 @@
 import { test, expect } from './support/fixtures'
-import { ZAP_RESPONSE, type SignedEvent, type Zapper } from '@welshman/util'
-import { request } from '@welshman/net'
+import { type SignedEvent } from '@welshman/util'
+// 0.9.5: `ZAP_RESPONSE` heisst `ZAP_RECEIPT` (die Zahl 9735 bleibt), `Zapper` liegt in
+// `@welshman/domain`, und `request` braucht den Netz-Kontext der App. Alle drei über die
+// Adapter des Pakets — dieselbe Quelle, die auch die Insel benutzt.
+import { ZAP_RECEIPT as ZAP_RESPONSE } from '../../packages/einundzwanzig-group/js/welshmanKinds'
+import { type Zapper } from '../../packages/einundzwanzig-group/js/welshmanZap'
+import { request } from '../../packages/einundzwanzig-group/js/welshmanNet'
 import {
     chooseZapMethod,
     payZapAuto,
