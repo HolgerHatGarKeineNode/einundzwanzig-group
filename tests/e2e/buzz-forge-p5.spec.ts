@@ -93,6 +93,51 @@ const events = (args: string[]): { id: string; kind: number; pubkey: string; tag
 }
 
 const tagValue = (tags: string[][], name: string): string => tags.find((tag) => tag[0] === name)?.[1] ?? ''
+
+/**
+ * Eine Vorgangszeile öffnen — **die Zeile ist ein LINK, kein Knopf.**
+ *
+ * Hier stand bis zum 2026-08-29 viermal `zeile.getByRole('button').first().click()`.
+ * Das war seit dem GitHub-Paritäts-Umbau vom **2026-08-27** falsch (Commit `60d04a0`):
+ * seitdem ist der ganze Zeilenkopf ein `<a wire:navigate data-forge-vorgang-link>` auf
+ * die eigene Route, und die Zeile trägt überhaupt keinen `button` mehr — kein Akkordeon,
+ * kein Rumpf, der sich inline öffnet (`⚡forge-repo.blade.php:499` / `:1446`).
+ *
+ * Die fünf Fälle dieser Datei wurden beim Umbau nicht nachgezogen und fielen erst beim
+ * welshman-Sprung auf; der Sprung hat die Blade-Datei nie angefasst
+ * (`git log <sprung>..HEAD -- ⚡forge-repo.blade.php` ist leer, und am Draht rendern die
+ * Zeilen einwandfrei). Zwei Nachbardateien tragen die richtige Form längst
+ * (`buzz-forge-write.spec.ts:266`, `buzz-forge.spec.ts:445`) — diese Datei war die
+ * letzte mit der alten Annahme (paketweit gesucht).
+ *
+ * **Warum das Attribut und nicht `getByRole('link')`:** eine Zeile darf künftig weitere
+ * Links tragen (ein Label, ein Autor); `data-forge-vorgang-link` trägt genau der
+ * Zeilenkopf. Die Rollenprüfung steht trotzdem daneben — verlöre der Kopf seine
+ * Link-Semantik, wäre das ein Tastatur- und Screenreader-Regress, und dieser Helfer ist
+ * die einzige Stelle, an der er auffiele.
+ *
+ * **Der Klick verlässt die Liste — deshalb gibt der Helfer das EINZELBLATT zurück, nicht
+ * die Zeile.** Das ist der zweite Teil desselben Umbaus und die eigentliche Falle: die
+ * Zeile war früher ein Akkordeon, ihre Bedienelemente hingen IN ihr. Seit `60d04a0`
+ * wohnen Zuweisen, Freigeben und Kommentieren auf `/forge/{naddr}/issues|pulls/{id}`
+ * (`⚡forge-issue.blade.php`, `⚡forge-pull.blade.php`) — ein `zeile.locator(…)` findet
+ * sie dort nie mehr, weil die Zeile selbst gar nicht mehr im Dokument steht. Wer nur den
+ * Klick nachzieht und die Locators lässt, tauscht „Knopf nicht gefunden" gegen
+ * „Bedienelement nicht gefunden" und hat nichts gewonnen (gemessen am 2026-08-29:
+ * fünfmal genau das).
+ */
+async function vorgangOeffnen(zeile: ReturnType<Page['locator']>): Promise<ReturnType<Page['locator']>> {
+    const kopf = zeile.locator('[data-forge-vorgang-link]').first()
+    await expect(kopf).toBeVisible({ timeout: 15_000 })
+    await expect(kopf).toHaveRole('link')
+    await kopf.click()
+
+    const blatt = kopf.page().locator('[data-forge-einzel-blatt]')
+    await expect(blatt, 'Einzelblatt kam nicht — der Zeilenklick hat nicht navigiert').toBeVisible({ timeout: 30_000 })
+
+    return blatt
+}
+
 const ownerPubkey = (): string => nak(['key', 'public', BUZZ_OWNER_SEC_HEX]).trim().split('\n')[0].trim()
 
 /**
@@ -249,13 +294,13 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
         await openRepo(page)
         await page.getByRole('tab', { name: 'Issues' }).click()
         const zeile = page.locator('[data-forge-issue]').filter({ hasText: 'P5 Zuweisungsziel' }).first()
-        await zeile.getByRole('button').first().click()
+        const blatt = await vorgangOeffnen(zeile)
 
-        const knopf = page.locator('[data-forge-assign-self]').first()
+        const knopf = blatt.locator('[data-forge-assign-self]').first()
         await expect(knopf).toBeVisible({ timeout: 15_000 })
         // Offen heisst: KEIN `aria-disabled` — die Selbstbedienung darf jedes Mitglied.
         await expect(knopf).not.toHaveAttribute('aria-disabled', 'true')
-        await expect(page.locator('[data-forge-assign-hint]')).toHaveCount(0)
+        await expect(blatt.locator('[data-forge-assign-hint]')).toHaveCount(0)
         await knopf.click()
 
         // Die Requery ist der Beweis, nicht das Band auf der Fläche: das Band
@@ -267,8 +312,10 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
         expect(notiz.pubkey).toBe(BUZZ_USER_PUB)
         expect(tagValue(notiz.tags, 'p')).toBe(BUZZ_USER_PUB)
 
-        // Und die Fläche zeigt es: das Zuweisungs-Band aus P1 trägt die Person.
-        await expect(zeile.locator('[data-forge-assignee]')).toHaveCount(1, { timeout: 20_000 })
+        // Und die Fläche zeigt es: das Zuweisungs-Band aus P1 trägt die Person. Geprüft
+        // auf dem EINZELBLATT — die Liste ist seit `60d04a0` verlassen, und `[data-forge-assignee]`
+        // steht sowohl dort als auch an der Zeile (`⚡forge-issue.blade.php`, `⚡forge-repo.blade.php`).
+        await expect(blatt.locator('[data-forge-assignee]')).toHaveCount(1, { timeout: 20_000 })
     })
 
     /**
@@ -281,12 +328,12 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
         await openRepo(page)
         await page.getByRole('tab', { name: 'Pull Requests' }).click()
         const zeile = page.locator('[data-forge-pr]').filter({ hasText: 'P5 mit Reviewer' }).first()
-        await zeile.getByRole('button').first().click()
+        const blatt = await vorgangOeffnen(zeile)
 
-        const knopf = zeile.locator('[data-forge-approve]').first()
+        const knopf = blatt.locator('[data-forge-approve]').first()
         await expect(knopf).toBeVisible({ timeout: 15_000 })
         await expect(knopf).not.toHaveAttribute('aria-disabled', 'true')
-        await expect(zeile.locator('[data-forge-review-hint]')).toHaveCount(0)
+        await expect(blatt.locator('[data-forge-review-hint]')).toHaveCount(0)
         await knopf.click()
 
         await expect
@@ -312,14 +359,14 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
         await openRepo(page)
         await page.getByRole('tab', { name: 'Pull Requests' }).click()
         const zeile = page.locator('[data-forge-pr]').filter({ hasText: 'P5 ohne Reviewer' }).first()
-        await zeile.getByRole('button').first().click()
+        const blatt = await vorgangOeffnen(zeile)
 
-        const knopf = zeile.locator('[data-forge-approve]').first()
+        const knopf = blatt.locator('[data-forge-approve]').first()
         await expect(knopf).toBeVisible({ timeout: 15_000 })
         await expect(knopf).toHaveAttribute('aria-disabled', 'true')
 
         // Die Begründung steht VOR dem Klick da — nicht als Toast danach.
-        const hinweis = zeile.locator('[data-forge-review-hint]').first()
+        const hinweis = blatt.locator('[data-forge-review-hint]').first()
         await expect(hinweis).toBeVisible()
         await expect(hinweis).toContainText('Reviewer')
 
@@ -354,14 +401,14 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
     async function issueOeffnen(page: Page, titel: string) {
         await page.getByRole('tab', { name: 'Issues' }).click()
         const zeile = page.locator('[data-forge-issue]').filter({ hasText: titel }).first()
-        await zeile.getByRole('button').first().click()
 
-        return zeile
+        // Das EINZELBLATT, nicht die Zeile — siehe {@link vorgangOeffnen}.
+        return vorgangOeffnen(zeile)
     }
 
     /** Den Agenten im Zuweisen-Feld eines OFFENEN Blattes suchen und wählen. */
-    async function agentWaehlen(page: Page, zeile: ReturnType<Page['locator']>) {
-        const feld = zeile.locator('[data-forge-assign-suche]').first()
+    async function agentWaehlen(page: Page, blatt: ReturnType<Page['locator']>) {
+        const feld = blatt.locator('[data-forge-assign-suche]').first()
         await expect(feld).toBeVisible({ timeout: 15_000 })
         await feld.fill(agentName)
 
@@ -377,7 +424,7 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
         await expect(vorschlag).toContainText(agentName)
         await vorschlag.click()
 
-        const chip = zeile.locator('[data-forge-assign-chip][data-agent="true"]').first()
+        const chip = blatt.locator('[data-forge-assign-chip][data-agent="true"]').first()
         await expect(chip).toBeVisible()
         await expect(chip).toContainText(agentName)
     }
@@ -398,13 +445,13 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
         }, BUZZ_URL)
         await loginNsec(page, BUZZ_OWNER_NSEC)
         await openRepo(page)
-        const zeile = await issueOeffnen(page, 'P10 Agentenziel')
-        await agentWaehlen(page, zeile)
+        const blatt = await issueOeffnen(page, 'P10 Agentenziel')
+        await agentWaehlen(page, blatt)
 
         // Autoritativ: kein `aria-disabled`, kein Riegelsatz.
-        const senden = zeile.locator('[data-forge-assign-senden="assignment"]').first()
+        const senden = blatt.locator('[data-forge-assign-senden="assignment"]').first()
         await expect(senden).not.toHaveAttribute('aria-disabled', 'true')
-        await expect(zeile.locator('[data-forge-assign-others-hint]')).toHaveCount(0)
+        await expect(blatt.locator('[data-forge-assign-others-hint]')).toHaveCount(0)
         await senden.click()
 
         await expect
@@ -430,18 +477,18 @@ test.describe('Buzz-Workspace: die Schreibriegel aus P5 (E2E, nur E2E_RELAY=buzz
     test('P10: ein Mitglied darf denselben Agenten nicht zuweisen — Riegel vor der Wahl, nichts am Relay', async ({ page }) => {
         await useWorkspace(page)
         await openRepo(page)
-        const zeile = await issueOeffnen(page, 'P10 Riegelziel')
+        const blatt = await issueOeffnen(page, 'P10 Riegelziel')
 
         // **Vor der ersten Wahl.** Ohne diesen Satz stünde die Auswahl da wie
         // eine Einladung, und der Nutzer erführe erst nach dem Suchen, dass er
         // nicht darf. Er nennt zugleich, WER dürfte — das ist die Auskunft, die
         // ihn weiterbringt.
-        const hinweis = zeile.locator('[data-forge-assign-others-hint]').first()
+        const hinweis = blatt.locator('[data-forge-assign-others-hint]').first()
         await expect(hinweis).toBeVisible({ timeout: 15_000 })
         await expect(hinweis).toContainText('Maintainer')
 
-        await agentWaehlen(page, zeile)
-        const senden = zeile.locator('[data-forge-assign-senden="assignment"]').first()
+        await agentWaehlen(page, blatt)
+        const senden = blatt.locator('[data-forge-assign-senden="assignment"]').first()
         await expect(senden).toHaveAttribute('aria-disabled', 'true')
 
         // `click()` liefe hier 30 s in einen Timeout (Playwright wertet
