@@ -475,11 +475,61 @@ async function measureRoomDivider(page: Page): Promise<Measured[]> {
 const PICKER = 'body > div.fixed.z-50'
 const SEARCH = `${PICKER} input[type=search]`
 
+/**
+ * Warten, bis **kein gemessener Träger mehr unter einer gebrochenen Deckkraft liegt.**
+ *
+ * ── Anlass (2026-08-29) ────────────────────────────────────────────────────────────
+ *
+ * Drei isolierte Läufe in frischen Slots ergaben drei Bilder: einmal grün, einmal
+ * `opacity 0.921` bzw. `0.775`, einmal „Knopf erscheint nicht". Ein systematischer Bruch
+ * hätte ein konstantes Bild — das zweite ist testseitig: der Emoji-Knopf des Composers
+ * trägt sein `!text-brand-700` erst, wenn das Panel offen ist, und wird mit ihm
+ * eingeblendet. Wer direkt nach `toBeVisible()` misst, greift mitten in die
+ * Opazitäts-Transition. **Die Sonde meldet das korrekt** (der Guard weiter unten
+ * verwirft jedes Verhältnis unter voller Deckkraft) — sie misst nur zu früh.
+ *
+ * ── Warum diese Bauform und keine Toleranz ────────────────────────────────────────
+ *
+ * Die Schwelle aufzuweichen wäre die falsche Reparatur: `opacity` steht nicht in
+ * `color`, ein Verhältnis unter gebrochener Deckkraft ist **erfunden**, nicht bloss
+ * ungenau. Gewartet wird deshalb auf die Bedingung, nicht auf eine Zahl.
+ *
+ * **Gemessen wird mit `measure()` selbst**, nicht mit einem nachgebauten
+ * `querySelectorAll`. Drei Stellen dieser Datei tragen bereits je einen eigenen
+ * Deckkraft-Poll für EINEN Selektor; eine vierte Kopie würde dieselbe Frage ein viertes
+ * Mal anders beantworten. Der Guard am Ende des Tests prüft die Deckkraft **jedes**
+ * gemessenen Trägers — also ist genau dessen Population die richtige Wartebedingung, und
+ * `measure()` ist die einzige Stelle, die sie kennt (inklusive `sichtbar()`, SVG und der
+ * Vorfahren-Kette). Ein Nachbau würde bei der nächsten Selektor-Änderung still blind.
+ *
+ * ── Und warum es NICHT wirft ──────────────────────────────────────────────────────
+ *
+ * Läuft die Zeit ab, kehrt der Helfer still zurück und überlässt das Urteil dem Guard.
+ * Ein `expect.poll` hier ersetzte dessen präzise Meldung („welches Label, welches
+ * Verhältnis, welche Deckkraft") durch ein nacktes Poll-Timeout. Der Helfer nimmt das
+ * RENNEN heraus, er trifft keine Entscheidung.
+ */
+async function warteAufVolleDeckkraft(page: Page, timeoutMs = 10_000): Promise<void> {
+    const ende = Date.now() + timeoutMs
+    while (Date.now() < ende) {
+        if ((await measure(page)).every((m) => m.opacity === 1)) {
+            return
+        }
+        await page.waitForTimeout(100)
+    }
+}
+
 async function measureEmojiPicker(page: Page): Promise<{ measured: Measured[]; tabDeckkraft: number }> {
     const composer = page
         .locator('div.relative.flex.items-end.gap-2')
         .filter({ has: page.getByPlaceholder('Nachricht schreiben…') })
-    await composer.getByRole('button', { name: 'Emoji einfügen' }).click()
+    const emojiKnopf = composer.getByRole('button', { name: 'Emoji einfügen' })
+    // Diagnose, keine Reparatur: das dritte Fehlerbild der Drei-Lauf-Probe war „Knopf
+    // erscheint nicht", und es ist mit dem Deckkraft-Wait unten NICHT erklärt. Bleibt es
+    // aus, soll der Lauf hier scheitern und nicht 30 Zeilen weiter an einer fehlenden
+    // Icon-Messung — dieselbe Ursache, aber eine Meldung, die zwei Erklärungen zulässt.
+    await expect(emojiKnopf, 'Emoji-Knopf des Composers erscheint nicht — die Fläche steht nicht').toBeVisible({ timeout: 15_000 })
+    await emojiKnopf.click()
     await expect(page.locator(PICKER)).toBeVisible({ timeout: 15_000 })
     // Die Tabs erscheinen erst, wenn emojibase geladen ist. Ohne dieses Warten misst
     // die Phase den Ladezustand: kein Unterstrich, kein Tab — und meldet „nicht
@@ -489,6 +539,10 @@ async function measureEmojiPicker(page: Page): Promise<{ measured: Measured[]; t
     // `focus:border-brand-500` überschriebe die zu prüfende Kantenfarbe. Gemessen wird
     // der Zustand, in dem das Feld die meiste Zeit steht.
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    // **Erst wenn nichts mehr einblendet.** Der Emoji-Knopf des Composers wird zusammen
+    // mit dem Panel sichtbar; ohne diese Zeile fiel die Messung in seine Transition
+    // (gemessen 0,921 und 0,775). Siehe {@link warteAufVolleDeckkraft}.
+    await warteAufVolleDeckkraft(page)
 
     // Unterphase A — Ruhezustand: Eingabefarbe, Platzhalter, Kante, Aktiv-Unterstrich.
     const offen = (
