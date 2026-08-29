@@ -194,3 +194,28 @@ welshman deckt Flotillas zooid-Stack bereits vollständig ab (tracker/Event→Re
 - **Reaktivität-Bridge:** welshman-Stores erfüllen den Svelte-Store-Contract (`.subscribe(cb) → unsubscribe`). In Alpine per `store.subscribe()` an Alpine-State koppeln (die client-seitige Nostr-Insel).
 - Vor dem Schreiben von Nostr-Code: die reale welshman-API im Quellcode unter `/home/user/Code/flotilla/node_modules/@welshman/*/dist` bzw. in Flotillas Nutzung nachschlagen, nicht raten.
 - Kein Nostr-MCP mehr konfiguriert — welshman wird direkt aus Quellcode/Flotilla-Referenz verwendet.
+
+## Relay-Inventar — wer nimmt was an (stehende Tatsache, keine Untersuchung je Audit)
+
+**Warum das hier steht:** Ein fehlender Client-seitiger Check ist eine **notwendige, keine
+hinreichende** Bedingung für einen Angriff — die Schwere entsteht erst aus der Frage, ob der
+Relay das Ereignis überhaupt annimmt. Wer eine Lücke ohne diese Angabe meldet, reicht ein
+Wort wie „Entführung" weiter, das niemand geprüft hat (belegt am 2026-08-29: zwei so
+gemeldete Funde waren auf beiden Relays gar nicht erreichbar). Die Annahme-Regeln ändern sich
+über Phasen kaum — sie gehören einmal hierher, nicht in jede Prüfung.
+
+| Relay | Quelle | Annahme-Regel, wörtlich |
+|---|---|---|
+| **zooid** | `zooid/groups.go:331` (`CheckWrite`) <!-- pfad-ok: nutzer-repo --> | Client-Schreibversuche auf NIP-29-Raumzustand (39000/39001/39002) werden rundweg abgewiesen: `"invalid: group metadata cannot be set directly"`. Moderations-Kinds inkl. 9008 hängen an `Config.CanManage`. |
+| **Buzz** | `crates/buzz-relay/src/handlers/ingest.rs:453` <!-- pfad-ok: nutzer-repo --> | Geschlossene Kind-Allowlist, die mit `_ => Err("restricted: unknown event kind")` endet — 39000–39002 kommen gar nicht erst hinein. 9008 verlangt `Scope::AdminChannels` **plus** Kanal-Owner-Rolle. |
+
+Quell-Repos: `/home/user/Code/zooid` und `/home/user/Code/buzz` <!-- pfad-ok: nutzer-repo -->.
+`tests/e2e/support/global-setup.ts` baut zooid bei **jedem** E2E-Lauf aus der Quelle — sie ist
+also näher als jeder Bericht.
+
+**Die Grenze dieser Tabelle:** Sie gibt die **Regel** wieder, nicht das Verhalten des
+**deployten Builds**. Dieses Projekt wurde davon schon einmal getroffen — ein zooid-Binary,
+Wochen älter als seine Quelle, antwortete auf ein unbekanntes Kind mit `OK true` und tat
+nichts. Wo eine Aussage daran hängt, dass ein Relay etwas ablehnt, entscheidet nur ein
+Schreibversuch mit anschließender **Requery**: `nak` druckt auch bei Ablehnung das signierte
+Event und endet mit 0.
