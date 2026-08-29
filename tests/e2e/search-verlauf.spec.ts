@@ -4,6 +4,7 @@ import { getPublicKey } from 'nostr-tools/pure'
 import { decode } from 'nostr-tools/nip19'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { BUZZ_URL, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_USER_NSEC } from './support/buzz'
+import { umgebungFehlt } from './support/umgebung'
 import { loginNsec } from './support/login'
 import { cleanupRooms, trackRoom } from './support/rooms'
 import { publishVerified } from './support/publishVerified'
@@ -319,7 +320,9 @@ test.describe('Suche: kein Treffer aus einem fremden Space', () => {
      */
     test('Zooid-Raum und Buzz-Raum mit identischer h-UUID zeigen nur ihre eigenen Treffer', async ({ page }) => {
         test.setTimeout(90_000)
-        if (!buzzUp()) {
+        // Siehe `support/umgebung.ts`: dieser Fall ist mit keinem `test:e2e`-Aufruf
+        // erreichbar. `E2E_STRICT_UMGEBUNG=1` macht das Überspringen zum Fehlschlag.
+        if (umgebungFehlt(!buzzUp(), `kein Buzz-Test-Stack auf :${BUZZ_PORT}`)) {
             test.skip(true, `kein Buzz-Test-Stack auf :${BUZZ_PORT} — bash tests/e2e/support/buzz-testserver.sh`)
         }
         joinBuzzRelay()

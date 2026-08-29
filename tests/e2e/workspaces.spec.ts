@@ -2,6 +2,7 @@ import { type Locator, type Page } from '@playwright/test'
 import { test, expect } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { BUZZ_URL, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_USER_NSEC, BUZZ_USER_PUB } from './support/buzz'
+import { umgebungFehlt } from './support/umgebung'
 import { loginNsec } from './support/login'
 import { spawnSync } from 'node:child_process'
 import { getPublicKey } from 'nostr-tools/pure'
@@ -96,7 +97,13 @@ const oeffneWorkspaces = async (page: Page): Promise<Locator> => {
 
 test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
     test.skip(process.env.E2E_RELAY === 'buzz', 'braucht den zooid-Modus als Basis')
-    test.skip(!buzzUp(), `kein Buzz-Test-Stack auf :${BUZZ_PORT} — bash tests/e2e/support/buzz-testserver.sh`)
+    // `umgebungFehlt` statt der nackten Bedingung: diese acht Fälle sind mit keinem
+    // `test:e2e`-Aufruf erreichbar, und der Lauf endet trotzdem mit Exit 0. Mit
+    // `E2E_STRICT_UMGEBUNG=1` wird daraus ein Fehlschlag — siehe `support/umgebung.ts`.
+    test.skip(
+        umgebungFehlt(!buzzUp(), `kein Buzz-Test-Stack auf :${BUZZ_PORT} — bash tests/e2e/support/buzz-testserver.sh`),
+        `kein Buzz-Test-Stack auf :${BUZZ_PORT} — bash tests/e2e/support/buzz-testserver.sh`,
+    )
 
     test('die Segmented-Bar des Chats hat genau zwei Tabs — Workspaces steht dort nicht mehr', async ({ page }) => {
         await useZooid(page)
