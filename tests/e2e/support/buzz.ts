@@ -16,6 +16,25 @@ import { type Page } from '@playwright/test'
 // `BUZZ_TEST_PORT` überschreibt den Versatz (Einzelaufruf des Skripts von Hand).
 // Der Mitschau-Stack `buzz-prod` auf :3000 bleibt unberührt.
 const SLOT = Number(process.env.TEST_PARALLEL_INDEX ?? '0') + Number(process.env.E2E_SLOT_OFFSET ?? '0')
+
+/**
+ * Der Buzz-Port dieses Workers — normalerweise `3001 + Worker + Slot-Offset`, also je
+ * Worker ein eigener Stack.
+ *
+ * ── `BUZZ_TEST_PORT` gehört NUR in Einzelläufe ─────────────────────────────────
+ *
+ * Die Variable überschreibt die Slot-Rechnung **für alle Worker zugleich**. In einem
+ * Lauf mit mehreren Workern zeigen damit alle auf denselben Stack und stören einander:
+ * am 2026-08-29 waren im vollen Web-Lauf mit `BUZZ_TEST_PORT=3141` sieben Fälle rot
+ * (sechs `workspaces`, einer `search-verlauf`), die isoliert 8/8 grün laufen; ohne die
+ * Variable war derselbe Lauf sauber. Das sah wie eine Regression aus und war ein
+ * Messfehler.
+ *
+ * Wer einen von Hand gestarteten Stack treffen will, setzt sie zusammen mit
+ * `--workers=1` oder für eine einzelne Datei — nie im Gesamtlauf. Braucht eine Spec
+ * einen Stack, den der Lauf nicht selbst startet, ist der saubere Weg der Einzellauf
+ * mit eigenem Stack, und im Gesamtlauf lässt man sie übersprungen werden.
+ */
 export const BUZZ_PORT = Number(process.env.BUZZ_TEST_PORT ?? String(3001 + SLOT))
 export const BUZZ_WS = `ws://localhost:${BUZZ_PORT}`
 export const BUZZ_URL = `${BUZZ_WS}/`
