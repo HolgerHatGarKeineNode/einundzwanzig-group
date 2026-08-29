@@ -1287,7 +1287,7 @@ function schneideNachladungenMit(page: Page, h: string): { alle: string[]; nachl
 }
 
 /**
- * D1 (kein Vorabladen) — **dieser Fall steht ROT, und das ist seine Aufgabe.**
+ * D1 (kein Vorabladen) — **stand bis P4 bewusst ROT, seit dem Prefetch-Riegel grün.**
  *
  * ── Was er festhält ───────────────────────────────────────────────────────────────
  *
@@ -1295,29 +1295,41 @@ function schneideNachladungenMit(page: Page, h: string): { alle: string[]; nachl
  * Nutzer hat nicht gescrollt; jede Seite, die trotzdem fliegt, ist eine Anfrage, ein
  * Relay-Roundtrip und ein Stück Verlauf, das niemand angefordert hat.
  *
- * ── Warum er rot ist, seit wann, und wer ihn grün macht ───────────────────────────
+ * ── Der Defekt, und die Ursache, die es NICHT war ────────────────────────────────
  *
- * **Der Defekt ist echt und älter als der welshman-Sprung** (gemessen am 2026-08-29,
- * beide Stände in eigenen frischen Slots): `loadOlder` feuert beim Öffnen **1× unter
+ * **Der Defekt war echt und älter als der welshman-Sprung** (gemessen am 2026-08-29,
+ * beide Stände in eigenen frischen Slots): `loadOlder` feuerte beim Öffnen **1× unter
  * 0.8.16 und 2× unter 0.9.5**. Die Ursache ist Geometrie, nicht Timing — der Log ist
- * `flex-col-reverse` (`⚡room.blade.php:420`), also ist `scrollTop: 0` das ENDE. Der
- * Scroller hält den frisch geöffneten Raum trotzdem für „nahe am ältesten Rand", weil
- * seine Nähe-Prüfung bedeutungslos ist, solange der Verlauf den Viewport nicht füllt:
- * dann ist man am neuesten UND am ältesten Rand zugleich.
+ * `flex-col-reverse` (`⚡room.blade.php:420`), also ist `scrollTop: 0` das ENDE.
  *
- * **Der Guard gehört in `createScroller`** („erst prüfen, wenn der Log überhaupt
- * scrollbar ist", `scrollHeight > clientHeight + Schwelle`) und ist als **P4** eingeplant
- * (`docs/plans/2026-08-28T1950-welshman-0-9-sprung.md`, vierter Erntepunkt). Er ist
- * bewusst nicht im Sprung gebaut worden: ein Guard im rAF-Scroller berührt jede
- * Chat-Fläche.
+ * **Hier stand als Ursache, die Nähe-Prüfung sei bedeutungslos, „solange der Verlauf den
+ * Viewport nicht füllt". Das ist widerlegt.** Im Browser gemessen, im Moment des Öffnens
+ * von „scroll": `scrollHeight 3317 · clientHeight 578 · scrollTop 0` — der Log ist
+ * scrollbar, mit 2739 px Überschuss, also 5,7 Viewports Inhalt. Ein Guard, der nur
+ * „ist der Log scrollbar?" fragt, hätte diesen Fall **durchgelassen**.
  *
- * ── Warum er nicht übersprungen und nicht `test.fail()` ist ───────────────────────
+ * Der wirkliche Auslöser ist das Verhältnis zur Schwelle: der Abstand zum ältesten Rand
+ * beträgt beim Öffnen `3317 − 0 − 578 = 2739 px` und liegt unter `threshold` (3000). Die
+ * Bedingung ist formal richtig — 2739 px SIND nah — und trotzdem falsch, weil sich
+ * niemand bewegt hat.
  *
- * Ein `skip` oder ein `test.fail()` machte die Suite grün und den Befund unsichtbar —
- * und ein Guard, der in P4 gebaut, aber falsch verdrahtet wird, fiele niemandem auf.
- * **Ein rotes Ergebnis mit Datum, Ursache und benanntem Zuständigen ist ehrlicher als
- * ein grünes, das nichts misst.** Nach dem P4-Guard wird dieser Fall von selbst grün;
- * tut er das nicht, greift der Guard nicht.
+ * ── Was ihn grün gemacht hat ─────────────────────────────────────────────────────
+ *
+ * Der Riegel in `createScroller` (`packages/einundzwanzig-group/js/scroll.ts`,
+ * `darfNachladen`): nachgeladen wird nur, wenn der Nutzer den unteren Rand verlassen hat
+ * (`offset > 0`) **oder** der Log gar nicht scrollbar ist — dann kann er sich nicht
+ * bewegen, und Nachladen ist die einzige Möglichkeit, den Viewport zu füllen. Die
+ * Entscheidungstabelle dazu steht in `js/scroll.test.ts`.
+ *
+ * ── Warum er damals nicht übersprungen und nicht `test.fail()` war ───────────────
+ *
+ * Ein `skip` oder ein `test.fail()` hätte die Suite grün und den Befund unsichtbar
+ * gemacht — und ein Guard, der gebaut, aber falsch verdrahtet wird, wäre niemandem
+ * aufgefallen. **Ein rotes Ergebnis mit Datum, Ursache und benanntem Zuständigen ist
+ * ehrlicher als ein grünes, das nichts misst.** Genau so ist es gelaufen: der Fall wurde
+ * ohne jede Änderung an seiner Zusage grün, und der Nachbarfall („Ältere laden
+ * automatisch beim Hochscrollen") ist grün geblieben — der Nachweis, dass der Prefetch
+ * nicht einfach abgeschaltet wurde.
  *
  * ── Und warum `REQ`-Frames statt einer DOM-Zählung ───────────────────────────────
  *
@@ -1343,8 +1355,8 @@ test('D1: das blosse Öffnen lädt KEINE ältere Seite nach', async ({ page }) =
     expect(
         nachladungen,
         `Beim Öffnen von „scroll" sind ${nachladungen.length} Seiten-Nachladungen rausgegangen, ohne dass jemand gescrollt hat. ` +
-            'Das ist der bekannte Scroller-Defekt (Geometrie, nicht Timing) — er wird mit dem P4-Guard in `createScroller` ' +
-            'behoben und NICHT durch Lockern dieser Zusage. Siehe den Kopf dieses Falls.',
+            'Das ist der bekannte Scroller-Defekt (Geometrie, nicht Timing). Er ist mit dem Riegel `darfNachladen` in ' +
+            '`js/scroll.ts` behoben — kommt er zurück, ist dort etwas gelockert worden, NICHT hier. Siehe den Kopf dieses Falls.',
     ).toHaveLength(0)
 })
 
