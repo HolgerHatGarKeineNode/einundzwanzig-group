@@ -36,10 +36,27 @@
  *   APPLY=1            schreiben; ohne die Variable Trockenlauf (nichts wird gesendet)
  *   MAX_REMOVALS       Sicherung gegen Massenentfernung, Default 10
  *   FORCE=1            hebt MAX_REMOVALS auf
+ *   MANAGED_STATE      Zustandsdatei mit den Pubkeys, die DIESES Skript aufgenommen hat.
+ *                      Default `verwaltet-buzz.json` neben dem Skript. Nur wer darin
+ *                      steht, wird je entfernt — Begruendung bei MANAGED_PATH.
+ *
+ * Aufrufe:
+ *   node buzz-member-sync.mjs                # Trockenlauf
+ *   APPLY=1 node buzz-member-sync.mjs        # schreibt
+ *   node buzz-member-sync.mjs --selbsttest   # prueft die Entfernungsregel, ohne Netz
  *
  * Idempotent: ein 9030 fuer ein bestehendes Mitglied ist ein stiller No-op, ein 9031
  * fuer einen Nicht-Mitglied ebenso. Das Skript darf beliebig oft laufen.
+ *
+ * **Es entfernt nur, wen es selbst aufgenommen hat** (seit 2026-08-31). Wer von Hand
+ * auf den Relay kam — Agenten, Dienste, Pilot-Nutzer — bleibt stehen, auch wenn er in
+ * keinem Jahrgang der Vereins-API auftaucht. Aufnehmen und Wegraeumen sind zwei
+ * Befugnisse; fuer fremde Eintraege hat dieses Skript nur die erste.
  */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { hexToBytes } from 'nostr-tools/utils'
 import { decode } from 'nostr-tools/nip19'
@@ -67,6 +84,12 @@ const PROTECTED_ROLES = new Set(['owner', 'admin'])
  * Einzelne Pubkeys, die das Skript niemals entfernt, obwohl sie nicht in der
  * Vereins-API stehen. Kommagetrennte 64-stellige Hex-Werte in `PROTECTED_PUBKEYS`.
  *
+ * SEIT DEM 2026-08-31 IST DAS DER ZWEITE RIEGEL, NICHT MEHR DER EINZIGE: entfernt
+ * wird ohnehin nur, wen dieses Skript selbst aufgenommen hat (siehe MANAGED_PATH).
+ * Diese Liste muss deshalb nicht mehr bei jedem neuen Agenten wachsen — sie bleibt
+ * als ausdrueckliche Zusage fuer Eintraege, die auch dann stehen sollen, wenn die
+ * Zustandsdatei einmal verloren geht und der Erstlauf sie neu aufbaut.
+ *
  * WARUM ueber eine Umgebungsvariable und nicht als Liste hier im Code: das sind
  * Bestandsdaten des Betreibers, keine Programmlogik. Sie gehoeren neben den Relay
  * und nicht in ein Repo, das auch anderswo ausgecheckt wird.
@@ -90,7 +113,104 @@ const PROTECTED_PUBKEYS = new Set(
         .filter((s) => /^[0-9a-f]{64}$/.test(s)),
 )
 
+/**
+ * WAS DIESES SKRIPT VERWALTET — und was es deshalb NIE anfassen darf.
+ *
+ * Bis zum 2026-08-31 entfernte der Lauf JEDEN `member`, der nicht in der
+ * Vereins-API stand. Das ist eine Aussage ueber die API, nicht ueber die
+ * Mitgliedschaft: wer von Hand aufgenommen wurde — Agenten, Dienste,
+ * Pilot-Nutzer — steht dort naturgemaess nicht und flog trotzdem raus.
+ *
+ * Belegt am 2026-08-31: ein am Vortag eingestellter Agent (a558c8c8…) wurde
+ * sechsmal in fuenf Stunden entfernt, jedes Mal binnen einer Viertelstunde
+ * nach dem Nachtragen. Sein Dienst scheiterte danach an
+ * `Auth failed: restricted: not a relay member` und haengte in einer
+ * Restart-Schleife, die `systemctl is-active` als `active` meldet — der Ausfall
+ * sah wie Betrieb aus. Dieselbe Ursache traf am 01./05./06./09.08. die zehn
+ * Pilot-Nutzer vom 2026-07-29; damals wurde sie mit `PROTECTED_PUBKEYS`
+ * einzeln zugeklebt, und die Liste musste bei jedem neuen Eintrag wachsen.
+ *
+ * DIE REGEL LAUTET JETZT: entfernt wird nur, wen dieses Skript selbst
+ * aufgenommen hat. Alles andere bleibt stehen, auch wenn es nicht in der API
+ * steht — Aufnehmen und Wegräumen sind zwei Befugnisse, und dieses Skript hat
+ * nur eine davon fuer fremde Eintraege.
+ *
+ * WARUM EINE DATEI UND NICHT DER RELAY: `added_by` steht nur in der
+ * Relay-Datenbank, an die dieses Skript nicht kommt (es laeuft auf dem Host,
+ * die DB liegt im Container). Die Kommando-Events 9030/9031 werden nicht
+ * persistiert — am 2026-08-31 gemessen: ein REQ darauf liefert 0 Treffer. Die
+ * relay-signierten Deltas 8000/8001 nennen zwar Ziel und Zeitpunkt, aber nicht
+ * den Veranlasser. Damit bleibt nur eigene Buchfuehrung.
+ *
+ * FEHLT DIE DATEI, wird NICHT geraten und NICHTS entfernt: der Lauf legt sie
+ * aus `Ist ∩ Soll` an — das sind genau die Eintraege, die aus der API stammen —
+ * und meldet das. Ein verlorener Zustand kostet damit einen Lauf ohne
+ * Entfernungen, nicht eine Runde falscher.
+ */
+const MANAGED_PATH =
+    process.env.MANAGED_STATE ||
+    join(dirname(fileURLToPath(import.meta.url)), 'verwaltet-buzz.json')
+
+function ladeVerwaltet() {
+    try {
+        const roh = JSON.parse(readFileSync(MANAGED_PATH, 'utf8'))
+        const liste = Array.isArray(roh) ? roh : (roh.pubkeys ?? [])
+        return new Set(liste.filter((x) => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x)))
+    } catch {
+        return null // fehlt oder unlesbar — der Aufrufer entscheidet, nicht dieser Helfer
+    }
+}
+
+function speichereVerwaltet(menge) {
+    mkdirSync(dirname(MANAGED_PATH), { recursive: true })
+    writeFileSync(
+        MANAGED_PATH,
+        `${JSON.stringify({ pubkeys: [...menge].sort(), stand: new Date().toISOString() }, null, 1)}\n`,
+        { mode: 0o600 },
+    )
+}
+
 const isHex64 = (s) => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s)
+
+/**
+ * Wen entfernt dieser Lauf — und wen laesst er ausdruecklich stehen?
+ *
+ * ALS REINE FUNKTION, damit `--selbsttest` sie ohne Relay und ohne Schluessel
+ * pruefen kann. Die Lagen, um die es geht, sind am laufenden Relay nicht
+ * herstellbar, ohne echte Mitglieder zu entfernen — und eine Regel, die man nur
+ * im Ernstfall pruefen kann, ist beim naechsten Umbau die erste, die still
+ * zurueckfaellt.
+ *
+ * VIER BEDINGUNGEN, und jede hat ihren eigenen Grund:
+ *   · `owner`/`admin` nie          — sie stehen bewusst dort, nicht wegen der API
+ *   · PROTECTED_PUBKEYS nie        — Bestandsdaten des Betreibers
+ *   · in der API                   — dann ist er Mitglied, es gibt nichts zu tun
+ *   · NICHT selbst aufgenommen nie — fremde Eintraege gehen dieses Skript nichts an
+ *
+ * `fremdeUnbekannte` sind die, die allein an der letzten Bedingung haengen: nach
+ * der alten Regel waeren sie geflogen. Sie gehoeren in die Ausgabe, sonst sieht
+ * ein Lauf, der zehn Eintraege in Ruhe laesst, aus wie einer ohne Arbeit.
+ */
+function planeEntfernungen({ current, desired, verwaltet, erstlauf }) {
+    const kandidat = ([pk, role]) =>
+        !PROTECTED_ROLES.has(role) && !PROTECTED_PUBKEYS.has(pk) && !desired.has(pk)
+
+    const fremdeUnbekannte = [...current]
+        .filter((e) => kandidat(e) && !verwaltet.has(e[0]))
+        .map(([pk]) => pk)
+        .sort()
+
+    // Beim Erstlauf wird NICHTS entfernt: die Zustandsdatei ist gerade erst aus
+    // `Ist ∩ Soll` entstanden und beweist nichts ueber die Vergangenheit.
+    const toRemove = erstlauf
+        ? []
+        : [...current]
+              .filter((e) => kandidat(e) && verwaltet.has(e[0]))
+              .map(([pk]) => pk)
+              .sort()
+
+    return { toRemove, fremdeUnbekannte }
+}
 
 function secretKey() {
     const raw = (process.env.BUZZ_ADMIN_SECRET || '').trim()
@@ -364,13 +484,17 @@ async function main() {
 
     // Aufnehmen: in der API, aber nicht auf dem Relay.
     const toAdd = [...desired].filter((pk) => !current.has(pk)).sort()
-    // Entfernen: auf dem Relay als `member`, aber nicht mehr in der API. Owner und
-    // Admins bleiben aussen vor — sie stehen bewusst dort und nicht wegen der API.
-    // Ebenso die einzeln geschuetzten Pubkeys (siehe PROTECTED_PUBKEYS oben).
-    const toRemove = [...current]
-        .filter(([pk, role]) => !PROTECTED_ROLES.has(role) && !PROTECTED_PUBKEYS.has(pk) && !desired.has(pk))
-        .map(([pk]) => pk)
-        .sort()
+
+    // WAS DIESES SKRIPT VERWALTET — die Datei, nicht die Abwesenheit in der API.
+    // Fehlt sie, wird sie aus `Ist ∩ Soll` angelegt und in DIESEM Lauf nichts
+    // entfernt; die Begruendung steht bei MANAGED_PATH.
+    let verwaltet = ladeVerwaltet()
+    const erstlauf = verwaltet === null
+    if (erstlauf) {
+        verwaltet = new Set([...current.keys()].filter((pk) => desired.has(pk)))
+    }
+
+    const { toRemove, fremdeUnbekannte } = planeEntfernungen({ current, desired, verwaltet, erstlauf })
 
     const protectedByRole = [...current.values()].filter((r) => PROTECTED_ROLES.has(r)).length
     const protectedByKey = [...current.keys()].filter((pk) => PROTECTED_PUBKEYS.has(pk)).length
@@ -382,6 +506,20 @@ async function main() {
             `(geschuetzt: ${protectedByRole} per Rolle, ${protectedByKey} per Pubkey)\n` +
             `Plan:     +${toAdd.length} aufnehmen  -${toRemove.length} entfernen${APPLY ? '' : '   [TROCKENLAUF]'}`,
     )
+    if (erstlauf) {
+        console.log(
+            `Hinweis:  keine Zustandsdatei (${MANAGED_PATH}) — sie wird aus Ist ∩ Soll ` +
+                `mit ${verwaltet.size} Eintraegen angelegt. In diesem Lauf wird NICHTS entfernt.`,
+        )
+    }
+    if (fremdeUnbekannte.length > 0) {
+        console.log(
+            `Fremd:    ${fremdeUnbekannte.length} Eintraege stehen weder in der API noch in der ` +
+                `Zustandsdatei und bleiben unberuehrt ` +
+                `(${fremdeUnbekannte.slice(0, 6).map((pk) => pk.slice(0, 8)).join(', ')}` +
+                `${fremdeUnbekannte.length > 6 ? ', …' : ''}) — von Hand aufgenommen, nicht von hier.`,
+        )
+    }
 
     // Wer geschuetzt ist, aber nicht in der API steht, wird benannt statt stillschweigend
     // uebergangen — sonst waechst die Ausnahmeliste unbemerkt und niemand raeumt sie je auf.
@@ -410,6 +548,9 @@ async function main() {
             console.log(`  - ${pk}`)
         }
         relay.close()
+        // AUCH DIE ZUSTANDSDATEI BLEIBT UNBERUEHRT. Ein Trockenlauf, der sie
+        // anlegt, waere kein Trockenlauf: der naechste echte Lauf faende sie vor
+        // und entfernte sofort, statt einmal auszusetzen.
         console.log('Trockenlauf — es wurde nichts gesendet.')
         return 0
     }
@@ -418,7 +559,11 @@ async function main() {
     for (const pk of toAdd) {
         const res = await publishWithRetry(relay, ADD_MEMBER, [['p', pk], ['role', 'member']])
         console.log(`  ${res.ok ? '+' : '!'} ${pk}${res.ok ? '' : ` — ${res.message}`}`)
-        if (!res.ok) {
+        if (res.ok) {
+            // Ab jetzt gehoert er diesem Skript — und nur, was ihm gehoert, darf es
+            // spaeter wieder entfernen.
+            verwaltet.add(pk)
+        } else {
             failed.push([pk, 'aufnehmen', res.message])
         }
         await sleep(100)
@@ -426,10 +571,24 @@ async function main() {
     for (const pk of toRemove) {
         const res = await publishWithRetry(relay, REMOVE_MEMBER, [['p', pk]])
         console.log(`  ${res.ok ? '-' : '!'} ${pk}${res.ok ? '' : ` — ${res.message}`}`)
-        if (!res.ok) {
+        if (res.ok) {
+            verwaltet.delete(pk)
+        } else {
             failed.push([pk, 'entfernen', res.message])
         }
         await sleep(100)
+    }
+
+    // NACH DEN EVENTS, VOR DER NACHKONTROLLE. Wer aufgenommen wurde, steht in der
+    // Datei — auch wenn die Nachkontrolle gleich Luecken findet: der Eintrag sagt
+    // „dieses Skript hat ihn aufgenommen", nicht „er ist bestimmt drin". Andersherum
+    // waere schlimmer: ein Absturz zwischen Aufnahme und Datei erzeugte einen
+    // Eintrag, den niemand mehr entfernen darf.
+    try {
+        speichereVerwaltet(verwaltet)
+    } catch (e) {
+        console.log(`WARNUNG: Zustandsdatei nicht geschrieben (${String(e.message).slice(0, 120)}).`)
+        console.log(`         Der naechste Lauf legt sie neu an und entfernt dabei nichts.`)
     }
 
     // NACHKONTROLLE. Ein `OK true` heisst: der Relay hat das Event ANGENOMMEN — nicht,
@@ -477,6 +636,93 @@ async function main() {
         return 0
     }
     return 1
+}
+
+/**
+ * `--selbsttest`: prueft die Entfernungsregel gegen nachgestellte Lagen.
+ *
+ * Ohne Relay, ohne Schluessel, ohne Netz — genau deshalb gibt es ihn. Die Lage,
+ * um die es geht (ein von Hand aufgenommener Pubkey, der nicht in der API
+ * steht), laesst sich am laufenden Relay nur herstellen, indem man sie
+ * herbeifuehrt; und wer sie dort prueft, hat den Schaden schon.
+ */
+function selbsttest() {
+    let schlecht = 0
+    const pk = (n) => String(n).repeat(64).slice(0, 64)
+    const API = pk(1) // in der Vereins-API
+    const WEG = pk(2) // war in der API, ist ausgetreten — vom Skript aufgenommen
+    const HAND = pk(3) // von Hand aufgenommen, nie in der API
+    const ADMIN = pk(4)
+
+    const faelle = [
+        {
+            name: 'ein Ausgetretener, den dieses Skript aufgenommen hat, wird entfernt',
+            current: new Map([[API, 'member'], [WEG, 'member']]),
+            desired: new Set([API]),
+            verwaltet: new Set([API, WEG]),
+            erstlauf: false,
+            entfernt: [WEG],
+            fremd: [],
+        },
+        {
+            name: 'ein von Hand aufgenommener Pubkey bleibt — DER FALL VOM 2026-08-31',
+            current: new Map([[API, 'member'], [HAND, 'member']]),
+            desired: new Set([API]),
+            verwaltet: new Set([API]),
+            erstlauf: false,
+            entfernt: [],
+            fremd: [HAND],
+        },
+        {
+            name: 'owner und admin fasst das Skript nie an',
+            current: new Map([[ADMIN, 'admin'], [HAND, 'owner']]),
+            desired: new Set(),
+            verwaltet: new Set([ADMIN, HAND]),
+            erstlauf: false,
+            entfernt: [],
+            fremd: [],
+        },
+        {
+            name: 'beim Erstlauf wird nichts entfernt',
+            current: new Map([[API, 'member'], [WEG, 'member']]),
+            desired: new Set([API]),
+            verwaltet: new Set([API, WEG]),
+            erstlauf: true,
+            entfernt: [],
+            fremd: [],
+        },
+        {
+            name: 'wer in der API steht, wird nie entfernt — auch nicht als fremd gemeldet',
+            current: new Map([[API, 'member']]),
+            desired: new Set([API]),
+            verwaltet: new Set(),
+            erstlauf: false,
+            entfernt: [],
+            fremd: [],
+        },
+    ]
+
+    for (const f of faelle) {
+        const { toRemove, fremdeUnbekannte } = planeEntfernungen(f)
+        const gut =
+            JSON.stringify(toRemove) === JSON.stringify(f.entfernt) &&
+            JSON.stringify(fremdeUnbekannte) === JSON.stringify(f.fremd)
+        if (!gut) schlecht++
+        console.log(
+            `${gut ? 'ok' : 'FEHLER'} - ${f.name}` +
+                (gut
+                    ? ''
+                    : `\n         entfernt=${JSON.stringify(toRemove.map((x) => x.slice(0, 4)))} ` +
+                      `erwartet=${JSON.stringify(f.entfernt.map((x) => x.slice(0, 4)))} | ` +
+                      `fremd=${JSON.stringify(fremdeUnbekannte.map((x) => x.slice(0, 4)))} ` +
+                      `erwartet=${JSON.stringify(f.fremd.map((x) => x.slice(0, 4)))}`),
+        )
+    }
+    return schlecht === 0 ? 0 : 1
+}
+
+if (process.argv.includes('--selbsttest')) {
+    process.exit(selbsttest())
 }
 
 main()
