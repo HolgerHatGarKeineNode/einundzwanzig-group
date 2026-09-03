@@ -31,6 +31,11 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
             // die Berechtigung muss trotzdem heute schon drinstehen, weil welshman die
             // Rechte einer bestehenden Amber-Verbindung nie nachverhandelt.
             30078,
+            // 45002 (Buzz-Forum-Bewertung) seit P3. Buzz-only — aber die Perm-Liste ist
+            // relay-unabhängig: sie wird beim KOPPELN einmal ausgehandelt, lange bevor
+            // feststeht, welchen Space der Nutzer öffnet, und welshman verhandelt eine
+            // bestehende Verbindung nie nach.
+            45002,
         ]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
