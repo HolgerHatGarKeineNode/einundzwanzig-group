@@ -10,11 +10,19 @@
  * Dieser Riegel hängt an etwas anderem: **an der Identität, mit der geschrieben wird.**
  * Ein Nostr-Ereignis, das mit einem Wegwerf-Schlüssel signiert ist, richtet auf dem
  * Produktions-Relay auch dann keinen Schaden an, wenn es ihn erreicht — der Relay verlangt
- * NIP-05-Verifikation und lehnt ab. Umgekehrt gilt: liegt in `NOSTR_TEST_NSEC` ein
- * Schlüssel, der auf Produktion schreiben DARF, ist jede andere Absicherung nur noch eine
- * Frage der Zeit. Genau dieser Fall ist absehbar — im Plan steht er wörtlich: „Die vierte
- * Schicht fällt in dem Moment weg, in dem für einen P7-Test ein verifizierter Schlüssel in
- * die `.env` gelegt wird."
+ * NIP-05-Verifikation und lehnt ab. Umgekehrt gilt: liegt in einer der Test-Identitäten
+ * ein Schlüssel, der auf Produktion schreiben DARF, ist jede andere Absicherung nur noch
+ * eine Frage der Zeit. Genau dieser Fall ist absehbar — im Plan steht er wörtlich: „Die
+ * vierte Schicht fällt in dem Moment weg, in dem für einen P7-Test ein verifizierter
+ * Schlüssel in die `.env` gelegt wird."
+ *
+ * **Jede Test-Identität wird geprüft, nicht nur die erste.** Bis 2026-09-03 prüfte
+ * dieser Riegel ausschließlich `NOSTR_TEST_NSEC`. Mit `testKeys2()`/`NOSTR_TEST2_NSEC`
+ * (`keys.ts`, P1) kam eine zweite hinzu — ein Produktionsschlüssel, der versehentlich
+ * DIREKT in `NOSTR_TEST2_NSEC` landet, während `NOSTR_TEST_NSEC` ein harmloser
+ * Wegwerf-Wert bleibt, wäre von der Ein-Variablen-Prüfung nie gesehen worden. Der Riegel
+ * iteriert deshalb über {@link TEST_SCHLUESSEL_VARIABLEN}, nicht mehr über eine
+ * einzelne Konstante — jede künftige Test-Identität gehört in diese Liste.
  *
  * Deshalb bricht dieser Riegel den Lauf **vor dem ersten Browser** ab (`global-setup.ts`),
  * unabhängig von jedem Netzpfad.
@@ -58,8 +66,17 @@
  * kompromittiert.
  */
 
-/** Die Variable, die den Wegwerf-Testschlüssel trägt. */
+/** Die Variable, die den primären Wegwerf-Testschlüssel trägt. */
 export const TEST_SCHLUESSEL_VARIABLE = 'NOSTR_TEST_NSEC'
+
+/**
+ * ALLE Variablen, die eine eigene Test-Identität tragen — jede von ihnen wird vom Riegel
+ * geprüft, nicht nur {@link TEST_SCHLUESSEL_VARIABLE}. `NOSTR_TEST2_NSEC` ist die zweite
+ * zooid-Identität aus P1 (`keys.ts` `testKeys2()`), gebraucht für Präsenz/DMs, wo eine
+ * Messung zwei echte Pubkeys braucht statt zwei Tabs auf demselben Schlüssel. Eine
+ * künftige dritte Identität gehört hier ergänzt, nicht daneben verdrahtet.
+ */
+export const TEST_SCHLUESSEL_VARIABLEN: readonly string[] = [TEST_SCHLUESSEL_VARIABLE, 'NOSTR_TEST2_NSEC']
 
 /** Ein Schlüssel, der auf Produktion schreiben darf — mit der Herkunft dieser Aussage. */
 export type Schreiber = { pk: string; quelle: string }
@@ -78,16 +95,25 @@ export type Schreiber = { pk: string; quelle: string }
 export const PRODUKTIONS_SCHREIBER: readonly Schreiber[] = []
 
 /**
- * Alle `*_NSEC`-Variablen der Umgebung außer dem Testschlüssel — sortiert, damit die
- * Meldung reproduzierbar ist.
+ * Alle `*_NSEC`-Variablen der Umgebung außer der geprüften Test-Identität selbst —
+ * sortiert, damit die Meldung reproduzierbar ist.
  *
  * Bewusst über das **Namensmuster** und nicht über eine Aufzählung: ein künftiger
  * `NOSTR_ANNOUNCE_NSEC` ist damit vom ersten Tag an erfasst. Leere Werte fallen raus —
  * eine gesetzte, aber leere Variable ist kein Schlüssel.
+ *
+ * `ausgenommen` ist standardmäßig {@link TEST_SCHLUESSEL_VARIABLE} — das erhält das
+ * Verhalten für jeden bestehenden Aufrufer ohne zweites Argument. Wer eine ANDERE
+ * Test-Identität prüft (z. B. `NOSTR_TEST2_NSEC`), gibt deren eigenen Variablennamen mit:
+ * sie darf sich nicht selbst als Vergleichsgegner sehen, alle übrigen `*_NSEC`-Variablen
+ * — inklusive der jeweils ANDEREN Test-Identität — bleiben Vergleichsgegner.
  */
-export const nsecVariablen = (env: Record<string, string | undefined>): string[] =>
+export const nsecVariablen = (
+    env: Record<string, string | undefined>,
+    ausgenommen: string = TEST_SCHLUESSEL_VARIABLE,
+): string[] =>
     Object.keys(env)
-        .filter((name) => /_NSEC$/.test(name) && name !== TEST_SCHLUESSEL_VARIABLE && (env[name] ?? '') !== '')
+        .filter((name) => /_NSEC$/.test(name) && name !== ausgenommen && (env[name] ?? '') !== '')
         .sort()
 
 /**
@@ -108,10 +134,15 @@ export const kurz = (pk: string): string => `${pk.slice(0, 12)}…`
 /**
  * Die Abbruchmeldung. Sie muss zwei Dinge leisten: sagen, WAS zu tun ist, und keinen
  * Zweifel lassen, dass der Lauf nicht einfach „wiederholt" werden kann.
+ *
+ * `variable` ist die Test-Identität, DEREN Wert getroffen hat — Default
+ * {@link TEST_SCHLUESSEL_VARIABLE} für bestehende Aufrufer. Seit der Riegel mehrere
+ * Identitäten prüft, muss die Meldung die tatsächlich betroffene nennen: eine Meldung,
+ * die immer `NOSTR_TEST_NSEC` sagt, wäre bei einem Treffer in `NOSTR_TEST2_NSEC` falsch.
  */
-export const sperrMeldung = (treffer: readonly Schreiber[]): string =>
+export const sperrMeldung = (treffer: readonly Schreiber[], variable: string = TEST_SCHLUESSEL_VARIABLE): string =>
     [
-        `${TEST_SCHLUESSEL_VARIABLE} trägt einen Schlüssel, der auf PRODUKTION schreiben darf.`,
+        `${variable} trägt einen Schlüssel, der auf PRODUKTION schreiben darf.`,
         ``,
         `  Übereinstimmung mit: ${treffer.map((t) => `${t.quelle} (${kurz(t.pk)})`).join(', ')}`,
         ``,
