@@ -41,6 +41,12 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
             // gilt: Buzz-only, aber die Perm-Liste wird beim KOPPELN ausgehandelt, lange
             // bevor feststeht, welchen Space der Nutzer öffnet.
             9042, 9043,
+            // 30300 (NIP-ER, private Erinnerung) seit P5 — wieder Buzz-only, wieder beim
+            // KOPPELN ausgehandelt. Der `content` ist NIP-44-Chiffrat an den eigenen
+            // Schlüssel; `nip44_encrypt`/`nip44_decrypt` stehen seit der 10009-Space-Liste
+            // in NIP46_PERMS und werden vom Fall darunter geprüft. Ohne SIE könnte ein
+            // Amber-Nutzer die Erinnerung signieren und danach nie wieder lesen.
+            30300,
         ]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
