@@ -67,6 +67,37 @@ async function moderationGet(path: string, query: Record<string, string> = {}): 
     return JSON.parse(body)
 }
 
+/** Eine Audit-Zeile, so wie `action_json` (`api/bridge.rs`) sie liefert. */
+export type BuzzActionRow = {
+    id: string
+    actor_pubkey: string
+    /** `ban` · `unban` · `timeout` · `untimeout` · `delete` · `resolve:*` · … */
+    action: string
+    target_pubkey: string | null
+    target_event_id: string | null
+    channel_id: string | null
+    public_reason: string | null
+    created_at: string
+}
+
+/**
+ * Eine Zeile der Sperrliste, so wie `ban_json` (`api/bridge.rs`) sie liefert.
+ *
+ * `muted_until` ist die laufende **befristete Sperre** (RFC-3339), `banned` der
+ * dauerhafte Bann. `list_restricted` (`buzz-db`) liefert nur Zeilen, die JETZT wirken:
+ * ein aktiver Bann oder `muted_until > now()`.
+ */
+export type BuzzRestrictionRow = {
+    pubkey: string
+    banned: boolean
+    ban_expires_at: string | null
+    ban_reason: string | null
+    muted_until: string | null
+    mute_reason: string | null
+    actor_pubkey: string
+    updated_at: string
+}
+
 /** Alle Reports des Test-Space (optional nach Status gefiltert). Wirft bei Fehlern. */
 export async function fetchReports(status?: string): Promise<BuzzReportRow[]> {
     const rows = await moderationGet('/moderation/reports', { ...(status ? { status } : {}), limit: '100' })
@@ -99,6 +130,56 @@ export async function waitForReport(targetEventId: string, attempts = 20): Promi
     }
     throw new Error(
         `Kein Report auf Event ${targetEventId} in der Moderations-Queue (${attempts} Versuche)` +
+            (last ? ` — letzter Fehler: ${String(last)}` : ''),
+    )
+}
+
+/**
+ * Die Moderations-Audit-Zeilen des Test-Space, neueste zuerst. Wirft bei Fehlern.
+ *
+ * **Der einzige Erfolgsnachweis für 9042/9043.** Der Relay fuehrt Moderationsbefehle aus
+ * und speichert sie NICHT (`handlers/ingest.rs`: 9042–9044 werden weder abgelegt noch
+ * gefanoutet), ein `nak req -k 9042` liefert also strukturell nichts. Was bleibt, ist die
+ * Audit-Zeile, die `insert_audit` je Befehl schreibt.
+ */
+export async function fetchAudit(limit = 100): Promise<BuzzActionRow[]> {
+    const rows = await moderationGet('/moderation/audit', { limit: String(limit) })
+    if (!Array.isArray(rows)) {
+        throw new Error(`/moderation/audit lieferte kein Array: ${JSON.stringify(rows)}`)
+    }
+    return rows as BuzzActionRow[]
+}
+
+/** Die aktuell wirksamen Sperren (Banns UND laufende Timeouts). Wirft bei Fehlern. */
+export async function fetchRestricted(): Promise<BuzzRestrictionRow[]> {
+    const rows = await moderationGet('/moderation/restricted')
+    if (!Array.isArray(rows)) {
+        throw new Error(`/moderation/restricted lieferte kein Array: ${JSON.stringify(rows)}`)
+    }
+    return rows as BuzzRestrictionRow[]
+}
+
+/**
+ * Wartet auf eine Audit-Zeile mit dieser Aktion gegen diesen Pubkey und liefert sie.
+ *
+ * Wirft beim Ablauf der Frist — „nicht gefunden" darf nie als „leer, also in Ordnung"
+ * durchgehen (derselbe Grund wie bei [[waitForReport]]).
+ */
+export async function waitForAction(action: string, targetPubkey: string, attempts = 30): Promise<BuzzActionRow> {
+    let last: unknown = null
+    for (let i = 0; i < attempts; i++) {
+        try {
+            const hit = (await fetchAudit()).find((r) => r.action === action && r.target_pubkey === targetPubkey)
+            if (hit) {
+                return hit
+            }
+        } catch (e) {
+            last = e
+        }
+        await new Promise((r) => setTimeout(r, 500))
+    }
+    throw new Error(
+        `Keine Audit-Zeile `+ JSON.stringify(action) + ` auf ${targetPubkey} (${attempts} Versuche)` +
             (last ? ` — letzter Fehler: ${String(last)}` : ''),
     )
 }

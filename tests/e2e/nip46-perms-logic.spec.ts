@@ -36,6 +36,11 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
             // feststeht, welchen Space der Nutzer öffnet, und welshman verhandelt eine
             // bestehende Verbindung nie nach.
             45002,
+            // 9042/9043 (Buzz-Timeout und dessen Aufhebung) seit P4 — die einzige
+            // Maßnahme gegen eine Person, die diese Oberfläche noch anbietet. Auch hier
+            // gilt: Buzz-only, aber die Perm-Liste wird beim KOPPELN ausgehandelt, lange
+            // bevor feststeht, welchen Space der Nutzer öffnet.
+            9042, 9043,
         ]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
