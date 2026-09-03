@@ -47,10 +47,25 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
             // in NIP46_PERMS und werden vom Fall darunter geprüft. Ohne SIE könnte ein
             // Amber-Nutzer die Erinnerung signieren und danach nie wieder lesen.
             30300,
+            // 20001 (Buzz-Praesenz) seit P6 — der einzige Eintrag dieser Liste, der
+            // WIEDERKEHREND signiert wird (Herzschlag alle 45 s, solange ein Raum offen
+            // ist). Fehlte er, promptete ein Bunker im Minutentakt statt einmal beim
+            // Koppeln, und weil bestehende Verbindungen nie nachverhandelt werden, waere
+            // die Praesenz fuer frueher gekoppelte Nutzer entweder tot oder eine Lawine.
+            20001,
         ]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
         }
+    })
+
+    test('enthält KEIN sign_event:20002 — der Tipp-Indikator wird nicht geschrieben', () => {
+        // Gegenrichtung derselben Zusage: P6 hat 20002 GEMESSEN und ausdruecklich nicht
+        // ausgeliefert (Entscheidung 2026-09-03). Ein Recht fuer eine Art, die dieser
+        // Client nie signiert, waere eine falsche Angabe in einer Liste, deren Beleg
+        // ausdruecklich die Aufrufstelle ist — und die naechste Runde laese es als
+        // „gibt es also".
+        expect(perms).not.toContain('sign_event:20002')
     })
 
     test('enthält nip44 encrypt/decrypt, aber kein nip04 (Client nutzt nur nip44)', () => {
