@@ -16,6 +16,9 @@ import { spawnSync } from 'node:child_process'
  * „ein zweiter Klick ändert den sichtbaren Zähler nicht" ist deshalb erst dann
  * belegt, wenn sie gegen einen Relay steht, der beide Ereignisse annähme.
  *
+ * Dasselbe gilt für die **Rücknahme**: sie ist eine NIP-09-Löschung (kind 5) je eigener
+ * Stimme, und ob sie wirkt, entscheidet nicht das `OK` des Relays, sondern die Requery.
+ *
  * Der Fall misst deshalb BEIDE Seiten:
  *   · die Fläche (die Zahl bewegt sich nicht), und
  *   · den Draht (`nak req` zählt die 45002 dieses Autors auf dieses Ziel).
@@ -138,7 +141,12 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
         expect(voteEventsOnWire(id), 'genau ein 45002 auf dem Draht').toBe(1)
     })
 
-    test('ein ZWEITER Upvote desselben Nutzers ändert den Zähler nicht — und schreibt nichts', async ({ page }) => {
+    test('ein zweiter Upvote erzeugt kein zweites 45002 — er nimmt zurück statt zu verdoppeln', async ({ page }) => {
+        // Die Zusage des Plans lautet „der sichtbare Zähler steigt nicht". Sie gilt, und
+        // zwar schärfer als gefordert: der Klick schreibt keine zweite Stimme, er löscht
+        // die erste. Beide Hälften stehen hier, weil nur zusammen sie „der Client hat
+        // nichts Doppeltes geschrieben" von „die Anzeige faltet es weg" trennen — der
+        // Relay hat für 45002 keine Dedup und hätte eine zweite Zeile behalten.
         const title = `E2E-Vote-Doppelt-${Date.now()}`
         const id = seedTopic(title)
         await openForum(page)
@@ -149,19 +157,15 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
 
         await upvote(page, title).click()
 
-        // Die Fläche: die Zahl steht. `expect.poll` statt `waitForTimeout` — ein
-        // fester Schlaf misst die Maschine, nicht die Zusage.
-        await expect(score(page, title)).toHaveText('1')
-        await expect(upvote(page, title)).toHaveAttribute('aria-pressed', 'true')
-
-        // Der Draht: es liegt weiterhin GENAU EIN Ereignis. Das ist die eigentliche
-        // Zusage — der Relay hätte ein zweites angenommen und für immer behalten.
+        // Nicht 2 — der Zähler steigt unter keinen Umständen.
+        await expect(score(page, title)).not.toHaveText('2')
+        await expect(score(page, title)).toHaveText('0')
         await expect
             .poll(() => voteEventsOnWire(id), {
                 message: 'der zweite Klick darf kein zweites 45002 erzeugt haben',
                 timeout: 10_000,
             })
-            .toBe(1)
+            .toBe(0)
     })
 
     test('der Wechsel von Zustimmung auf Ablehnung bewegt den Punktstand um ZWEI', async ({ page }) => {
@@ -185,6 +189,62 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
         await expect
             .poll(() => voteEventsOnWire(id), { timeout: 10_000 })
             .toBe(2)
+    })
+
+    test('ein Klick auf den gedrückten Pfeil NIMMT die Stimme zurück — Fläche und Draht', async ({ page }) => {
+        const title = `E2E-Vote-Ruecknahme-${Date.now()}`
+        const id = seedTopic(title)
+        await openForum(page)
+
+        await upvote(page, title).click()
+        await expect(score(page, title)).toHaveText('1')
+        await expect(upvote(page, title)).toHaveAttribute('aria-pressed', 'true')
+        expect(voteEventsOnWire(id)).toBe(1)
+
+        // Derselbe Pfeil noch einmal: das ist die Rücknahme, nicht ein zweiter Upvote.
+        await upvote(page, title).click()
+
+        await expect(score(page, title)).toHaveText('0')
+        await expect(upvote(page, title)).toHaveAttribute('aria-pressed', 'false')
+        await expect(downvote(page, title)).toHaveAttribute('aria-pressed', 'false')
+
+        // Und der Draht: die Requery findet die Stimme nicht mehr. Sie ist der einzige
+        // Beleg, der zählt — `nak` druckt auch bei einer Ablehnung das signierte
+        // Ereignis und endet mit 0, ein „success" allein sagt über die Wirkung nichts.
+        await expect
+            .poll(() => voteEventsOnWire(id), {
+                message: 'nach der Rücknahme darf die Requery die Stimme nicht mehr liefern',
+                timeout: 10_000,
+            })
+            .toBe(0)
+    })
+
+    test('nach Wechsel UND Rücknahme lebt die erste Stimme nicht wieder auf', async ({ page }) => {
+        // Der Fall, für den die Rücknahme mehrere Grabsteine schreibt (einer je eigener
+        // Stimme, weil Buzz genau ein Ziel je kind 5 nimmt). Würde nur die jüngste
+        // gelöscht, gewänne die `+` von vorher — aus „zurückgenommen" würde „Meinung
+        // geändert", und zwar auf einen Wert, den der Nutzer vor zwei Klicks verlassen hat.
+        const title = `E2E-Vote-Wechsel-Ruecknahme-${Date.now()}`
+        const id = seedTopic(title)
+        await openForum(page)
+
+        await upvote(page, title).click()
+        await expect(score(page, title)).toHaveText('1')
+        await downvote(page, title).click()
+        await expect(score(page, title)).toHaveText('-1')
+        expect(voteEventsOnWire(id), 'zwei Stimmen liegen auf dem Draht').toBe(2)
+
+        await downvote(page, title).click()
+
+        await expect(score(page, title)).toHaveText('0')
+        await expect(upvote(page, title)).toHaveAttribute('aria-pressed', 'false')
+        await expect(downvote(page, title)).toHaveAttribute('aria-pressed', 'false')
+        await expect
+            .poll(() => voteEventsOnWire(id), {
+                message: 'BEIDE Stimmen müssen zurückgenommen sein, nicht nur die jüngste',
+                timeout: 10_000,
+            })
+            .toBe(0)
     })
 
     test('die Ordnung ist umschaltbar: nach Punkten steht das bewertete Thema vor dem jüngeren', async ({ page }) => {
