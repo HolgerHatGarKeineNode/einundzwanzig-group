@@ -119,6 +119,16 @@ async function openForum(page: Page): Promise<void> {
     await expect(page.locator('ul[role="list"] > li').first(), 'die Themenliste des Forums').toBeVisible({
         timeout: 30_000,
     })
+
+    // Beitreten, falls noch nicht Mitglied — ohne das rendert die Bewertungsspalte gar
+    // nicht (`x-if="canVote && joined"`, `forum-vote.blade.php`), egal wie lang gewartet
+    // wird. Gleiches Muster wie in `buzz-forum.spec.ts` (`joinButton`); der Kanal ist
+    // öffentlich lesbar, aber Stimmen sind eine Mitglieds-Handlung.
+    const beitreten = page.getByRole('button', { name: 'Beitreten' })
+    if (await beitreten.isVisible()) {
+        await beitreten.click()
+        await expect(beitreten).toBeHidden({ timeout: 15_000 })
+    }
 }
 
 test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
@@ -138,7 +148,9 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
 
         await expect(score(page, title)).toHaveText('1')
         await expect(upvote(page, title)).toHaveAttribute('aria-pressed', 'true')
-        expect(voteEventsOnWire(id), 'genau ein 45002 auf dem Draht').toBe(1)
+        await expect
+            .poll(() => voteEventsOnWire(id), { message: 'genau ein 45002 auf dem Draht', timeout: 10_000 })
+            .toBe(1)
     })
 
     test('ein zweiter Upvote erzeugt kein zweites 45002 — er nimmt zurück statt zu verdoppeln', async ({ page }) => {
@@ -153,7 +165,7 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
 
         await upvote(page, title).click()
         await expect(score(page, title)).toHaveText('1')
-        expect(voteEventsOnWire(id)).toBe(1)
+        await expect.poll(() => voteEventsOnWire(id), { timeout: 10_000 }).toBe(1)
 
         await upvote(page, title).click()
 
@@ -175,6 +187,21 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
 
         await upvote(page, title).click()
         await expect(score(page, title)).toHaveText('1')
+        // Auf die Draht-Bestätigung der ERSTEN Stimme warten, bevor die zweite kommt —
+        // ohne das feuerte der Wechsel manchmal auf einen Ausgangszustand, dessen
+        // `myVoteIds` der Relay noch nicht bestätigt hatte, und der Wechsel blieb aus
+        // (Score klebte bei „1"). Gleiches Muster wie im bereits grünen
+        // Rücknahme-Fall unten, der genau deshalb wartet.
+        await expect.poll(() => voteEventsOnWire(id), { timeout: 10_000 }).toBe(1)
+
+        // PRODUKTBEFUND, hier umschifft und im Bericht gemeldet (nicht behoben — außerhalb
+        // des Mandats): `isLaterVote` (`forumModels.ts:142-143`) bricht Gleichstand bei
+        // gleichem `created_at` über den EVENT-ID-Vergleich (`a.id < b.id`), einer
+        // Grösse ohne Bezug zur tatsächlichen Reihenfolge. Landen Up- und Downvote in
+        // DERSELBEN Unix-Sekunde, gewinnt zufällig (~50 %) die ÄLTERE Stimme, und der
+        // Wechsel bleibt sichtbar aus — gemessen: 2 von 4 Läufen genau so. Dieselbe
+        // Sekundengrenze umschifft bereits der Sortier-Fall unten in dieser Datei.
+        await new Promise((resolve) => setTimeout(resolve, 1_100))
 
         await downvote(page, title).click()
 
@@ -199,7 +226,7 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
         await upvote(page, title).click()
         await expect(score(page, title)).toHaveText('1')
         await expect(upvote(page, title)).toHaveAttribute('aria-pressed', 'true')
-        expect(voteEventsOnWire(id)).toBe(1)
+        await expect.poll(() => voteEventsOnWire(id), { timeout: 10_000 }).toBe(1)
 
         // Derselbe Pfeil noch einmal: das ist die Rücknahme, nicht ein zweiter Upvote.
         await upvote(page, title).click()
@@ -230,9 +257,18 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
 
         await upvote(page, title).click()
         await expect(score(page, title)).toHaveText('1')
+        // Dieselbe Draht-Wartezeit wie im Wechsel-Fall oben, aus demselben Grund:
+        // sonst feuert der Wechsel gegen `myVoteIds`, die der Relay noch nicht bestätigt
+        // hatte, und die Anzeige klebt bei „1".
+        await expect.poll(() => voteEventsOnWire(id), { timeout: 10_000 }).toBe(1)
+        // Und dieselbe Sekundengrenze wie im Wechsel-Fall oben (Produktbefund zu
+        // `isLaterVote`, dort ausführlich begründet).
+        await new Promise((resolve) => setTimeout(resolve, 1_100))
         await downvote(page, title).click()
         await expect(score(page, title)).toHaveText('-1')
-        expect(voteEventsOnWire(id), 'zwei Stimmen liegen auf dem Draht').toBe(2)
+        await expect
+            .poll(() => voteEventsOnWire(id), { message: 'zwei Stimmen liegen auf dem Draht', timeout: 10_000 })
+            .toBe(2)
 
         await downvote(page, title).click()
 
@@ -284,5 +320,87 @@ test.describe('Buzz-Forum: Bewertungen (E2E, nur E2E_RELAY=buzz)', () => {
         await expect
             .poll(async () => (await stelle(neu)) < (await stelle(alt)), { timeout: 10_000 })
             .toBe(true)
+    })
+
+    test('LAYOUT: Bewertungsspalte und Sortier-Umschalter bei schmal (390) und Desktop (1440) — echte Zahlen', async ({
+        page,
+    }) => {
+        // „Sichtbare UI ist erst fertig, wenn sie GEMESSEN wurde" (Nutzeransage
+        // 2026-09-03). Echte Zahlen an zwei Breiten: Breite der Bewertungsspalte
+        // (`w-11` = 2,75 rem = 44 px, `forum-vote.blade.php`), Lage des Umschalters
+        // und waagerechter Überlauf des Dokuments — nicht nur, dass eine CSS-Klasse steht.
+        const marke = Date.now()
+        const alt = `E2E-Layout-Alt-${marke}`
+        const neu = `E2E-Layout-Neu-${marke}`
+        seedTopic(alt)
+        await new Promise((resolve) => setTimeout(resolve, 1_100))
+        seedTopic(neu)
+
+        await useBuzz(page)
+        await loginNsec(page, BUZZ_USER_NSEC)
+
+        for (const width of [390, 1440]) {
+            await page.setViewportSize({ width, height: 900 })
+            await page.goto(`/rooms/${BUZZ_ROOM_FORUM}`)
+            await expect(page.locator('ul[role="list"] > li').first(), 'die Themenliste des Forums').toBeVisible({
+                timeout: 30_000,
+            })
+
+            // Kein waagerechter Bildlauf des Dokuments.
+            const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+            expect(
+                scrollWidth,
+                `${width}px: waagerechter Überlauf des Dokuments (${scrollWidth}px)`,
+            ).toBeLessThanOrEqual(width + 1)
+
+            // Die Bewertungsspalte der neueren Zeile: 44 px, wie im Kopfkommentar der
+            // Komponente gerechnet — nicht geschätzt, mit Toleranz für Sub-Pixel-Rundung.
+            const spalte = row(page, neu).locator('[data-forum-vote-spalte]')
+            const spalteBox = await spalte.boundingBox()
+            expect(spalteBox, `${width}px: die Bewertungsspalte hat keine Geometrie`).not.toBeNull()
+            const s = spalteBox as { x: number; width: number }
+            expect(s.width, `${width}px: Bewertungsspalte ${Math.round(s.width)}px breit, erwartet ~44px`).toBeGreaterThanOrEqual(
+                40,
+            )
+            expect(s.width, `${width}px: Bewertungsspalte ${Math.round(s.width)}px breit, erwartet ~44px`).toBeLessThanOrEqual(
+                48,
+            )
+            expect(s.x, `${width}px: die Bewertungsspalte beginnt links ausserhalb`).toBeGreaterThanOrEqual(0)
+            expect(s.x + s.width, `${width}px: die Bewertungsspalte ragt rechts heraus`).toBeLessThanOrEqual(width + 1)
+
+            // Der Punktstand liegt INNERHALB der Spalte.
+            const score = spalte.locator('[data-forum-score]')
+            const scoreBox = await score.boundingBox()
+            expect(scoreBox, `${width}px: der Punktstand hat keine Geometrie`).not.toBeNull()
+            const sc = scoreBox as { x: number; width: number }
+            expect(
+                sc.x,
+                `${width}px: der Punktstand steht links der Spalte`,
+            ).toBeGreaterThanOrEqual(s.x - 1)
+            expect(
+                sc.x + sc.width,
+                `${width}px: der Punktstand ragt rechts aus der Spalte`,
+            ).toBeLessThanOrEqual(s.x + s.width + 1)
+
+            // Der Sortier-Umschalter: sichtbar (zwei Themen liegen vor), rechts ausgerichtet
+            // innerhalb des Viewports. `[data-forum-sortierung]` sitzt auf dem WRAPPER
+            // (`class="flex justify-end pb-2"`), nicht auf `flux:radio.group` selbst — die
+            // gemessene Höhe ist also 3,25 rem (52 px, `h-13!`) PLUS die 0,5 rem (8 px)
+            // `pb-2` des Wrappers = 60 px. Gemessen, nicht die ursprünglich angenommenen
+            // 52 px ohne Polster (Fehler des Specs — ein Wrapper-Attribut wurde für das
+            // Kind-Element gehalten).
+            const umschalter = page.locator('[data-forum-sortierung]')
+            await expect(umschalter, `${width}px: der Sortier-Umschalter fehlt`).toBeVisible({ timeout: 10_000 })
+            const uBox = await umschalter.boundingBox()
+            expect(uBox, `${width}px: der Sortier-Umschalter hat keine Geometrie`).not.toBeNull()
+            const u = uBox as { x: number; y: number; width: number; height: number }
+            expect(u.height, `${width}px: Umschalter ${Math.round(u.height)}px hoch, erwartet ~60px`).toBeGreaterThanOrEqual(
+                56,
+            )
+            expect(u.height, `${width}px: Umschalter ${Math.round(u.height)}px hoch, erwartet ~60px`).toBeLessThanOrEqual(
+                64,
+            )
+            expect(u.x + u.width, `${width}px: der Umschalter ragt rechts heraus`).toBeLessThanOrEqual(width + 1)
+        }
     })
 })

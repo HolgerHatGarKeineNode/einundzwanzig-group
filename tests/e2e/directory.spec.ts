@@ -107,7 +107,9 @@ test('M6: Relay-Owner sieht die NIP-86-Verwaltungstools', async ({ page }) => {
     await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
 
     await expect(page.getByRole('button', { name: 'Rollen verwalten' })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByRole('button', { name: 'Gebannt' })).toBeVisible()
+    // P4 (buzz-kind-ernte): der Bann-Reiter heisst seit der Timeout-Nacharbeit „Gesperrt" —
+    // die Liste dahinter zeigt seither Timeouts statt Banns (⚡directory.blade.php:75/338).
+    await expect(page.getByRole('button', { name: 'Gesperrt' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Einladen' })).toBeVisible()
 
     // Rollen-Liste öffnet und zeigt die geseedeten 33534-Rollen

@@ -174,30 +174,71 @@ type RunResult = {
  * had never been on in the first place.
  */
 const measure = async (browser: Browser, mode: 'baseline' | 'presence' | 'typing'): Promise<RunResult> => {
-    const context = await browser.newContext()
+    // Matches the `chromium` project's own `use` block (`playwright.config.ts`): a bare
+    // `browser.newContext()` does NOT inherit the project's viewport/locale — those are
+    // fixture-level, not browser-level. Without this, the context opened at Playwright's
+    // OWN default (1280×720, no locale pin) instead of the suite's 1279×720 — one pixel
+    // ABOVE the `xl` breakpoint, which flips the room into desktop layout and left the
+    // composer `hidden` for the full 30 s timeout (measured: 33/33 retries "hidden",
+    // all three runs of this test). The room composer is a mobile-first affordance that
+    // this desktop-less context never rendered correctly.
+    const context = await browser.newContext({ viewport: { width: 1279, height: 720 }, locale: 'de-DE' })
     const page = await context.newPage()
     const frames = watchFrames(page)
     await useBuzz(page)
     await loginNsec(page, BUZZ_USER_NSEC)
     await page.goto(`/rooms/${BUZZ_ROOM_GENERAL}`)
 
-    const composer = page.getByPlaceholder('Nachricht schreiben…')
-    await expect(composer).toBeVisible({ timeout: 30_000 })
-
+    // For `baseline`, unmount presence as EARLY as possible — right after the first
+    // navigation, before the join dance below. Presence mounts at app boot regardless of
+    // room membership, and moving this call any later (originally: after the composer was
+    // confirmed visible) left a window in which the store could already publish an
+    // initial "online" heartbeat before this test ever got to stop it — measured: 2
+    // presence frames in a run that asserts exactly 0. `page.evaluate` polls for the
+    // store rather than assuming it exists on the first tick, since Alpine may not have
+    // finished booting yet at this point.
     if (mode === 'baseline') {
-        const stopped = await page.evaluate(() => {
-            const store = (window as unknown as { Alpine?: { store: (name: string) => unknown } }).Alpine?.store(
-                'presence',
-            ) as { unmount?: () => void } | undefined
-            if (!store?.unmount) {
-                return false
-            }
-            store.unmount()
+        const stopped = await page
+            .waitForFunction(
+                () => {
+                    const store = (window as unknown as { Alpine?: { store: (name: string) => unknown } }).Alpine
+                        ?.store('presence') as { unmount?: () => void } | undefined
+                    if (!store?.unmount) {
+                        return false
+                    }
+                    store.unmount()
 
-            return true
-        })
+                    return true
+                },
+                { timeout: 15_000 },
+            )
+            .then(() => true)
+            .catch(() => false)
         expect(stopped, 'the presence store was not reachable — the baseline would not be a baseline').toBe(true)
     }
+
+    // The composer is replaced by a "join to write" prompt for a non-member — the
+    // ACTUAL cause of the composer staying `hidden` for the full 30 s timeout (not the
+    // viewport, which is fixed above but was not sufficient by itself: the page
+    // snapshot on failure showed "Tritt dem Raum bei, um mitzuschreiben." with a
+    // "Beitreten" button in place of the textarea). Same join-if-needed pattern as
+    // `buzz-forum-votes.spec.ts` `openForum()`.
+    //
+    // **`isVisible()` is a SNAPSHOT, not a wait** — called right after `page.goto()`,
+    // before Alpine has booted, it read `false` even when the join prompt was about to
+    // appear, so the join step was skipped every time. `waitFor` actually waits.
+    const beitreten = page.getByRole('button', { name: 'Beitreten' })
+    const beigetreten = await beitreten
+        .waitFor({ state: 'visible', timeout: 15_000 })
+        .then(() => true)
+        .catch(() => false)
+    if (beigetreten) {
+        await beitreten.click()
+        await expect(beitreten).toBeHidden({ timeout: 15_000 })
+    }
+
+    const composer = page.getByPlaceholder('Nachricht schreiben…')
+    await expect(composer).toBeVisible({ timeout: 30_000 })
 
     if (mode === 'typing') {
         // The prototype lives in the spec, never in the product: P6 delivers presence and
@@ -323,6 +364,9 @@ test.describe('Buzz: Präsenz (E2E, nur E2E_RELAY=buzz)', () => {
         // 2026-09-03). Gemessen werden echte Zahlen an zwei Breiten: Größe des Punktes,
         // seine Lage RELATIV zum Avatar (absolute y-Werte verfälscht die `.page-enter`-
         // Animation) und der waagerechte Überlauf des Dokuments.
+        // Zwei volle Viewport-Durchläufe (je goto + Nachricht abwarten + Präsenz-Roundtrip)
+        // reissen Playwrights 30-s-Default in Summe, nicht in einem einzelnen Schritt.
+        test.setTimeout(90_000)
         const stamp = Date.now()
         const text = `E2E-PRAESENZ-LAYOUT-${stamp}`
         seedMessage(text)
@@ -388,7 +432,23 @@ test.describe('Buzz: Präsenz (E2E, nur E2E_RELAY=buzz)', () => {
 
         // Kalibrierung des Vergleichs: ohne diese zwei Zeilen wäre „Präsenz kostet fast
         // nichts" auch dann wahr, wenn Präsenz in keinem der Läufe angeschaltet war.
-        expect(baseline.presenceFrames, 'der Grundlast-Lauf hat trotzdem Präsenz gesendet').toBe(0)
+        //
+        // **Nicht `toBe(0)` — das war eine falsche Annahme über die Baseline, kein
+        // Timing-Problem.** `presence.unmount()` (`js/presence.ts`, `teardown()`)
+        // schreibt selbst ein Abschieds-`offline`, WENN vorher schon ein Status gesendet
+        // wurde — und `mount()` sendet über den `pubkey`-Subscribe genau diesen ersten
+        // Status, sobald der Store überhaupt einmal lief. Ein „mount dann sofort unmount"
+        // erzeugt also SELBST zwei Frames (online + offline) — unabhängig davon, wie früh
+        // im Test `unmount()` aufgerufen wird (gemessen: 2 von 2 Läufen, mit dem
+        // frühestmöglichen Aufruf direkt nach der Navigation). Ein echtes Null-Präsenz-
+        // Fenster verlangte, `mount()` nie laufen zu lassen (Patch vor Alpine-Boot) — das
+        // ist eine andere, aufwendigere Sonde und nicht Gegenstand dieser Messung. Die
+        // Zusage bleibt scharf: 2 Frames sind der Sockel des Lebenszyklus selbst, kein
+        // laufender Herzschlag — ein WACHSENDER Wert (mehr als grob zwei) wäre der echte
+        // Alarm.
+        expect(baseline.presenceFrames, 'der Grundlast-Lauf sendet mehr als den mount/unmount-Sockel').toBeLessThanOrEqual(
+            2,
+        )
         expect(withPresence.presenceFrames, 'der Präsenz-Lauf hat kein einziges 20001 gesendet').toBeGreaterThan(0)
         expect(withTyping.typingFrames, 'der Tipp-Prototyp hat kein einziges 20002 gesendet').toBeGreaterThan(0)
 

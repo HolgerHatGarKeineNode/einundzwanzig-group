@@ -1,7 +1,7 @@
 import { test, expect, type Locator, type Page } from './support/fixtures'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { useZooid, ZOOID_PORT } from './support/zooid'
+import { useZooid, ZOOID_PORT, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
 import { freshKeypair } from './support/keys'
 
@@ -118,6 +118,34 @@ async function clickRowMenuItem(page: Page, row: Locator, name: string | RegExp)
     }).toPass({ timeout: 20_000 })
 }
 
+const nak = (args: string[]): string => {
+    const res = spawnSync(NAK, args, { encoding: 'utf8', timeout: 30_000 })
+
+    return `${res.stdout ?? ''}\n${res.stderr ?? ''}`
+}
+
+/**
+ * Steht die 10003-Liste dieses Pubkeys bereits BEIM RELAY? Unabhängig vom Client
+ * gemessen (`nak req`), nicht über den Alpine-Store.
+ *
+ * **Warum das nötig ist, bevor die Seite verlassen wird.** Ein früherer Zwischenstand
+ * dieses Tests wartete nur auf die LOKALE Repository-Übernahme (der Store meldete das
+ * Merken sofort, `toggle()` legt das Ereignis per welshman-Thunk optimistisch ein) und
+ * navigierte dann direkt zu `/bookmarks`. Das reichte nicht: `page.goto()` ist eine
+ * HARTE Navigation, die den laufenden WebSocket und das In-Memory-Repository komplett
+ * abreißt. War die Relay-Bestätigung (`await waitForPublishError`,
+ * `js/publishOptimistic.ts`) zu diesem Zeitpunkt noch nicht durch, sah die neue Seite
+ * weder den Cold-Start-Cache (Batch-Schreibung ins IndexedDB noch nicht durch) noch den
+ * Relay-Bestand — leerer Zustand, aus einem Grund, der mit der Zusage „übersteht einen
+ * Reload" nichts zu tun hat. Gemessen: unter isolierter Wiederholung 4 von 4 Läufen rot
+ * genau an dieser Stelle. Dieselbe Lehre steht bereits in `pin-room.spec.ts` für die
+ * IndexedDB-Batch-Schreibung: „Auf die Persistenz WARTEN, nicht sofort blocken."
+ */
+const bookmarkOnRelay = (pk: string, nsec: string): boolean =>
+    nak(['req', '--auth', '--sec', nsec, '-k', '10003', '-a', pk, '-l', '1', ZOOID_WS])
+        .split('\n')
+        .some((row) => row.trim().startsWith('{') && row.includes('"kind":10003'))
+
 test('P2: ein Lesezeichen überlebt einen Reload (frisches Keypair)', async ({ page }) => {
     const user = freshKeypair()
 
@@ -134,6 +162,12 @@ test('P2: ein Lesezeichen überlebt einen Reload (frisches Keypair)', async ({ p
     const row = page.locator('div.group', { hasText: MESSAGE })
     await expect(row.first()).toBeVisible({ timeout: 15_000 })
     await clickRowMenuItem(page, row.first(), 'Merken')
+    await expect
+        .poll(() => bookmarkOnRelay(user.pk, user.nsec), {
+            timeout: 15_000,
+            message: 'die 10003-Liste steht noch nicht beim Relay — ein Reload jetzt bewiese nichts',
+        })
+        .toBe(true)
 
     // ── Auf der Fläche sichtbar ─────────────────────────────────────────────────────
     //
@@ -158,7 +192,71 @@ test('P2: ein Lesezeichen überlebt einen Reload (frisches Keypair)', async ({ p
         .poll(() => entry.count(), { timeout: 20_000 })
         .toBeGreaterThan(0)
 
-    // Und die Gegenprobe zur Zusage selbst: der Leerzustand darf NICHT dastehen. Ohne
-    // sie wäre der Test auch auf einer Fläche grün, die den Text irgendwo sonst rendert.
-    await expect(page.getByText('Noch nichts gemerkt.')).toHaveCount(0)
+    // Und die Gegenprobe zur Zusage selbst: der Leerzustand darf NICHT sichtbar dastehen.
+    // Ohne sie wäre der Test auch auf einer Fläche grün, die den Text irgendwo sonst
+    // rendert. **`toBeHidden()`, nicht `toHaveCount(0)`**: der Leerzustand steckt hinter
+    // `x-show` (nicht `x-if`, `⚡bookmarks.blade.php:99`) und bleibt damit als
+    // `display:none`-Knoten im DOM — `toHaveCount` zählt DOM-Präsenz unabhängig von
+    // Sichtbarkeit und wäre hier IMMER `1`, egal ob der Leerzustand zu sehen ist.
+    await expect(page.getByText('Noch nichts gemerkt.')).toBeHidden()
+})
+
+test('P2 LAYOUT: /bookmarks bei schmal (390) und Desktop (1440) — echte Zahlen', async ({ page }) => {
+    // „Sichtbare UI ist erst fertig, wenn sie GEMESSEN wurde" (Nutzeransage
+    // 2026-09-03). Echte Zahlen an zwei Breiten, keine CSS-Klassen-Assertion: waagerechter
+    // Überlauf des Dokuments, dass die Karte im Viewport bleibt, und dass der
+    // Lösen-Knopf innerhalb der Karte liegt.
+    const user = freshKeypair()
+    mgmt(`{"method":"allowpubkey","params":["${user.pk}"]}`)
+
+    await useZooid(page)
+    await loginNsec(page, user.nsec)
+
+    await page.goto('/rooms/welcome')
+    const row = page.locator('div.group', { hasText: MESSAGE })
+    await expect(row.first()).toBeVisible({ timeout: 15_000 })
+    await clickRowMenuItem(page, row.first(), 'Merken')
+    await expect
+        .poll(() => bookmarkOnRelay(user.pk, user.nsec), {
+            timeout: 15_000,
+            message: 'die 10003-Liste steht noch nicht beim Relay — ein Reload jetzt bewiese nichts',
+        })
+        .toBe(true)
+
+    for (const width of [390, 1440]) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.goto('/bookmarks')
+        const entry = page.getByText(MESSAGE)
+        await expect(entry.first()).toBeVisible({ timeout: 20_000 })
+
+        // Kein waagerechter Bildlauf des Dokuments.
+        const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+        expect(scrollWidth, `${width}px: waagerechter Überlauf des Dokuments (${scrollWidth}px)`).toBeLessThanOrEqual(
+            width + 1,
+        )
+
+        // Die Karte selbst bleibt im Bild. `[x-ref="list"]` statt `.surface-card`: die
+        // Klasse ist nicht eindeutig — bei 1440px trägt auch ein unsichtbares Popover der
+        // Desktop-Rail (`desktop-rail.blade.php:500`) dieselbe Klasse und steht im DOM
+        // VOR der Lesezeichen-Karte, `.first()` traf also das falsche, unsichtbare
+        // Element (`boundingBox()` lieferte `null`). Gemessen: 2 von 2 Läufen bei 1440px
+        // rot, 390px stets grün — genau das Muster einer DOM-Reihenfolge-Kollision.
+        const card = page.locator('[x-ref="list"]')
+        const box = await card.boundingBox()
+        expect(box, `${width}px: die Karte hat keine Geometrie`).not.toBeNull()
+        const b = box as { x: number; width: number }
+        expect(b.x, `${width}px: die Karte beginnt links ausserhalb`).toBeGreaterThanOrEqual(0)
+        expect(b.x + b.width, `${width}px: die Karte ragt rechts heraus`).toBeLessThanOrEqual(width + 1)
+
+        // Der Lösen-Knopf liegt INNERHALB der Karte, nicht am Rand hinausgeschoben.
+        const removeBtn = page.locator('[data-bookmark-remove="entry"]').first()
+        await expect(removeBtn).toBeVisible({ timeout: 10_000 })
+        const rbox = await removeBtn.boundingBox()
+        expect(rbox, `${width}px: der Lösen-Knopf hat keine Geometrie`).not.toBeNull()
+        const r = rbox as { x: number; width: number }
+        expect(
+            r.x + r.width,
+            `${width}px: der Lösen-Knopf endet bei ${Math.round(r.x + r.width)}px, die Karte bei ${Math.round(b.x + b.width)}px`,
+        ).toBeLessThanOrEqual(b.x + b.width + 1)
+    }
 })

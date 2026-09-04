@@ -264,7 +264,10 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
 
             return (el?._x_dataStack?.[0]?.groups ?? []).map((g) => g.key)
         })
-        expect(jumpOrder).toEqual(['rooms', 'workspace', 'meetups', 'proposals'])
+        // P7 (buzz-kind-ernte) fügte „dms" in `RAIL_GROUP_ORDER` an dritter Stelle ein
+        // (`js/railGroups.ts:90`) — diese Zeile war seither stale (Fehler des Specs,
+        // nicht des Produkts: die Reihenfolge hat sich absichtlich geändert).
+        expect(jumpOrder).toEqual(['rooms', 'workspace', 'dms', 'meetups', 'proposals'])
 
         // Und die Folge, die das Auge sieht. Gruppen ohne Bestand rendern gar
         // nicht (`rail-group.blade.php`), deshalb wird gegen die GEFILTERTE Liste

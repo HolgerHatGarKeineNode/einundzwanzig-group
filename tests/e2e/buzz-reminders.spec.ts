@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page } from './support/fixtures'
 import { useBuzz, BUZZ_PORT, BUZZ_USER_NSEC, BUZZ_USER_PUB, BUZZ_OWNER_SEC_HEX, BUZZ_ROOM_GENERAL } from './support/buzz'
 import { loginNsec } from './support/login'
 import { spawnSync } from 'node:child_process'
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 
 /**
  * P5 — **private Erinnerungen (NIP-ER, kind 30300)** an der echten Fläche gegen einen
@@ -142,6 +143,13 @@ test.describe('Buzz: private Erinnerungen (E2E, nur E2E_RELAY=buzz)', () => {
     test.skip(process.env.E2E_RELAY !== 'buzz', 'nur im Buzz-Modus (E2E_RELAY=buzz) relevant')
 
     test('eine Erinnerung wird verschlüsselt geschrieben und erscheint fällig in den Updates', async ({ page }) => {
+        // Ohne eigenes Limit greift Playwrights Default von 30 s — dieser Fall verkettet
+        // aber mehrere 20–30-s-Polls (Draht-Bestätigung, Fälligkeit nach Uhr-Vorstellung,
+        // Ersetzung nach „Erledigt") allein schon in Summe über 30 s. Gemessen: der Fall
+        // riss regelmäßig genau an der LETZTEN Prüfung ab — nicht weil sie selbst hing,
+        // sondern weil das Gesamtbudget vorher aufgebraucht war. Gleiche Lehre wie bei
+        // `buzz-timeout.spec.ts` (`test.setTimeout(150_000)`).
+        test.setTimeout(150_000)
         const stamp = Date.now()
         const text = `E2E-ERINNERUNG-${stamp}`
         seedMessage(text)
@@ -211,8 +219,29 @@ test.describe('Buzz: private Erinnerungen (E2E, nur E2E_RELAY=buzz)', () => {
         await expect(page.getByText(text)).toBeVisible({ timeout: 30_000 })
 
         // ── Erledigt: die Zeile verschwindet und der Relay sieht die Ersetzung ─────
+        //
+        // Auf die EIGENE Zeile scopen, nicht `.first()` — die geteilte Buzz-Testidentität
+        // sammelt Erinnerungen über Läufe hinweg an (Kopfkommentar dieser Datei), und ein
+        // zweiter Test im selben Worker könnte eine eigene Zeile im DOM haben.
+        //
+        // **Die Uhr VOR dem Klick zurückstellen — das ist der eigentliche Fund.**
+        // `page.clock` ersetzt `Date.now()` GLOBAL im Seitenkontext, und `finish()` baut
+        // den Ersetzungs-`created_at` genau darüber (`Math.floor(Date.now()/1000)`,
+        // `js/reminders.ts`). Nach 13 × `runFor(300_000)` steht die Seitenuhr ~65 min VOR
+        // der echten Relay-Uhr — weit außerhalb jedes plausiblen Ingest-Toleranzfensters
+        // (±900 s an anderer Stelle in diesem Relay bereits gemessen, R7/R4 des Plans).
+        // Der Relay verwarf die Ersetzung deshalb STILL (kein Fehler auf der Fläche, sie
+        // zeigt die Zeile ja optimistisch als verschwunden — das Requery blieb aber jedes
+        // Mal bei der ALTEN Erinnerung mit `not_before`, 3 von 3 Läufen). Ein Reset auf
+        // die echte Zeit ändert nichts an der Fälligkeit: die wird nur bei einem neuen
+        // Store-Emit neu berechnet, nie von einem Uhr-Tick allein.
+        await page.clock.setSystemTime(Date.now())
+
         const d = tagValues(reminder, 'd')[0]
-        await page.getByRole('button', { name: 'Erinnerung erledigt' }).first().click()
+        const eigeneZeile = page
+            .locator('section[aria-labelledby="reminders-heading"] div.divide-y > div')
+            .filter({ hasText: text })
+        await eigeneZeile.getByRole('button', { name: 'Erinnerung erledigt' }).click()
         await expect(page.getByText(text)).toBeHidden({ timeout: 30_000 })
 
         // Die Ersetzung trägt dasselbe `d`, KEIN `not_before` (sonst bliebe sie in der
@@ -225,7 +254,11 @@ test.describe('Buzz: private Erinnerungen (E2E, nur E2E_RELAY=buzz)', () => {
 
                     return head ? tagValues(head, 'not_before').length : -1
                 },
-                { message: 'die erledigte Erinnerung trägt weiterhin ein not_before', timeout: 20_000 },
+                // 30 s statt 20 s: gemessen unter voller Worker-Auslastung (4 parallele
+                // Buzz-Docker-Stacks) reichten 20 s nicht durchgehend — jeder `nak`-Aufruf
+                // fährt seine eigene NIP-42-AUTH-Runde, und die Ersetzung ist eine echte
+                // Relay-Schreibung, kein lokaler Zustand.
+                { message: 'die erledigte Erinnerung trägt weiterhin ein not_before', timeout: 30_000 },
             )
             .toBe(0)
         const erledigt = myReminders().find((row) => tagValues(row, 'd')[0] === d) as RelayRow
@@ -243,7 +276,11 @@ test.describe('Buzz: private Erinnerungen (E2E, nur E2E_RELAY=buzz)', () => {
         // Datei, weil er dieselbe Vorbedingung hat (laufender Buzz-Slot) und dasselbe
         // `test.skip`.
         expect(page).toBeTruthy()
-        const fremd = 'b'.repeat(64)
+        // Ein ECHTER Pubkey, nicht ein wiederholtes Zeichen: `'b'.repeat(64)` ist zwar 64
+        // Hex-Zeichen lang, aber kein gültiger Punkt auf der secp256k1-Kurve — `nak`
+        // verweigert ihn selbst mit „invalid pubkey … expected hex, npub, or nprofile"
+        // und der Fall maß dann nur seine eigene fehlerhafte Eingabe.
+        const fremd = getPublicKey(generateSecretKey())
         const out = nak(['req', '--auth', '--sec', BUZZ_USER_NSEC, '-k', '30300', '-a', fremd, '-l', '5', WS()])
 
         expect(out, 'ein REQ auf fremde Erinnerungen muss abgewiesen werden').toMatch(/author-only|restricted/i)
@@ -257,6 +294,9 @@ test.describe('Buzz: private Erinnerungen (E2E, nur E2E_RELAY=buzz)', () => {
         // „Sichtbare UI ist erst fertig, wenn sie GEMESSEN wurde" (Nutzeransage
         // 2026-09-03). Gemessen werden echte Zahlen an zwei Breiten, nicht CSS-Klassen:
         // Breite der Sektion, waagerechter Überlauf und die Lage der beiden Knöpfe.
+        // Gleiches Budget-Problem wie im ersten Fall dieser Datei: die Uhr-Vorstellung
+        // plus zwei Viewport-Durchläufe reißen Playwrights 30-s-Default.
+        test.setTimeout(150_000)
         const stamp = Date.now()
         const text = `E2E-ERINNERUNG-LAYOUT-${stamp}`
         seedMessage(text)

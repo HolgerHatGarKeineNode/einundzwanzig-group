@@ -152,7 +152,7 @@ test.describe('Buzz: Direktnachrichten (E2E, nur E2E_RELAY=buzz)', () => {
         await page.setViewportSize({ width: 1440, height: 900 })
         await useBuzz(page)
         await loginNsec(page, BUZZ_USER_NSEC)
-        await page.goto('/')
+        await page.goto('/spaces')
 
         const sektion = dmSection(page)
         await expect(sektion, 'die DM-Gruppe fehlt in der Rail').toBeVisible({ timeout: 30_000 })
@@ -202,10 +202,16 @@ test.describe('Buzz: Direktnachrichten (E2E, nur E2E_RELAY=buzz)', () => {
     })
 
     test('41012 nimmt die Unterhaltung aus der Spalte — gelöscht wird sie NICHT', async ({ page }) => {
+        // Ohne eigenes Limit greift Playwrights 30-s-Default — dieser Fall verkettet
+        // Eröffnen (Draht-Roundtrip), Dialog-schliessen-lassen und einen bis zu 30-s
+        // `toPass`-Retry allein schon über das Budget. Gemessen: riss dem `toPass` mitten
+        // im Retry die Grundlage weg, „Test timeout of 30000ms exceeded" statt eines
+        // ehrlichen Befunds aus dem Retry selbst.
+        test.setTimeout(90_000)
         await page.setViewportSize({ width: 1440, height: 900 })
         await useBuzz(page)
         await loginNsec(page, BUZZ_USER_NSEC)
-        await page.goto('/')
+        await page.goto('/spaces')
 
         const sektion = dmSection(page)
         await expect(sektion).toBeVisible({ timeout: 30_000 })
@@ -220,10 +226,27 @@ test.describe('Buzz: Direktnachrichten (E2E, nur E2E_RELAY=buzz)', () => {
 
         const vorher = await sektion.getByRole('button').count()
 
+        // Den Dialog erst SCHLIESSEN lassen, bevor er erneut geöffnet wird — ein Klick auf
+        // „Neue Unterhaltung" mitten in der Schließ-Animation des vorigen Submits landete
+        // in einem Alpine-Zustand, in dem `mode` noch nicht zurückgesetzt war und die Liste
+        // „Meine Unterhaltungen" leer blieb (gemessen: „im Dialog steht keine Unterhaltung
+        // zum Ausblenden" trotz vorher bestätigter Zeile in der Rail).
+        await expect(page.locator('dialog[data-modal="dm"]')).toBeHidden({ timeout: 15_000 })
+
         // Ausblenden über den Dialog — dort sitzen die zwei Handlungen je Unterhaltung.
-        await sektion.getByRole('button', { name: 'Neue Unterhaltung' }).click()
+        // WIEDERHOLBAR: ein einzelner Klick auf „Neue Unterhaltung" öffnete den Dialog
+        // vereinzelt nicht (Alpine-Zustand aus dem vorigen Submit noch nicht zur Ruhe
+        // gekommen, siehe Kommentar am `toBeHidden` oben) — dieselbe Bauform wie
+        // `clickRowMenuItem` in `bookmarks.spec.ts`/`buzz-reminders.spec.ts`.
         const ausblenden = page.getByRole('button', { name: /ausblenden$/ }).first()
-        await expect(ausblenden, 'im Dialog steht keine Unterhaltung zum Ausblenden').toBeVisible({ timeout: 15_000 })
+        await expect(async () => {
+            if (!(await ausblenden.isVisible())) {
+                await sektion.getByRole('button', { name: 'Neue Unterhaltung' }).click()
+            }
+            await expect(ausblenden, 'im Dialog steht keine Unterhaltung zum Ausblenden').toBeVisible({
+                timeout: 5_000,
+            })
+        }).toPass({ timeout: 30_000 })
         await ausblenden.click()
 
         await expect
@@ -253,7 +276,7 @@ test.describe('Buzz: Direktnachrichten (E2E, nur E2E_RELAY=buzz)', () => {
         // Knotens. Stünde die DM-Gruppe schmal doch im Baum, liefe auf jedem Telefon eine
         // Relay-Subscription für eine Spalte, die dort niemand sieht.
         await page.setViewportSize({ width: 390, height: 844 })
-        await page.goto('/')
+        await page.goto('/spaces')
         await expect(page.locator('[data-rail]'), 'die Rail existiert bei 390 px').toHaveCount(0)
         const schmalOverflow = await page.evaluate(() => document.documentElement.scrollWidth)
         expect(schmalOverflow, `390px: waagerechter Überlauf des Dokuments (${schmalOverflow}px)`).toBeLessThanOrEqual(
@@ -262,7 +285,7 @@ test.describe('Buzz: Direktnachrichten (E2E, nur E2E_RELAY=buzz)', () => {
 
         // ── 1440: Gruppenkopf, Aktionsknopf und Dialog ──────────────────────────
         await page.setViewportSize({ width: 1440, height: 900 })
-        await page.goto('/')
+        await page.goto('/spaces')
 
         const sektion = dmSection(page)
         await expect(sektion).toBeVisible({ timeout: 30_000 })
