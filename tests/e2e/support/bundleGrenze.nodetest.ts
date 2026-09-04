@@ -108,6 +108,20 @@ const bootChunks = (mf: Record<string, ManifestEintrag>): string[] => {
     return [...gesehen].map((schluessel) => mf[schluessel]!.file)
 }
 
+/** Every built JS chunk whose text contains `needle` — the calibration for the searches below. */
+const chunksContaining = (mf: Record<string, ManifestEintrag>, needle: string): string[] =>
+    Object.values(mf)
+        .map((eintrag) => eintrag.file)
+        .filter((datei) => datei.endsWith('.js') && existsSync(join(buildDir, datei)))
+        .filter((datei) => readFileSync(join(buildDir, datei), 'utf8').includes(needle))
+
+/** The same search, narrowed to the chunks the boot path pulls in STATICALLY. */
+const bootChunksContaining = (mf: Record<string, ManifestEintrag>, needle: string): string[] => {
+    const boot = new Set(bootChunks(mf))
+
+    return chunksContaining(mf, needle).filter((datei) => boot.has(datei))
+}
+
 describe('Bundle-Grenze: der Renderer bleibt aus dem Boot-Pfad', () => {
     test('KALIBRIERUNG: der Test sieht ein echtes Bündel', () => {
         const mf = manifest()
@@ -213,6 +227,48 @@ describe('Bundle-Grenze: der Renderer bleibt aus dem Boot-Pfad', () => {
             `markdown-it ist im Boot-Pfad gelandet (${treffer.join(', ')}). Das kostet rund 48 kB gzip auf JEDER Seite. ` +
                 'Ursache ist fast immer ein WERT-Import aus `js/longform.ts` in einem Modul, das an `core.ts` oder ' +
                 '`bridge.ts` hängt — Kind-Zahlen kommen aus dem importfreien `js/longformKinds.ts`, Typen nur als `import type`.',
+        )
+    })
+
+    /**
+     * **The second heavy library that must not ride along on every page: the QR renderer.**
+     *
+     * Measured 2026-09-04 by source-map attribution against the built `app` chunk: `qrcode`
+     * accounted for 22 182 B raw in it — on EVERY page, for four surfaces a minority of
+     * sessions ever opens (wallet receive sheet, the two zap QR fallbacks, desktop NIP-46
+     * login). Moving it behind `import()` in `bridge.ts` (`qrDataUrl`) took the `app` chunk
+     * from 112 635 to 103 520 B gzip, i.e. **9 115 B gzip off every page**, with the boot
+     * chunk count unchanged at 6.
+     *
+     * **Why a case of its own and not one more needle in the one above.** The two come back
+     * by different routes and need different advice: markdown-it returns through a VALUE
+     * import out of `longform.ts` in some module far away, the QR renderer returns the moment
+     * someone turns `qrDataUrl` back into a top-level `import QRCode from 'qrcode'` — a
+     * one-line change that reads like a cleanup and is invisible in review.
+     *
+     * **The needle is a string literal of the library, not its package name.** Its browser
+     * entry is bundled as `browser-*.js` and the built chunk contains the word `qrcode`
+     * nowhere at all — a grep for the package name would be green by construction, which is
+     * fail-open and exactly the hole this file exists to avoid. `Invalid QR Code version` is
+     * thrown by `qrcode/lib/core/version.js` and survives minification; the calibration below
+     * fails the case if it ever stops appearing anywhere in the bundle.
+     */
+    test('KERNBEWEIS: auch der QR-Renderer liegt in KEINEM Chunk des Boot-Pfads', () => {
+        const mf = manifest()
+        const needle = 'Invalid QR Code version'
+        // Calibration in the same case, not in a neighbouring one: without the needle
+        // somewhere in the bundle the search below inspects the empty set and is green for
+        // the wrong reason.
+        assert.ok(
+            chunksContaining(mf, needle).length > 0,
+            `Der Suchtext "${needle}" steckt in KEINEM Chunk — dann misst dieser Fall nichts. Entweder ist qrcode ganz aus dem Bündel verschwunden (dann gehört dieser Riegel weg), oder die Bibliothek hat ihren Fehlertext geändert (dann gehört der Suchtext nachgezogen).`,
+        )
+
+        assert.deepEqual(
+            bootChunksContaining(mf, needle),
+            [],
+            `qrcode ist im Boot-Pfad gelandet (${bootChunksContaining(mf, needle).join(', ')}). Das kostet rund 9 kB gzip auf JEDER Seite. ` +
+                'Ursache ist fast immer ein Toplevel-`import QRCode from \'qrcode\'`; der Renderer gehört hinter das `import()` in `qrDataUrl` (`js/bridge.ts`).',
         )
     })
 
