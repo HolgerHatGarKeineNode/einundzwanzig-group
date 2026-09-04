@@ -55,9 +55,18 @@
  *
  * | Lage | Kopf | Suchfeld | Liste | Fußzeile |
  * |---|---|---|---|---|
- * | mit `workspace_url`, Space ungeladen | 60 | 36 | 532 | 264 |
- * | ohne `workspace_url`, Space ungeladen | 60 | 36 | 570 | **226** |
- * | mit `workspace_url`, Space MIT Beschreibung | **64** | 36 | **528** | 264 |
+ * | mit `workspace_url`, Space ungeladen | 60 | 36 | 494 | 302 |
+ * | ohne `workspace_url`, Space ungeladen | 60 | 36 | 532 | **264** |
+ * | mit `workspace_url`, Space MIT Beschreibung | **64** | 36 | **490** | 302 |
+ *
+ * RE-MEASURED 2026-09-04: the footer grew by 38 px (264 → 302 with a workspace,
+ * 226 → 264 without), the list gave the same 38 px back. The cause is a THIRD area
+ * row in the rail footer — „Lesezeichen", added by P2 of this plan next to „Artikel"
+ * and „Forge". `rail-skelett.blade.php` had kept reserving two, so the rail and its
+ * placeholder disagreed by exactly one `min-h-9` row plus its `mt-0.5`: a 38 px jump
+ * at boot, the very failure this whole file is written against. The placeholder now
+ * renders three rows (two without a workspace) and the numbers above are the fresh
+ * measurement of BOTH sides, not a correction of the expectation alone.
  *
  * Die dritte Zeile stand bis 2026-08-26 als `64,8 | 36 | 527,2` da. Die Nachkomma-
  * stelle kam aus der Beschreibungszeile in `text-[0.7rem]` (Zeilenbox 16,8 px); die
@@ -401,9 +410,9 @@ test('Platzhalter und echte Rail sind Block für Block dimensionsgleich — MIT 
 
     expect(rail).toEqual(platzhalter)
     // Und die Zahlen selbst, damit ein gemeinsamer Umbau beider Seiten auffällt statt
-    // stillschweigend „gleich" zu bleiben. Kopf 60 · Suchfeld 36 · Liste 532 · Fußzeile
-    // 264 (zwei Flächenzeilen, drei Nav-Zeilen, Profilzeile).
-    expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 532, 264])
+    // stillschweigend „gleich" zu bleiben. Kopf 60 · Suchfeld 36 · Liste 494 · Fußzeile
+    // 302 (drei Flächenzeilen, drei Nav-Zeilen, Profilzeile).
+    expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 494, 302])
 })
 
 testOhneWorkspace(
@@ -416,21 +425,24 @@ testOhneWorkspace(
         // Fehler wie auf der Bühne, nur eine Ebene tiefer.
         //
         // Eine Zusage, die nur in EINER Konfiguration gemessen ist, gilt auch nur dort.
+        // Und sie hat sich bewährt: 2026-09-04 hat genau dieser Fall denselben Fehler ein
+        // zweites Mal gemeldet, diesmal in der anderen Richtung — die Lesezeichen-Zeile
+        // aus P2 stand in der Rail und nicht im Platzhalter (Kopf dieser Datei).
         await page.setViewportSize({ width: BREITE, height: 900 })
         await vorDemBoot(page, { ohneSpaceMetadaten: true })
         const { platzhalter, rail } = await vergleich(page)
 
         expect(rail).toEqual(platzhalter)
-        // 226 = 264 − 36 (`min-h-9`) − 2 (`mt-0.5`): genau die fehlende Forge-Zeile.
+        // 264 = 302 − 36 (`min-h-9`) − 2 (`mt-0.5`): genau die fehlende Forge-Zeile.
         // Die Liste bekommt die 38 px, weil sie die einzige Fläche mit `flex-1` ist.
-        expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 570, 226])
+        expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 532, 264])
     },
 )
 
 for (const { hoehe, gibtDieListeAb } of [
     { hoehe: 900, gibtDieListeAb: 'alles' },
-    { hoehe: 380, gibtDieListeAb: 'alles' },
-    { hoehe: 379, gibtDieListeAb: 'teilweise' },
+    { hoehe: 418, gibtDieListeAb: 'alles' },
+    { hoehe: 417, gibtDieListeAb: 'teilweise' },
     { hoehe: 360, gibtDieListeAb: 'nichts' },
 ] as const) {
     test(`die Space-Beschreibung ist die eine Höhe, die der Server nicht kennt — 1440×${hoehe}`, async ({ page }) => {
@@ -452,6 +464,13 @@ for (const { hoehe, gibtDieListeAb } of [
         // als 1440×379 weiter (gemessen: 376 und tiefer = „nichts", 377–379 = Teil-Fall,
         // 380 und höher = „alles").
         //
+        // MOVED AGAIN 2026-09-04, and this time not by a fraction: the boundary is at
+        // **418 px**, because the footer grew by 38 px (the bookmarks row of P2, see the
+        // head of this file). The 380 in the paragraph above is history — what carries
+        // the number today is the formula and the measured series below. The four cases
+        // moved with it: 418 is the boundary, 417 the partial case, 360 stays the deep
+        // one. Nothing about the RULE changed, only the height at which it kicks in.
+        //
         // Zwei Fassungen dieses Absatzes waren vorher falsch, und beide auf dieselbe
         // Weise: sie behaupteten mehr, als gemessen war.
         //
@@ -465,22 +484,24 @@ for (const { hoehe, gibtDieListeAb } of [
         // SOLANGE sie Spiel hat, und ihr Boden ist das eigene `pb-2` (8 px). Der Platz,
         // den die Spalte im gewachsenen Zustand braucht, ist
         //
-        //     64 (Kopf MIT Beschreibung) + 36 (Suchfeld) + 8 (mb-2) + 264 (Fußzeile)
-        //   +  8 (pb-2 der Liste)                                         = **380 px**
+        //     64 (Kopf MIT Beschreibung) + 36 (Suchfeld) + 8 (mb-2) + 302 (Fußzeile)
+        //   +  8 (pb-2 der Liste)                                         = **418 px**
         //
         // Ab da federt die Liste vollständig, darunter teilt sie sich die 4 px mit der
         // Fußzeile, und sobald mehr als 4 px fehlen, wandert die Fußzeile ganz.
         //
-        // Am gerenderten Element gemessen (2026-08-21, Sonde über sechs Höhen):
+        // Am gerenderten Element gemessen (2026-09-04, Sonde über zwölf Höhen; die Reihe
+        // vom 2026-08-21 stand bis dahin hier und lag um dieselben 38 px tiefer):
         //   1440×900  Kopf +4 · Liste −4 · Fußzeile-y ±0
-        //   1440×380  Kopf +4 · Liste −4 · Fußzeile-y ±0     ← genau die Grenze
-        //   1440×379  Kopf +4 · Liste −3 · Fußzeile-y **+1**
-        //   1440×378  Kopf +4 · Liste −2 · Fußzeile-y **+2**
-        //   1440×377  Kopf +4 · Liste −1 · Fußzeile-y **+3**
-        //   1440×376  Kopf +4 · Liste ±0 · Fußzeile-y **+4**
+        //   1440×424  Kopf +4 · Liste −4 · Fußzeile-y ±0
+        //   1440×418  Kopf +4 · Liste −4 · Fußzeile-y ±0     ← genau die Grenze
+        //   1440×417  Kopf +4 · Liste −3 · Fußzeile-y **+1**
+        //   1440×416  Kopf +4 · Liste −2 · Fußzeile-y **+2**
+        //   1440×415  Kopf +4 · Liste −1 · Fußzeile-y **+3**
+        //   1440×414  Kopf +4 · Liste ±0 · Fußzeile-y **+4**
         //   1440×360  Kopf +4 · Liste ±0 · Fußzeile-y **+4**
         //
-        // Der Rest bei 377–379 ist kein Rauschen, sondern genau der fehlende Betrag —
+        // Der Rest bei 415–417 ist kein Rauschen, sondern genau der fehlende Betrag —
         // das ist die Probe auf die Formel. Alle drei Lagen laufen hier als eigener
         // Fall: eine Regel, die nur an einer Stelle geprüft ist, ist keine Regel,
         // sondern ein Messpunkt, und zwei Stellen haben den Teilbereich dazwischen
@@ -522,9 +543,9 @@ for (const { hoehe, gibtDieListeAb } of [
             expect(listeGibtAb).toBeCloseTo(4, 2)
             expect(fussWandert).toBe(0)
         } else if (gibtDieListeAb === 'teilweise') {
-            // 380 − 379 = 1 px fehlt der Spalte, genau der wandert.
-            expect(fussWandert).toBeCloseTo(380 - hoehe, 2)
-            expect(listeGibtAb).toBeCloseTo(4 - (380 - hoehe), 2)
+            // 418 − 417 = 1 px fehlt der Spalte, genau der wandert.
+            expect(fussWandert).toBeCloseTo(418 - hoehe, 2)
+            expect(listeGibtAb).toBeCloseTo(4 - (418 - hoehe), 2)
         } else {
             // Mehr als 4 px fehlen: die Liste steht auf ihrem Boden, die Fußzeile
             // nimmt alles.
