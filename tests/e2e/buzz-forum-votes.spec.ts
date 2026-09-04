@@ -40,10 +40,16 @@ import { spawnSync } from 'node:child_process'
  *    Kind-Allowlist), und der Riegel `mayWriteKind` sperrt die Fläche dort — der
  *    Fall wäre also nicht „rot", sondern gegenstandslos. Daher `test.skip`.
  *
- * **Stand: geschrieben, noch nie gelaufen.** Er gehört in den gesammelten
- * E2E-Schlusslauf des Plans und wird dort einmal kalibriert (absichtlich rot
- * machen, zurückbauen) — ein Spec, den niemand hat scheitern sehen, ist nicht als
- * Wächter bekannt.
+ * **Stand: gelaufen und kalibriert am 2026-09-04**, im gesammelten E2E-Schlusslauf
+ * des Plans. Kalibriert wurde am Produkt (`isLaterVote` invertiert), nicht am Test —
+ * ein Spec, den niemand hat scheitern sehen, ist nicht als Wächter bekannt.
+ *
+ * Dieser Absatz sagte bis zum 2026-09-04 „geschrieben, noch nie gelaufen", während der
+ * Rumpf derselben Datei bereits eigene Messwerte trug („gemessen: 2 von 4 Läufen"). Ein
+ * Nachfolgelauf hatte den Rumpf korrigiert und den Kopf stehen lassen. Beide Leseweisen
+ * schaden: entweder kalibriert jemand nach, was längst kalibriert ist, oder er traut einem
+ * Wächter nicht, der trägt. **Kein Test bewacht Prosa** — wer den Rumpf anfasst, zieht den
+ * Kopf mit.
  */
 
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
