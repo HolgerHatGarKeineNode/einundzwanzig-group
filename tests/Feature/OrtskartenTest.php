@@ -340,8 +340,11 @@ test('genau fünf Views übergeben eine width-Prop — belegt am Quelltext, nich
         '⚡forge-repo.blade.php',
         '⚡forge.blade.php',
     ]);
-    // Stand 2026-08-27: 15 Views im Verzeichnis (13 + die zwei neuen).
-    expect(count(glob($wurzel.'/*.blade.php') ?: []))->toBe(15);
+    // Stand 2026-09-03: 16 Views im Verzeichnis (15 + `⚡bookmarks`, P2). Die
+    // Lesezeichen-Fläche reicht ABSICHTLICH keine `width` durch — sie ist eine
+    // Liste wie `/updates`, keine dichte Fläche wie die Forge; sie steht deshalb
+    // in der Zählung, aber nicht in der Aufzählung darüber.
+    expect(count(glob($wurzel.'/*.blade.php') ?: []))->toBe(16);
 });
 
 // ── Der Einstieg in die Autorenseite (Schritt 25a) ──────────────────────────────────

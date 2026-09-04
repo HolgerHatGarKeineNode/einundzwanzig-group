@@ -22,15 +22,50 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
         const required = [
             0, 5, 7, 9, 1018, 1068, 1111, 1984,
             9000, 9001, 9002, 9005, 9007, 9008, 9021, 9022, 9041, 9734,
+            // 10003 (NIP-51 Lesezeichenliste) seit P2 — ohne diese Berechtigung kann ein
+            // Amber-Nutzer nichts merken. 30003 steht bewusst NICHT hier: Lesezeichen-Sets
+            // werden nur gelesen, dieser Client signiert sie nie.
+            10003,
             10009, 22242, 27235, 28934, 28936,
             // 30078 (NIP-78 App-Data) = Lesestand. Publiziert wird er erst in P6 —
             // die Berechtigung muss trotzdem heute schon drinstehen, weil welshman die
             // Rechte einer bestehenden Amber-Verbindung nie nachverhandelt.
             30078,
+            // 45002 (Buzz-Forum-Bewertung) seit P3. Buzz-only — aber die Perm-Liste ist
+            // relay-unabhängig: sie wird beim KOPPELN einmal ausgehandelt, lange bevor
+            // feststeht, welchen Space der Nutzer öffnet, und welshman verhandelt eine
+            // bestehende Verbindung nie nach.
+            45002,
+            // 9042/9043 (Buzz-Timeout und dessen Aufhebung) seit P4 — die einzige
+            // Maßnahme gegen eine Person, die diese Oberfläche noch anbietet. Auch hier
+            // gilt: Buzz-only, aber die Perm-Liste wird beim KOPPELN ausgehandelt, lange
+            // bevor feststeht, welchen Space der Nutzer öffnet.
+            9042, 9043,
+            // 30300 (NIP-ER, private Erinnerung) seit P5 — wieder Buzz-only, wieder beim
+            // KOPPELN ausgehandelt. Der `content` ist NIP-44-Chiffrat an den eigenen
+            // Schlüssel; `nip44_encrypt`/`nip44_decrypt` stehen seit der 10009-Space-Liste
+            // in NIP46_PERMS und werden vom Fall darunter geprüft. Ohne SIE könnte ein
+            // Amber-Nutzer die Erinnerung signieren und danach nie wieder lesen.
+            30300,
+            // 20001 (Buzz-Praesenz) seit P6 — der einzige Eintrag dieser Liste, der
+            // WIEDERKEHREND signiert wird (Herzschlag alle 45 s, solange ein Raum offen
+            // ist). Fehlte er, promptete ein Bunker im Minutentakt statt einmal beim
+            // Koppeln, und weil bestehende Verbindungen nie nachverhandelt werden, waere
+            // die Praesenz fuer frueher gekoppelte Nutzer entweder tot oder eine Lawine.
+            20001,
         ]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
         }
+    })
+
+    test('enthält KEIN sign_event:20002 — der Tipp-Indikator wird nicht geschrieben', () => {
+        // Gegenrichtung derselben Zusage: P6 hat 20002 GEMESSEN und ausdruecklich nicht
+        // ausgeliefert (Entscheidung 2026-09-03). Ein Recht fuer eine Art, die dieser
+        // Client nie signiert, waere eine falsche Angabe in einer Liste, deren Beleg
+        // ausdruecklich die Aufrufstelle ist — und die naechste Runde laese es als
+        // „gibt es also".
+        expect(perms).not.toContain('sign_event:20002')
     })
 
     test('enthält nip44 encrypt/decrypt, aber kein nip04 (Client nutzt nur nip44)', () => {

@@ -211,7 +211,12 @@ async function setExpanded(toggle: Locator, open: boolean): Promise<void> {
 }
 
 const topicButton = (page: Page, forum: ForumFixture) =>
-    page.getByRole('button', { name: new RegExp(`Thema ${forum.topicTitle.slice(0, 20)}`) })
+    // ` öffnen` ist Pflicht im Muster seit P3 (buzz-kind-ernte): die neuen
+    // Bewertungspfeile tragen ebenfalls `aria-label="Thema <title> befürworten/
+    // ablehnen"`, ohne das Suffix träfe dieser Locator drei Knöpfe statt einem
+    // (Strict-Mode-Verstoß, Fehler des Specs — die Fläche hat sich absichtlich
+    // geändert, der Selektor zog nicht mit).
+    page.getByRole('button', { name: new RegExp(`Thema ${forum.topicTitle.slice(0, 20)}.*öffnen`) })
 const joinButton = (page: Page) => page.getByRole('button', { name: 'Beitreten' })
 const composer = (page: Page) => page.getByPlaceholder('Nachricht schreiben…')
 
@@ -390,7 +395,7 @@ test.describe('Buzz-Workspace: der Forum-Modus (E2E, nur E2E_RELAY=buzz)', () =>
 
                     // Stufe 1 — optimistisch. Das Blatt schließt, die Zeile steht.
                     await expect(blatt).toBeHidden({ timeout: 30_000 })
-                    const zeile = page.getByRole('button', { name: new RegExp(`Thema ${marke}`) })
+                    const zeile = page.getByRole('button', { name: new RegExp(`Thema ${marke}.*öffnen`) })
                     await expect(zeile, 'die neue Zeile steht sofort (optimistisch)').toBeVisible({ timeout: 30_000 })
 
                     // Kein Fehlerkasten: der Ausgang ist sichtbar und er ist Erfolg.

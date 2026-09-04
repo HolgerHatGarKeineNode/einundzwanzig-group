@@ -172,34 +172,29 @@ test('P4: normaler User sieht keine Raum-Verwaltung', async ({ page }) => {
 })
 
 /**
- * P4b (Raum-Mitglieder, NIP-29 9000/9001) — der Admin öffnet die Mitgliederliste
- * eines Raums, fügt einen Pubkey per npub hinzu (allowpubkey + kind 9000 → 39002)
- * und entfernt ihn wieder (kind 9001). Self-contained (Wegwerf-Raum + -Pubkey).
- */
-/**
- * Bekannter Relay-Bug, hier NUR umschifft (nicht gepatcht — zooid ist ein fremdes
- * Repo, `/home/user/Code/zooid`, außerhalb jeder Zuständigkeit dieser Suite):
+ * P4b (Raum-Mitglieder, NIP-29 9000) — der Admin öffnet die Mitgliederliste eines
+ * Raums und fügt einen Pubkey per npub hinzu (allowpubkey + kind 9000 → 39002).
+ * Self-contained (Wegwerf-Raum + -Pubkey).
  *
- * `zooid/events.go:165` sortiert Events ausschließlich mit `OrderBy("created_at
- * DESC")` — OHNE Tie-Breaker. Landen Hinzufügen (9000) und Entfernen (9001)
- * innerhalb DERSELBEN Unix-SEKUNDE (NIP-01-Auflösung), ist die Reihenfolge zweier
- * Zeilen mit gleichem `created_at` laut SQL-Semantik UNDEFINIERT. `GetMembers()`
- * (`zooid/groups.go:242`) baut die Mitgliedschaft aber genau aus dieser Reihenfolge
- * per Replay auf (`Reversed(QueryEvents(...))`, add setzt, remove löscht) — landet
- * das 9001 bei einem Sekunden-Gleichstand VOR dem 9000 in der (Tie-bedingt
- * beliebigen) Sortierung, gewinnt scheinbar der Add, und die 39002 bleibt für immer
- * beim entfernten Pubkey stehen. Kein Nachziehen, kein Timeout hilft dagegen — der
- * Zustand ist nicht „noch nicht da", sondern dauerhaft falsch.
+ * **Der „entfernen"-Teil dieses Falls ist mit `buzz-kind-ernte`/P4 (2026-09-03)
+ * gestrichen, nicht vergessen.** Die Entscheidung „wir entfernen und bannen keine
+ * Mitglieder" traf auch die Raum-Mitgliederliste eine Ebene tiefer als die
+ * Space-Verwaltung (`⚡spaces.blade.php:1157`, `kickRoomMember` steht seither in
+ * einem Blade-Kommentar mit demselben Begründungstext wie an den drei anderen
+ * Stellen). Der Schreibpfad (`kickRoomMember` in `js/bridge.ts`, kind 9001) bleibt
+ * bestehen — ungenutzte Fähigkeit, kein toter Code —, nur die Bedienfläche ist weg.
+ * Der frühere Fallname trug „(hinzufügen/entfernen)"; der Fall selbst fand beim
+ * E2E-Schlusslauf des Plans zuerst rot vor einem inzwischen entfernten
+ * „Entfernen"-Knopf, dann wurde er hierauf korrigiert (Fehler des Specs, nicht des
+ * Produkts: die Fläche hat sich absichtlich geändert, der Test nicht mitgezogen).
  *
- * Belegt (fünf Vollläufe, `execFileSync`-Instrumentierung, seither entfernt):
- * IMMER wenn 9000 und 9001 dasselbe `created_at` trugen, blieb die 39002 falsch —
- * IMMER wenn sie eine Sekunde auseinanderlagen (No-Op-Wartezeit durch die
- * UI-Interaktion selbst), stimmte sie. Deshalb hier `awaitNextSecond()` zwischen
- * Hinzufügen und Entfernen — derselbe Mechanismus wie in `unread-dot.spec.ts` für
- * das Wasserzeichen, hier gegen denselben Sekunden-Gleichstand in einer anderen
- * Ableitung. Gemeldet an den zooid-Maintainer statt gepatcht (Boundary).
+ * Die frühere Doku eines zooid-Sortier-Bugs bei Sekunden-Gleichstand von 9000/9001
+ * (`zooid/events.go:165`, keine Tie-Breaker in `ORDER BY created_at DESC`) betraf
+ * genau die jetzt gestrichene Entfernen-Flanke und ist mit ihr hinfällig — die
+ * Erkenntnis bleibt in der Git-History dieser Datei nachlesbar, falls der
+ * Schreibpfad je wieder eine Bedienfläche bekommt.
  */
-test('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ page }) => {
+test('P4b: Admin fügt ein Raum-Mitglied per npub hinzu — kein Entfernen mehr in der Fläche', async ({ page }) => {
     const h = `mem${Math.floor(Math.random() * 1e9)}`
     const name = `MemRoom-${Math.floor(Math.random() * 1e9)}`
     createRoomNak(h, name)
@@ -221,17 +216,12 @@ test('P4b: Admin verwaltet Raum-Mitglieder (hinzufügen/entfernen)', async ({ pa
     // Hinzufügen per npub → allowpubkey + kind 9000 → in der 39002-Liste (UI + Relay).
     await modal.getByPlaceholder('npub1…').fill(targetNpub)
     await modal.getByRole('button', { name: 'Hinzufügen' }).click()
-    await expect(modal.getByRole('button', { name: 'Entfernen' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(inRoom, { timeout: 15_000 }).toBe(true)
 
-    // Sekundengrenze abwarten, BEVOR entfernt wird — siehe Kommentar oben. Ohne das
-    // landen Add und Remove manchmal (gemessen: ca. jeder zweite Lauf unter Last)
-    // im selben `created_at`, und der zooid-Sortier-Bug lässt die 39002 falsch stehen.
-    await awaitNextSecond(page)
-
-    // Entfernen (kind 9001) → relay-seitig aus der 39002 raus.
-    await modal.getByRole('button', { name: 'Entfernen' }).click()
-    await expect.poll(inRoom, { timeout: 15_000 }).toBe(false)
+    // Rückbau-Gegenprobe (P4): kein Entfernen-Knopf für das neue Mitglied — sonst
+    // wäre die Bedienfläche eine Hintertür zu genau der Handlung, die der Plan
+    // ausdrücklich stillgelegt hat.
+    await expect(modal.getByRole('button', { name: 'Entfernen' })).toHaveCount(0)
 })
 
 /**
