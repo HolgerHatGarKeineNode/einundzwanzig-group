@@ -345,6 +345,22 @@ test.describe('Buzz: NIP-17 private messages (E2E, E2E_RELAY=buzz only)', () => 
         }
     })
 
+    test('the promise on the screen is the narrow one, not the broad one', async ({ page }) => {
+        // The P7 audit's F4: the first version said content AND SENDER stay hidden. On a
+        // zooid space that is false — each message goes out as two envelopes on the same
+        // relay (one to the recipient, one to the author, because NIP-17 has no sent
+        // folder), and a live `{"kinds":[1059]}` subscriber sees them 139 ms apart, which
+        // pairs sender and recipient. Asserted on the RENDERED text rather than on the
+        // blade source, so a translation that drifts is caught too.
+        await openMessages(page)
+        const zusage = page.locator('[data-pm-zusage]')
+        await expect(zusage).toBeVisible({ timeout: 45_000 })
+        const text = (await zusage.innerText()).replace(/\s+/g, ' ')
+
+        expect(text, 'the surface no longer claims the sender is hidden').not.toContain('Absender')
+        expect(text, 'and it names what actually leaks').toContain('Wer mit wem')
+    })
+
     test('Buzz refuses kind 10050, and the surface says so instead of offering a dead button', async ({ page }) => {
         // Measured with kind 10000 as the positive control (`p7-messung-c-kind10050.txt`):
         // Buzz has no constant for 10050 and answers `restricted: unknown event kind`.
