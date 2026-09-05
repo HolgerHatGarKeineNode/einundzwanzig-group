@@ -294,6 +294,24 @@ test.describe('Forge-Feinschliff (P6)', () => {
             page.evaluate(() =>
                 Array.from(document.querySelectorAll('[data-forge-region="issues"] [data-forge-vorgang-link]')).length,
             )
+        // ── The count is POLLED, and that is a repair rather than an addition ──────
+        // Right after the tile click the list is not finished. Measured 2026-09-05:
+        // `zaehleIssues()` returned 1 here, while the SAME probe 200 ms later — after
+        // `setzeScope('von-mir')` — counted 4. The case then compared 4 against 1 and
+        // reported "„Von mir" hat die eigenen Issues weggefiltert", which is a verdict
+        // about a list that had not rendered yet. Its own control `alle > 0` cannot
+        // catch that, because 1 is greater than 0.
+        //
+        // The race was latent and got flipped by a few bytes of unrelated CSS: adding
+        // one `@utility` to the package theme was enough to move the paint. A guard
+        // that a stylesheet edit can turn red is measuring load timing, not the filter.
+        //
+        // 3 + 1 are the two numbers asserted AT THE RELAY above (lines 164/165), so the
+        // expected total is not a new piece of knowledge introduced here.
+        const ERWARTETE_ISSUES = 3 + 1
+        await expect
+            .poll(zaehleIssues, { message: 'Die Issue-Liste ist nicht fertig geworden', timeout: 15_000 })
+            .toBe(ERWARTETE_ISSUES)
         const alle = await zaehleIssues()
         expect(alle, 'Ohne Issues misst dieser Test nichts').toBeGreaterThan(0)
 

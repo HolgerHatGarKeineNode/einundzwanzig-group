@@ -4,7 +4,8 @@ import { loginNsec } from './support/login'
 
 /**
  * **The action row of the "new conversation" card, measured against the fixed bottom bar
- * at 375 px and 1280 px.**
+ * at 320 px, 375 px and 1280 px — and the whole page measured for horizontal overflow at
+ * the same three widths.**
  *
  * ── The defect this latches ──────────────────────────────────────────────────────────
  *
@@ -30,10 +31,10 @@ import { loginNsec } from './support/login'
  * ── What this file measures about ITSELF before it measures the surface ──────────────
  *
  * A green "no overlap" is worthless if there was no bar. Every width therefore asserts
- * what it expects to find: at 375 px the bar must be present AND visible, at 1280 px it
- * must be gone (`xl:hidden` in the web host). And `--group-nav-h` is checked against the
- * bar's own `getBoundingClientRect().height` at 375 px and against `0px` at 1280 px — so
- * the mechanism is measured, not only its outcome.
+ * what it expects to find: below 1280 px the bar must be present AND visible, at 1280 px
+ * it must be gone (`xl:hidden` in the web host). And `--group-nav-h` is checked against
+ * the bar's own `getBoundingClientRect().height` on the narrow widths and against `0px`
+ * at 1280 px — so the mechanism is measured, not only its outcome.
  *
  * ── Why the file is NOT called `desktop-*` and needs no relay guard ──────────────────
  *
@@ -42,15 +43,19 @@ import { loginNsec } from './support/login'
  * would be lying about its own viewport. And in Buzz mode the `chromium` project narrows
  * to `BUZZ_SPECS`, so this name is excluded there without a `test.skip` nobody reads.
  *
- * ── One number that is reported and deliberately NOT asserted ────────────────────────
+ * ── The second defect this file latches ─────────────────────────────────────────────
  *
- * `docScrollWidth` is 406 against a 375 px client width — 31 px of horizontal overflow
- * that exists with or without this change. It is not the picker: the culprit is
- * `[data-pm-relay-publish]`, a Flux button whose long label carries Flux's own
- * `whitespace-nowrap` and measures 373 px inside a 309 px column. That is a separate
- * defect (WCAG 1.4.10) on the same screen and it is reported, not silently repaired here.
- * What this file does assert is that the number does not GROW — the fix must not add
- * overflow of its own.
+ * The first version of this case allowed `scrollWidth - clientWidth <= 31`, because the
+ * screen carried that much horizontal overflow: `[data-pm-relay-publish]` is a Flux
+ * button whose sentence-long label runs under Flux's own `whitespace-nowrap`, so it
+ * shrink-wrapped to a constant 373 px and pushed `scrollWidth` to 406 — against 375 px
+ * of client width, and against 288 px of column at 320 px, where the overflow is 86 px.
+ * WCAG 1.4.10 names 320 px, which is why the ceiling was read at the wrong width to
+ * begin with.
+ *
+ * The button now wraps, and the ceiling is `scrollWidth === clientWidth`. Because a
+ * reflow fix must not be bought by shrinking a target below WCAG 2.5.8, the button's own
+ * box is asserted alongside the page width.
  */
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 
@@ -65,6 +70,8 @@ type Messung = {
     bar: (Kasten & { visible: boolean }) | null
     fuss: Kasten | null
     bestaetigen: Kasten | null
+    /** The delivery-address button — the element that used to overflow the document. */
+    veroeffentlichen: Kasten | null
     /** Geometric intersection of the action row with the bar, in px. */
     overlapPx: number
     /** How far the action row reaches past the usable edge (bar top, else viewport bottom). */
@@ -128,6 +135,7 @@ async function messeFuss(page: Page): Promise<Messung> {
             bar: bar ? { ...(kasten(bar) as Kasten), visible: bar.checkVisibility() } : null,
             fuss: kasten(fuss),
             bestaetigen: kasten(document.querySelector('[data-pm-oeffnen]')),
+            veroeffentlichen: kasten(document.querySelector('[data-pm-relay-publish]')),
             overlapPx:
                 f && bar
                     ? rund(
@@ -149,12 +157,16 @@ test('the new-conversation footer clears the bottom bar: measured at 375 px and 
     await page.goto('/messages')
     await expect(page.locator('[data-pm-liste]')).toBeVisible({ timeout: 45_000 })
 
-    // 375 × 667 and not the project default: the report is from a phone, and this is the
-    // narrowest viewport the surface is designed for. The HEIGHT is part of the
-    // measurement and not a decoration — measured with the fix removed, the same card at
-    // 375 × 800 put its action row at y 716–748 against a bar at y 740, an overlap of
-    // 8 px. A width on its own does not reproduce a vertical overlap.
+    // Three widths and not the project default. 320 px is the one WCAG 1.4.10 names for
+    // reflow, 375 px is the phone the defect was reported from, 1280 px is the first
+    // width at which the web host drops the bar entirely.
+    //
+    // The HEIGHT is part of the measurement and not a decoration: measured with the fix
+    // removed, the same card at 375 × 800 put its action row at y 716–748 against a bar
+    // at y 740 — an overlap of 8 px, where 375 × 667 gives 109 px. A width on its own
+    // does not reproduce a vertical overlap.
     for (const [breite, hoehe] of [
+        [320, 667],
         [375, 667],
         [1280, 800],
     ] as const) {
@@ -223,14 +235,31 @@ test('the new-conversation footer clears the bottom bar: measured at 375 px and 
             expect(gemessen.unterKantePx, `${wo}: the action row reaches past the usable bottom edge`).toBe(0)
             expect(gemessen.bestaetigen!.top, `${wo}: the confirm button is scrolled off the top edge`).toBeGreaterThanOrEqual(0)
 
-            // No horizontal overflow ADDED. The surface carries 31 px of it already
-            // (`[data-pm-relay-publish]`, see the header) — this bound is the one the
-            // sibling case `buzz-private-messages.spec.ts` uses, loosened by exactly that
-            // known amount so it fails on any NEW overflow rather than on the old one.
+            // WCAG 1.4.10 — no horizontal document scroll at all, at any of the three
+            // widths. This stood at "at most 31 px" while `[data-pm-relay-publish]`
+            // still carried Flux's `whitespace-nowrap`: the button shrink-wrapped to a
+            // constant 373 px and pushed `scrollWidth` to 406 against 320 and 375 px of
+            // client width. 320 px is the width the criterion names, and it is measured
+            // here because the old ceiling of 31 px was read at 375 px, where the same
+            // defect is only a third as wide.
+            expect(gemessen.docScrollWidth, `${wo}: the page scrolls sideways`).toBe(gemessen.docClientWidth)
+
+            // The button that used to do the overflowing, measured as a target rather
+            // than only as a page-width number: it may not fix the reflow by shrinking
+            // out of WCAG 2.5.8 (24 × 24). It wraps to two lines below 1280 px and
+            // therefore GROWS — 254 × 52 at 320 px, 309 × 52 at 375 px, 373 × 32 at
+            // 1280 px. Asserted as bounds, not as literals, so a translation with
+            // different word lengths does not turn this red for the wrong reason.
             expect(
-                gemessen.docScrollWidth - gemessen.docClientWidth,
-                `${wo}: the page gained horizontal overflow`,
-            ).toBeLessThanOrEqual(31)
+                gemessen.veroeffentlichen,
+                `${wo}: the delivery-address button is missing — the target check below would be vacuous`,
+            ).not.toBeNull()
+            expect(gemessen.veroeffentlichen!.w, `${wo}: the button fell below the 24 px target width`).toBeGreaterThanOrEqual(24)
+            expect(gemessen.veroeffentlichen!.h, `${wo}: the button fell below the 24 px target height`).toBeGreaterThanOrEqual(24)
+            expect(
+                gemessen.veroeffentlichen!.right,
+                `${wo}: the button still runs past the right edge of the viewport`,
+            ).toBeLessThanOrEqual(gemessen.docClientWidth)
         }
 
         await page.locator('[data-pm-picker] button:has-text("Abbrechen")').click()
