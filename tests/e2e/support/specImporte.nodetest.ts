@@ -48,6 +48,10 @@ const OHNE_WAECHTER: readonly string[] = [
     'blossom-media-guard.spec.ts',
     // Rendert `group::partials.chat-composer` über tinker, ebenso neutralisiert.
     'composer-attachment-preview.spec.ts',
+    // Misst die GEOMETRIE einer Vorschauzeile (`⚡updates.blade.php`) bei 390/960 px gegen
+    // das gebaute Stylesheet. Baut ihr Markup selbst, fasst weder PHP noch einen Relay an —
+    // der Teststack würde nur aufgebaut, um ihn nicht zu benutzen.
+    'updates-vorschau-sichtbarkeit.spec.ts',
 ]
 
 /** Die Quellen, aus denen eine bewachte Spec ihr `test` beziehen darf. */
