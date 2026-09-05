@@ -115,6 +115,21 @@ export const testServerEnv = ({ slot, mitBoard = false, ohneWorkspace = false }:
         // vierter Tab auf `/forge`. Ohne ihn rendert dieselbe Spec auf einem Rechner mit
         // `.env`-Eintrag anders als auf einem ohne, und kein Test sagt einem das.
         NOSTR_WORKSPACE_URL: ohneWorkspace ? '' : workerRelay,
+        // P2 — die NIP-52-Kalenderquelle. IMMER leer, ohne Option, und das ist die
+        // Entscheidung: die Terminkarte im Raumkopf braucht serverseitig gar nichts —
+        // ihr Markup steht unabhängig von der Konfiguration im HTML, und die Insel
+        // entscheidet im Browser, ob sie fragt. Ein Spec, der die Karte messen will,
+        // setzt `window.__nostrCalendarRelays`/`…Authors` per `addInitScript` auf den
+        // worker-eigenen Relay (`meetup-calendar.spec.ts`) — das gewinnt gegen das `??`
+        // im Head-Partial und braucht keinen zweiten `serve`-Prozess wie das Board.
+        //
+        // Leer ist hier keine Formalie: die empfohlenen Werte in `.env.example` sind
+        // `wss://nos.lol,wss://relay.damus.io`. Stünden sie im Testlauf, öffnete JEDER
+        // Meetup-Raum eine Verbindung ins öffentliche Internet — und der Relay-Wächter
+        // machte jeden Test rot, der einen Meetup-Raum berührt.
+        NOSTR_CALENDAR_RELAYS: '',
+        NOSTR_CALENDAR_AUTHORS: '',
+
         // ── Und die beiden, die heute noch folgenlos sind ───────────────────────────
         //
         // `NOSTR_BOT_NSEC`/`NOSTR_BOT_RELAY` liest bisher nur

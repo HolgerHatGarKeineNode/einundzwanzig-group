@@ -485,7 +485,32 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // in der Liste wiederfinden, in offenem UND privatem Forum, plus die
         // Ausschließlichkeit der zwei Bauformen). Wer die Träger hier sucht,
         // sucht am falschen Ort.
-        'room' => 37,
+        //
+        // **P2 des Community-Plans (2026-09-05): 37 → 42.** Multiset-Diff
+        // (`array_count_values`, `git show HEAD:…⚡room.blade.php` gegen den
+        // Arbeitsbaum) ist EINSEITIG — nur Additionen, keine einzige Deletion:
+        //
+        //     aria-hidden="true"                        3 → 4
+        //     aria-pressed="false"                      0 → 2
+        //     x-bind:aria-pressed="myStatus === 'accepted' …"  0 → 1
+        //     x-bind:aria-pressed="myStatus === 'declined' …"  0 → 1
+        //
+        // Alle fünf sitzen in der neuen NIP-52-Terminkarte. Die zwei
+        // `aria-pressed`-PAARE sind der Kern: Zusagen und Absagen sind EIN
+        // Umschalter mit zwei Zuständen, und ein Screenreader soll den aktuellen
+        // hören und nicht nur die Hervorhebung sehen. Statisch `false` im Markup
+        // plus die Bindung daneben — dieselbe Regel wie am Suchknopf im Kopf: der
+        // statische Wert muss VOR dem Alpine-Boot stimmen, sonst meldet die
+        // Sprachausgabe im ersten Moment einen Knopf ohne Zustand.
+        //
+        // Das vierte `aria-hidden` liegt auf dem „·"-Trenner zwischen Datum und
+        // Ort. Dekorativ, kein Text — dieselbe Bauform wie in der Meetup-Kachel.
+        //
+        // **Die Terminkarte hat keine eigene Komponentendatei**, sie steht
+        // vollständig in dieser View. Sie ist damit der seltene Fall, in dem
+        // diese Zählung die neue Fläche wirklich VOLLSTÄNDIG erfasst — bei den
+        // Themen darüber tat sie es ausdrücklich nicht.
+        'room' => 42,
         'directory' => 3,
         'spaces' => 9,
         // **P1 des Gitea-Sprache-Plans (2026-08-26): 20 → 16.** Multiset-Diff
