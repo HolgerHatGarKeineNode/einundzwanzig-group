@@ -628,6 +628,15 @@ test('P4/4: the rail row menu writes as well — measured at 1280 px', async ({ 
  * room 1 as muted. Without that control the anchor would pass even if the drop never
  * worked — B would then have A's entry the ordinary way and the merge would prove nothing
  * (the exact hole the previous version of P4/2 had).
+ *
+ * **One prevention layer is off in this anchor, and that is not an accident.** The
+ * registered `routeWebSocket` below replaces `window.WebSocket` for the WHOLE page
+ * (`class WebSocket extends WebSocketMock`, measured 2026-08-21 and written out in
+ * `support/hermetik.ts`), so its `addInitScript` wrapper — the layer that refuses a
+ * connection to a foreign host — is no longer the constructor here. What still holds is
+ * Chromium's `--host-resolver-rules`, which the browser applies below JavaScript. This
+ * and P4/6 are the first two tests of the suite to use the technique `hermetik.ts`
+ * argues against; anyone adding a third should know that they are down to one layer.
  */
 test('P4/5: a second device publishing into a race keeps the first device’s channel', async ({ browser, baseURL }) => {
     test.skip(process.env.E2E_RELAY !== 'buzz', 'only in Buzz mode (E2E_RELAY=buzz)')
@@ -709,6 +718,11 @@ test('P4/5: a second device publishing into a race keeps the first device’s ch
  * The proxy answers our own kind-30078 with `OK false` and does not forward it, so the
  * relay genuinely never receives it. Then the refusal stops and the `hidden` flush gets
  * its one retry — the bounded second chance the module offers instead of a retry timer.
+ *
+ * **Same caveat as P4/5:** the registered `routeWebSocket` replaces `window.WebSocket`
+ * page-wide, so the `addInitScript` prevention layer of `support/hermetik.ts` is not the
+ * constructor in this test. Chromium's `--host-resolver-rules` layer remains and is what
+ * still keeps a foreign host unreachable here.
  */
 test('P4/6: a relay that refuses the publish does not count as delivered — the retry still gets through', async ({ page }) => {
     test.skip(process.env.E2E_RELAY !== 'buzz', 'only in Buzz mode (E2E_RELAY=buzz)')
