@@ -76,9 +76,19 @@ async function messeFuss(page: Page): Promise<{
             // The footer is the fourth direct child of `[data-rail]` — the invariant the
             // header of `desktop-rail.blade.php` states and `bloecke()` enforces.
             fussBlock: kasten(rail?.children.item(3) ?? null),
-            // Not a class assertion: does the label actually fit, or is it ellipsised?
-            // German „Verschlüsselt" is the longest of the seven catalogues (13 chars;
-            // pl 12, hu/nl 11), so if any locale clips, this one does.
+            // ── WHAT THIS PROBE CAN AND CANNOT DO ────────────────────────────────
+            // It reports ELLIPSIS, and in the current markup that is nearly always
+            // false: the `<span>` carries neither `truncate` nor `overflow-hidden`,
+            // so it grows instead of clipping. Measured — a label stretched to 66
+            // characters turned the case red through `the row box moved` (h 36 → 40,
+            // the row wrapping to a second line), while `labelGekuerzt` stayed
+            // `false`. So this probe is NOT the reason the label promise holds; the
+            // box and alignment assertions are.
+            //
+            // It stays because it is the cheap latch for the OTHER direction: the
+            // day someone adds `truncate` to this row — the reflex when a long
+            // locale wraps — the label would silently shorten to „Verschlüss…" and
+            // every geometry assertion would go green. That case is what it catches.
             labelGekuerzt: label ? label.scrollWidth > label.clientWidth + 1 : null,
         }
     })
@@ -117,7 +127,6 @@ test('the encrypted row: measured at 375 px and 1280 px', async ({ page }) => {
     expect(breit.zeilen.map((z) => z.href)).toEqual(['/articles', '/forge', '/bookmarks', '/messages'])
 
     const zeile = (anker: string) => breit.zeilen.find((z) => z.anker === anker) as (typeof breit.zeilen)[number]
-    const lesezeichen = zeile('lesezeichen')
     const messages = zeile('messages')
 
     // The box itself. Rail track 320 px minus the 1 px `border-e` = 319 content, minus
@@ -147,7 +156,8 @@ test('the encrypted row: measured at 375 px and 1280 px', async ({ page }) => {
         expect(zeile(unten).y - zeile(oben).y, `1280px: ${oben} → ${unten} is not one 38 px step`).toBe(38)
     })
 
-    // The label fits — no ellipsis, in the longest of the seven locales.
+    // No ellipsis on the label — see the probe's own note for what that does and does
+    // not prove. Only the German string is measured here, the longest of the seven.
     expect(breit.labelGekuerzt, '1280px: the label „Verschlüsselt" is being clipped').toBe(false)
 
     // The row sits inside the footer block, and the block inside the viewport. This is
@@ -155,6 +165,17 @@ test('the encrypted row: measured at 375 px and 1280 px', async ({ page }) => {
     // giving the space back.
     const fuss = breit.fussBlock as Kasten
     expect(fuss.h, '1280px: the footer block height moved').toBe(340)
+
+    // ── The block's VERTICAL seat, which every relative promise above survives ───────
+    // Everything so far is measured inside the footer or against a neighbour, so a
+    // footer shoved past the bottom edge would pass all of it — and `fuss.h === 340`
+    // with it. Measured, the block ends at exactly 800: the column is `h-dvh`, the list
+    // is the only `flex-1` surface and it has already given back all it can. There is
+    // NO slack here, which is precisely why it needs an assertion rather than trust.
+    expect(
+        fuss.y + fuss.h,
+        `1280px: the footer block ends at ${fuss.y + fuss.h}px, below the 800px viewport`,
+    ).toBeLessThanOrEqual(800)
     expect(messages.y, '1280px: the row starts above its own footer block').toBeGreaterThanOrEqual(fuss.y)
     expect(messages.y + messages.h, '1280px: the row runs out of the footer block').toBeLessThanOrEqual(
         fuss.y + fuss.h,
