@@ -71,7 +71,13 @@ test('C6a: Bild anhängen öffnet genau EINEN funktionierenden Cropper', async (
     // Direkt auf das versteckte Datei-Feld des HAUPT-Composers setzen (erstes im DOM;
     // der Thread-Composer hat ein zweites) — change → pickImage, ohne den nativen
     // Datei-Dialog (den Playwright nicht bedienen kann).
-    await page.locator('input[type="file"][accept="image/*"]').first().setInputFiles({
+    //
+    // Anchored on `x-ref` since P5, not on `accept="image/*"`: the composer's input no
+    // longer carries an `accept` at all (it takes documents and video too). The two
+    // inputs that still carry one are the space icon and the room picture, and neither
+    // is on this page — so the old locator would have gone from "the composer's field"
+    // to "no element", i.e. a 30 s timeout pointing at the cropper.
+    await page.locator('input[type="file"][x-ref="imageInput"]').first().setInputFiles({
         name: 'meme.png',
         mimeType: 'image/png',
         buffer: IMAGE,
