@@ -111,6 +111,93 @@ function readFlags(dTag: string, field: 'starred' | 'muted'): Record<string, boo
     return out
 }
 
+/**
+ * **A proxy between page and relay** — `page.routeWebSocket` with a real server side.
+ *
+ * Two of the four guards of the write path only fire in a state the relay will not
+ * produce on request: a foreign event still in flight while we publish, and a relay that
+ * refuses. Both are frame-level conditions, so they are produced at the frame level.
+ *
+ * `connectToServer()` is what makes this usable here, and it was worth measuring rather
+ * than assuming: `support/hermetik.ts` carries a measurement from 2026-08-21 that a
+ * registered `routeWebSocket` broke the Buzz publish path (NIP-42 AUTH did not get
+ * through) — but that route was a MOCK with no server side. With one, measured in this
+ * repo on 2026-09-05: the publish arrives, 36 frames page→relay and 59 back, and
+ * `page.on('websocket')` still reports the socket, so the relay guard of `fixtures.ts`
+ * keeps seeing what it watches.
+ *
+ * Both filters are OFF by default; a test switches them on for the window it needs.
+ */
+type RelayProxy = {
+    /** Drop kind-30078 events on their way TO the page (the page stays blind to them). */
+    dropIncomingPrefs: boolean
+    /** Answer our own kind-30078 publish with `OK false` instead of forwarding it. */
+    refuseOutgoingPrefs: boolean
+    dropped: number
+    refused: number
+}
+
+const APP_DATA = Number(APP_DATA_KIND)
+
+const parseFrame = (message: string | Buffer): unknown[] | null => {
+    try {
+        const parsed: unknown = JSON.parse(String(message))
+
+        return Array.isArray(parsed) ? parsed : null
+    } catch {
+        return null // binary or malformed — never our business, always forwarded
+    }
+}
+
+/** `["EVENT", <subId>, <event>]` — the relay pushing an event to the page. */
+const incomingPrefsEvent = (message: string | Buffer): boolean => {
+    const frame = parseFrame(message)
+    const event = frame?.[0] === 'EVENT' ? (frame[2] as { kind?: number } | undefined) : undefined
+
+    return event?.kind === APP_DATA
+}
+
+/** `["EVENT", <event>]` — the page publishing. Returns the id, because the refusal needs it. */
+const outgoingPrefsEventId = (message: string | Buffer): string | null => {
+    const frame = parseFrame(message)
+    if (frame?.[0] !== 'EVENT' || frame.length !== 2) {
+        return null
+    }
+    const event = frame[1] as { kind?: number; id?: string } | undefined
+
+    return event?.kind === APP_DATA && typeof event.id === 'string' ? event.id : null
+}
+
+async function proxyBuzz(page: Page): Promise<RelayProxy> {
+    const proxy: RelayProxy = { dropIncomingPrefs: false, refuseOutgoingPrefs: false, dropped: 0, refused: 0 }
+    await page.routeWebSocket(new RegExp(`localhost:${BUZZ_PORT}`), (ws) => {
+        const server = ws.connectToServer()
+        ws.onMessage((message) => {
+            const id = outgoingPrefsEventId(message)
+            if (id !== null && proxy.refuseOutgoingPrefs) {
+                proxy.refused += 1
+                // The relay never sees the event; the page gets the verdict a refusing
+                // relay would give. `nak` cannot tell this apart from a real rejection —
+                // which is the point.
+                ws.send(JSON.stringify(['OK', id, false, 'blocked: e2e refusal probe']))
+
+                return
+            }
+            server.send(message)
+        })
+        server.onMessage((message) => {
+            if (proxy.dropIncomingPrefs && incomingPrefsEvent(message)) {
+                proxy.dropped += 1
+
+                return
+            }
+            ws.send(message)
+        })
+    })
+
+    return proxy
+}
+
 /** Workspace on the test relay, viewport BEFORE boot, logged in — the mobile channel list. */
 async function bootChannelList(page: Page, width = 375): Promise<void> {
     await page.setViewportSize({ width, height: 800 })
@@ -183,6 +270,46 @@ async function chooseFromRowMenu(page: Page, h: string, label: RegExp): Promise<
 }
 
 /**
+ * **Establish the starting state, do not assume it** (the rule `setExpanded` follows for
+ * the rail group, applied to relay state).
+ *
+ * The preference blob is addressable and survives the test that wrote it. An anchor that
+ * failed before its own clean-up leaves a muted room behind, and the NEXT anchor then
+ * looks for a menu entry that reads "unmute" — it fails for a reason that has nothing to
+ * do with what it measures. Measured exactly that way during the mutation probes of this
+ * file: with `mergeOwnBlobBeforePublish` disabled, P4/5 failed as intended AND P4/6
+ * failed on P4/5's leftovers, which makes the second result unreadable.
+ *
+ * Reads the state from the row's `aria-label` — the same source the anchors assert on —
+ * and only clicks where something has to change.
+ */
+async function ensureRoomsUnflagged(page: Page, rooms: readonly string[]): Promise<void> {
+    for (const h of rooms) {
+        const line = row(page, h)
+        // `angeheftet` also appears inside "angeheftet und stummgeschaltet", so both
+        // probes are substring probes, not anchored ones.
+        if (await line.getByRole('button', { name: /stummgeschaltet/ }).count() > 0) {
+            await chooseFromRowMenu(page, h, /^Stummschaltung des Raums aufheben$/)
+        }
+        if (await line.getByRole('button', { name: /angeheftet/ }).count() > 0) {
+            await chooseFromRowMenu(page, h, /^Anheftung des Raums aufheben$/)
+        }
+    }
+    // Wait for the relay, not just for the row: the next anchor reads the blob.
+    await expect
+        .poll(
+            () => {
+                const muted = readFlags(D_CHANNEL_MUTES, 'muted')
+                const starred = readFlags(D_CHANNEL_STARS, 'starred')
+
+                return rooms.every((h) => muted[h] !== true && starred[h] !== true)
+            },
+            { timeout: POLL_WINDOW_MS },
+        )
+        .toBe(true)
+}
+
+/**
  * ANCHOR 1 — the core case: set both flags in the client, and they are still there after
  * a reload; the relay carries them; the two blob tags stay untouched.
  *
@@ -195,6 +322,7 @@ test('P4/1: mute and star are set in the client, survive a reload, and reach the
     test.setTimeout(180_000)
 
     await bootChannelList(page)
+    await ensureRoomsUnflagged(page, [BUZZ_ROOM_GENERAL, BUZZ_ROOM_WELCOME])
 
     // ── mute ────────────────────────────────────────────────────────────────
     await chooseFromRowMenu(page, BUZZ_ROOM_GENERAL, /^Raum stummschalten$/)
@@ -250,12 +378,20 @@ test('P4/1: mute and star are set in the client, survive a reload, and reach the
 /**
  * ANCHOR 2 — DoD 3: two devices, two DIFFERENT channels, neither statement lost.
  *
- * Kind 30078 is addressable: the relay REPLACES, it does not union. Without the
- * fetch-and-merge before publishing (`mergeOwnBlobBeforePublish`) the second device
- * would drop the first one's channel, and nothing in the browser would say so.
+ * **What this anchor measures, precisely.** Device B boots AFTER device A has published,
+ * so B reads A's blob through its ordinary start-up load and merges it per channel
+ * (`mergeFlags`) before it ever writes. What is held here is that chain: read on arming →
+ * per-channel merge → publish carries both.
  *
- * Two contexts of the SAME key, because that is the real case — one account, two
- * devices. Device B boots after A has published, so it also has to read A's blob first.
+ * **What it does NOT measure, and an earlier version of this comment wrongly claimed it
+ * did:** that `mergeOwnBlobBeforePublish` is what saves A's channel. Measured — with that
+ * function reduced to a no-op this anchor stays GREEN, because B already has A's entry by
+ * the time it clicks. The fetch-before-publish covers the RACE, where B publishes while
+ * A's event is still in flight, and that case has its own anchor (P4/5). A comment that
+ * claims a cause it does not test is worse than no comment: the next reader stops looking
+ * for cover, because it says so here.
+ *
+ * Two contexts of the SAME key, because that is the real case — one account, two devices.
  */
 test('P4/2: two devices mute different channels — the relay keeps both', async ({ browser, baseURL }) => {
     test.skip(process.env.E2E_RELAY !== 'buzz', 'only in Buzz mode (E2E_RELAY=buzz)')
@@ -266,6 +402,7 @@ test('P4/2: two devices mute different channels — the relay keeps both', async
     try {
         const pageA = await contextA.newPage()
         await bootChannelList(pageA)
+        await ensureRoomsUnflagged(pageA, [BUZZ_ROOM_GENERAL, BUZZ_ROOM_WELCOME])
         await chooseFromRowMenu(pageA, BUZZ_ROOM_WELCOME, /^Raum stummschalten$/)
         await expect
             .poll(() => readFlags(D_CHANNEL_MUTES, 'muted')[BUZZ_ROOM_WELCOME] === true, { timeout: POLL_WINDOW_MS })
@@ -317,6 +454,11 @@ test('P4/3: the menu fits — measured at 375 px (mobile list) and 1280 px (rail
 
     // ── 375 px: the mobile channel list ─────────────────────────────────────
     await bootChannelList(page, 375)
+    // The UNFLAGGED row is the one being measured. A leftover pin plus mute adds two
+    // 16 px icons and shrinks the name span — measured during the mutation probes, where
+    // that alone pushed `nameWidth` under half the row and produced a geometry failure
+    // that had nothing to do with geometry.
+    await ensureRoomsUnflagged(page, [BUZZ_ROOM_WELCOME, BUZZ_ROOM_GENERAL])
     // Assert the trigger EXISTS before measuring it. Without this line a missing menu
     // fails inside `page.evaluate` with a null dereference — red, but with a message
     // about `getBoundingClientRect` instead of about the menu (measured on the probe
@@ -441,6 +583,7 @@ test('P4/4: the rail row menu writes as well — measured at 1280 px', async ({ 
     test.setTimeout(180_000)
 
     await bootChannelList(page)
+    await ensureRoomsUnflagged(page, [BUZZ_ROOM_GENERAL])
     await bootRail(page)
 
     const line = railLine(page, BUZZ_ROOM_GENERAL)
@@ -464,6 +607,153 @@ test('P4/4: the rail row menu writes as well — measured at 1280 px', async ({ 
     const undo = line.getByRole('menuitem', { name: /^Stummschaltung des Raums aufheben$/ })
     await expect(undo).toBeVisible({ timeout: 15_000 })
     await undo.click()
+    await expect
+        .poll(() => readFlags(D_CHANNEL_MUTES, 'muted')[BUZZ_ROOM_GENERAL] === false, { timeout: POLL_WINDOW_MS })
+        .toBe(true)
+})
+
+/**
+ * ANCHOR 5 — the RACE that `mergeOwnBlobBeforePublish` exists for.
+ *
+ * Device A mutes room 1. Device B boots while the relay's copy is kept from it, mutes
+ * room 2, and only then may see anything again. B's own store therefore never held A's
+ * channel; the only way its publish can still carry it is the fetch-and-merge that runs
+ * immediately before the write.
+ *
+ * Kind 30078 is addressable — the relay replaces, it does not union. Without that fetch,
+ * B's publish silently deletes A's mute, on the user's own account, and nothing in either
+ * browser says so.
+ *
+ * **The blindfold is verified, not assumed.** Step 3 asserts that B really does NOT show
+ * room 1 as muted. Without that control the anchor would pass even if the drop never
+ * worked — B would then have A's entry the ordinary way and the merge would prove nothing
+ * (the exact hole the previous version of P4/2 had).
+ */
+test('P4/5: a second device publishing into a race keeps the first device’s channel', async ({ browser, baseURL }) => {
+    test.skip(process.env.E2E_RELAY !== 'buzz', 'only in Buzz mode (E2E_RELAY=buzz)')
+    test.setTimeout(240_000)
+
+    const contextA = await browser.newContext({ baseURL })
+    const contextB = await browser.newContext({ baseURL })
+    try {
+        // ── Device A: mute room 1, confirmed at the relay ────────────────────
+        const pageA = await contextA.newPage()
+        await bootChannelList(pageA)
+        await ensureRoomsUnflagged(pageA, [BUZZ_ROOM_GENERAL, BUZZ_ROOM_WELCOME])
+        await chooseFromRowMenu(pageA, BUZZ_ROOM_WELCOME, /^Raum stummschalten$/)
+        await expect
+            .poll(() => readFlags(D_CHANNEL_MUTES, 'muted')[BUZZ_ROOM_WELCOME] === true, { timeout: POLL_WINDOW_MS })
+            .toBe(true)
+
+        // ── Device B: boots blindfolded to the preference blob ───────────────
+        const pageB = await contextB.newPage()
+        const proxy = await proxyBuzz(pageB)
+        proxy.dropIncomingPrefs = true
+        await bootChannelList(pageB)
+
+        // The control: B must NOT know about A's mute. If this line is ever green by
+        // accident, everything below measures nothing.
+        await expect(
+            row(pageB, BUZZ_ROOM_WELCOME).getByRole('button', { name: /, stummgeschaltet$/ }),
+            'device B has to be blind to the relay copy for this anchor to mean anything',
+        ).toHaveCount(0)
+        expect(proxy.dropped, 'the proxy must actually have dropped preference events').toBeGreaterThan(0)
+
+        // ── B mutes room 2 and the blindfold comes off in the same breath ────
+        // From here only ONE code path can still bring A's channel into B's publish:
+        // the fetch-and-merge inside `publishChannelFlags`. The live subscription cannot
+        // — A's event predates B's connection, and relays do not resend on an open REQ.
+        await chooseFromRowMenu(pageB, BUZZ_ROOM_GENERAL, /^Raum stummschalten$/)
+        proxy.dropIncomingPrefs = false
+
+        await expect
+            .poll(() => readFlags(D_CHANNEL_MUTES, 'muted')[BUZZ_ROOM_GENERAL] === true, { timeout: POLL_WINDOW_MS })
+            .toBe(true)
+        const flags = readFlags(D_CHANNEL_MUTES, 'muted')
+        console.log(`[p4-race] dropped ${proxy.dropped} incoming preference events; blob after B: ${JSON.stringify(flags)}`)
+        expect(
+            flags[BUZZ_ROOM_WELCOME],
+            'device A’s channel must survive a publish from a device that never saw it — that is what '
+                + 'the fetch-and-merge before publishing is for',
+        ).toBe(true)
+        expect(flags[BUZZ_ROOM_GENERAL]).toBe(true)
+
+        // Clean up, so a later run in this stack starts unmuted.
+        await chooseFromRowMenu(pageB, BUZZ_ROOM_WELCOME, /^Stummschaltung des Raums aufheben$/)
+        await chooseFromRowMenu(pageB, BUZZ_ROOM_GENERAL, /^Stummschaltung des Raums aufheben$/)
+        await expect
+            .poll(
+                () => {
+                    const after = readFlags(D_CHANNEL_MUTES, 'muted')
+
+                    return after[BUZZ_ROOM_WELCOME] === false && after[BUZZ_ROOM_GENERAL] === false
+                },
+                { timeout: POLL_WINDOW_MS },
+            )
+            .toBe(true)
+    } finally {
+        await contextA.close()
+        await contextB.close()
+    }
+})
+
+/**
+ * ANCHOR 6 — a REFUSED publish must not be remembered as delivered.
+ *
+ * `anyRelayAccepted` decides whether the payload goes into `publishedJson` and the
+ * pending mark is cleared. Treat a refusal as success and the client believes the
+ * preference is stored: it never tries again, and the switch the user flipped is silently
+ * gone at the next reload. Nothing in the interface says so — the row keeps showing the
+ * local value until then.
+ *
+ * The proxy answers our own kind-30078 with `OK false` and does not forward it, so the
+ * relay genuinely never receives it. Then the refusal stops and the `hidden` flush gets
+ * its one retry — the bounded second chance the module offers instead of a retry timer.
+ */
+test('P4/6: a relay that refuses the publish does not count as delivered — the retry still gets through', async ({ page }) => {
+    test.skip(process.env.E2E_RELAY !== 'buzz', 'only in Buzz mode (E2E_RELAY=buzz)')
+    test.setTimeout(180_000)
+
+    const proxy = await proxyBuzz(page)
+    await bootChannelList(page)
+    await ensureRoomsUnflagged(page, [BUZZ_ROOM_GENERAL])
+    // Only now: the clean-up above has to be allowed through.
+    proxy.refuseOutgoingPrefs = true
+
+    await chooseFromRowMenu(page, BUZZ_ROOM_GENERAL, /^Raum stummschalten$/)
+    await expect(
+        row(page, BUZZ_ROOM_GENERAL).getByRole('button', { name: /, stummgeschaltet$/ }),
+        'the row shows the local value regardless — that is exactly why the relay side has to be checked',
+    ).toBeVisible({ timeout: 10_000 })
+
+    // The control: the refusal really happened and the relay really has nothing.
+    await expect.poll(() => proxy.refused, { timeout: POLL_WINDOW_MS }).toBeGreaterThan(0)
+    expect(
+        readFlags(D_CHANNEL_MUTES, 'muted')[BUZZ_ROOM_GENERAL],
+        'the refused event must not be at the relay',
+    ).not.toBe(true)
+    console.log(`[p4-refusal] refused ${proxy.refused} publish frames`)
+
+    // Refusal over. The `hidden` flush is the one retry the module offers; it only fires
+    // if the failed publish is still marked pending.
+    proxy.refuseOutgoingPrefs = false
+    await page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+        Object.defineProperty(document, 'hidden', { value: true, configurable: true })
+        document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    await expect
+        .poll(() => readFlags(D_CHANNEL_MUTES, 'muted')[BUZZ_ROOM_GENERAL] === true, { timeout: POLL_WINDOW_MS })
+        .toBe(true)
+
+    // Clean up.
+    await page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+        Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+        document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await chooseFromRowMenu(page, BUZZ_ROOM_GENERAL, /^Stummschaltung des Raums aufheben$/)
     await expect
         .poll(() => readFlags(D_CHANNEL_MUTES, 'muted')[BUZZ_ROOM_GENERAL] === false, { timeout: POLL_WINDOW_MS })
         .toBe(true)
