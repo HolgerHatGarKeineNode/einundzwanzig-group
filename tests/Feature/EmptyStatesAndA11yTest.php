@@ -486,30 +486,28 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // Ausschließlichkeit der zwei Bauformen). Wer die Träger hier sucht,
         // sucht am falschen Ort.
         //
-        // **P2 des Community-Plans (2026-09-05): 37 → 42.** Multiset-Diff
-        // (`array_count_values`, `git show HEAD:…⚡room.blade.php` gegen den
-        // Arbeitsbaum) ist EINSEITIG — nur Additionen, keine einzige Deletion:
+        // **P2 of the community plan (2026-09-05): 37 -> 42.** The multiset diff
+        // (`array_count_values`, `git show HEAD:…⚡room.blade.php` against the working
+        // tree) is ONE-SIDED — additions only, not a single deletion:
         //
-        //     aria-hidden="true"                        3 → 4
-        //     aria-pressed="false"                      0 → 2
-        //     x-bind:aria-pressed="myStatus === 'accepted' …"  0 → 1
-        //     x-bind:aria-pressed="myStatus === 'declined' …"  0 → 1
+        //     aria-hidden="true"                               3 -> 4
+        //     aria-pressed="false"                             0 -> 2
+        //     x-bind:aria-pressed="myStatus === 'accepted' …"  0 -> 1
+        //     x-bind:aria-pressed="myStatus === 'declined' …"  0 -> 1
         //
-        // Alle fünf sitzen in der neuen NIP-52-Terminkarte. Die zwei
-        // `aria-pressed`-PAARE sind der Kern: Zusagen und Absagen sind EIN
-        // Umschalter mit zwei Zuständen, und ein Screenreader soll den aktuellen
-        // hören und nicht nur die Hervorhebung sehen. Statisch `false` im Markup
-        // plus die Bindung daneben — dieselbe Regel wie am Suchknopf im Kopf: der
-        // statische Wert muss VOR dem Alpine-Boot stimmen, sonst meldet die
-        // Sprachausgabe im ersten Moment einen Knopf ohne Zustand.
+        // All five sit in the new NIP-52 date card. The two `aria-pressed` PAIRS are the
+        // point: accept and decline are ONE toggle with two states, and a screen reader
+        // should hear the current one rather than only see the highlight. The static
+        // `false` in the markup plus the binding beside it — same rule as the search
+        // button in the header: the static value has to be right BEFORE Alpine boots, or
+        // the screen reader announces a button without a state for the first moment.
         //
-        // Das vierte `aria-hidden` liegt auf dem „·"-Trenner zwischen Datum und
-        // Ort. Dekorativ, kein Text — dieselbe Bauform wie in der Meetup-Kachel.
+        // The fourth `aria-hidden` sits on the "·" separator between date and venue.
+        // Decorative, not text — the same shape as in the meetup tile.
         //
-        // **Die Terminkarte hat keine eigene Komponentendatei**, sie steht
-        // vollständig in dieser View. Sie ist damit der seltene Fall, in dem
-        // diese Zählung die neue Fläche wirklich VOLLSTÄNDIG erfasst — bei den
-        // Themen darüber tat sie es ausdrücklich nicht.
+        // **The date card has no component file of its own**, it stands entirely in this
+        // view. It is therefore the rare case where this count really does cover the new
+        // surface COMPLETELY — for the forum topics above it explicitly did not.
         'room' => 42,
         'directory' => 3,
         'spaces' => 9,

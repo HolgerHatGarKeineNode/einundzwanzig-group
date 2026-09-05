@@ -56,6 +56,7 @@ const publishDate = (opts: {
     start: number
     end?: number
     location?: string
+    tzid?: string
     meetupId: string
     sec?: string
 }): string => {
@@ -66,7 +67,7 @@ const publishDate = (opts: {
         '-t', `title=${opts.title}`,
         '-t', `start=${opts.start}`,
         '-t', `D=${Math.floor(opts.start / 86400)}`,
-        '-t', 'start_tzid=Europe/Berlin',
+        '-t', `start_tzid=${opts.tzid ?? 'Europe/Vienna'}`,
         '-t', `a=${calendarAddress(opts.meetupId)}`,
     ]
     if (opts.end !== undefined) {
@@ -97,6 +98,8 @@ type CardState = {
     canRsvp: boolean
     busy: boolean
     error: string
+    dateZone: string
+    partial: boolean
 }
 
 /**
@@ -114,6 +117,7 @@ const cardState = async (page: Page): Promise<CardState> =>
             return {
                 mounted: false, source: '', title: '', dateLabel: '',
                 attending: -1, myStatus: '', canRsvp: false, busy: false, error: '',
+                dateZone: '', partial: false,
             }
         }
         const alpine = (window as unknown as { Alpine: { $data: (e: Element) => Record<string, unknown> } }).Alpine
@@ -129,6 +133,8 @@ const cardState = async (page: Page): Promise<CardState> =>
             canRsvp: Boolean(data.canRsvp),
             busy: Boolean(data.busy),
             error: String(data.error ?? ''),
+            dateZone: String(data.dateZone ?? ''),
+            partial: Boolean(data.partial),
         }
     })
 
@@ -195,6 +201,9 @@ test.describe('Meetup dates (NIP-52)', () => {
         const soonId = publishDate({
             dTag: `meetup-event-${stamp}-soon`, title: soonTitle, meetupId: BERLIN.meetupId,
             start: now + 4 * 86400, end: now + 4 * 86400 + 7200, location: 'Bar 21',
+            // A zone the RUNNER is not in, so that "renders the event's zone" and
+            // "renders the reader's zone" cannot both be green.
+            tzid: 'Pacific/Auckland',
         })
         // And a date from a stranger, pointing at the SAME meetup calendar. Everything
         // about it is legal Nostr; only the author is wrong.
@@ -231,6 +240,22 @@ test.describe('Meetup dates (NIP-52)', () => {
         expect(before.source, 'the card is not reading from the relay').toBe('nostr')
         expect(before.attending, 'somebody has answered before the test did').toBe(0)
 
+        // ── 2b. The date is labelled with the EVENT's zone, not silently converted into
+        // the reader's. A meetup happens in one place at one o'clock; the runner is not in
+        // Auckland, so a card showing local time would fail here.
+        expect(before.dateZone, 'the date carries no zone — or the wrong one').toBe('Pacific/Auckland')
+        await expect(card.locator('[data-testid="meetup-event-zone"]')).toHaveText('Pacific/Auckland')
+        const inAuckland = new Intl.DateTimeFormat('de', {
+            weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+            timeZone: 'Pacific/Auckland',
+        }).format(new Date((now + 4 * 86400) * 1000))
+        expect(before.dateLabel, 'the time is not the one at the venue').toBe(inAuckland)
+
+        // ── 2c. What pressing the button does is said next to the button.
+        await expect(card.locator('[data-testid="meetup-event-disclosure"]')).toBeVisible()
+        await expect(card.locator('[data-testid="meetup-event-disclosure"]'))
+            .toContainText('zählt Signaturen, nicht Personen')
+
         // ── 3. RSVP: signed in the browser, then found again on the relay.
         await card.locator('[data-testid="meetup-event-yes"]').click()
         await expect(card.locator('[data-testid="meetup-event-attending"]')).toHaveText('1 kommt', { timeout: 30_000 })
@@ -247,6 +272,11 @@ test.describe('Meetup dates (NIP-52)', () => {
         const verdict = await cardState(page)
         expect(verdict.error, `the relay rejected the RSVP: ${verdict.error}`).toBe('')
         expect(verdict.attending, 'the count fell back after the relay answered — the write was rolled back').toBe(1)
+        // One relay, so there is no in-between state to report here. The partial case has
+        // its own unit cover (`publishResult.test.ts`, `publishSpread`); what this asserts
+        // is that a COMPLETE success does not raise the partial line.
+        expect(verdict.partial, 'a single-relay success must not report a partial result').toBe(false)
+        await expect(card.locator('[data-testid="meetup-event-partial"]')).toBeHidden()
 
         const address = `31923:${PORTAL_PUB}:meetup-event-${stamp}-soon`
         const requery = nak(['req', '-k', '31925', '-t', `a=${address}`, '--auth', '--sec', strangerSec, ZOOID_WS])
@@ -311,6 +341,18 @@ test.describe('Meetup dates (NIP-52)', () => {
             // lifts labelled targets to 44 px only under `@media (pointer: coarse)`, and
             // the E2E browser has a FINE pointer, so that rule is out of reach here.
             expect(yes.height, `${width}px: the RSVP button is smaller than 32 px high`).toBeGreaterThanOrEqual(32)
+
+            // The "·" between the zone and the venue only does its job while the two
+            // stay on ONE line. Measured at 375 px against the real portal event it
+            // wrapped onto a line of its own and read as an empty row between date and
+            // venue — hence `hidden sm:inline`. Asserted at BOTH widths, because a
+            // separator that is gone everywhere is the other half of the same defect.
+            const separator = card.locator('span[aria-hidden="true"]', { hasText: '·' })
+            if (width < 640) {
+                await expect(separator, '375px: the separator wraps onto a line of its own').toBeHidden()
+            } else {
+                await expect(separator, '1280px: the separator is gone where it is needed').toBeVisible()
+            }
         }
         console.log(`\n[meetup-calendar] geometry\n${report.join('\n')}`)
     })
@@ -344,6 +386,11 @@ test.describe('Meetup dates (NIP-52)', () => {
         expect(state.source, 'the card is not on the HTTP fallback').toBe('http')
         expect(state.dateLabel, 'the fallback shows no date').not.toBe('')
         expect(state.canRsvp, 'there is nothing to answer without a signed date').toBe(false)
+        // `next_event_start` is a bare `YYYY-MM-DD HH:MM` and the API says nothing about
+        // which clock it is on. Naming a zone here would be an invention; leaving the
+        // label off would be the silence the label exists against.
+        expect(state.dateZone, 'the fallback date is not labelled as the reader\'s own time').toBe('deine Zeit')
+        await expect(card.locator('[data-testid="meetup-event-disclosure"]')).toBeHidden()
 
         // And the two things the fallback must NOT pretend to have.
         await expect(card.locator('[data-testid="meetup-event-attending"]')).toBeHidden()

@@ -6,37 +6,34 @@ use Illuminate\Testing\TestResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * P2 — die serverseitige Weiche für die NIP-52-KALENDERQUELLE.
+ * P2 — the server-side switch for the NIP-52 CALENDAR SOURCE.
  *
- * ── Warum das eine eigene, serverseitige Zusage ist ────────────────────────────────
+ * ── Why this is a server-side promise of its own ──────────────────────────────────
  *
- * Die Termine eines Meetups liegen nicht auf dem Space-Relay, sondern auf den
- * öffentlichen Relays des PORTALS: `einundzwanzig-portal` signiert und publiziert seine
- * Meetups (31924) und Termine (31923) seit dem 2026-09-04 selbst, alle fünf Minuten, auf
- * die Adressen aus seinem eigenen `NOSTR_RELAYS`. Welche das für diesen Client sind — und
- * WESSEN Termine gelten — steht deshalb in der Konfiguration
- * (`NOSTR_CALENDAR_RELAYS`/`NOSTR_CALENDAR_AUTHORS` → `group.calendar_*`) und wird über
- * `partials/head.blade.php` als `window.__nostrCalendarRelays`/`…Authors` in die Insel
- * gereicht.
+ * A meetup's dates do not live on the space relay but on the PORTAL's public ones:
+ * `einundzwanzig-portal` has signed and published its meetups (31924) and dates (31923)
+ * itself since 2026-09-04, every five minutes, to the addresses from its own
+ * `NOSTR_RELAYS`. Which ones those are for this client — and WHOSE dates count — is
+ * therefore configuration (`NOSTR_CALENDAR_RELAYS`/`NOSTR_CALENDAR_AUTHORS` →
+ * `group.calendar_*`) and is handed to the island through `partials/head.blade.php` as
+ * `window.__nostrCalendarRelays`/`…Authors`.
  *
- * **Ein Code-Default wäre hier ein Fehler**, aus denselben zwei Gründen wie bei den
- * Artikel-Signal-Relais (`ArticleMetricRelaysTest.php`): er machte aus einer fehlenden
- * Konfiguration eine stille WebSocket-Verbindung ins öffentliche Internet, und der
- * fail-closed Relay-Wächter der E2E-Suite machte damit jeden Test rot, der einen
- * Meetup-Raum berührt.
+ * **A code default would be a defect here**, for the same two reasons as the article
+ * signal relays (`ArticleMetricRelaysTest.php`): it would turn a missing configuration
+ * into a silent WebSocket connection to the public internet, and the fail-closed relay
+ * guard of the E2E suite would then turn every test that touches a meetup room red.
  *
- * **Und der Autorenfilter ist keine Härtung, sondern die halbe Fläche.** kind 31923 ist
- * ein öffentliches Kind auf öffentlichen Relays, und das `a`-Tag, das einen Termin an
- * einen Meetup-Kalender bindet, ist eine BEHAUPTUNG — jeder darf ein Event mit unserer
- * Koordinate publizieren. Gemessen 2026-09-05 lieferte ein blanker
- * `nak req -k 31923 -l 100 wss://nos.lol` 100 Events von 16 Autoren. Ohne `authors`
- * stünde im Raumkopf, was ein Fremder dorthin zeigt.
+ * **And the author filter is not a hardening, it is half the surface.** A kind 31923 is
+ * a public kind on public relays, and the `a` tag that binds a date to a meetup calendar
+ * is a CLAIM — anybody may publish an event carrying our coordinate. Measured 2026-09-05,
+ * a bare `nak req -k 31923 -l 100 wss://nos.lol` returned 100 events from 16 authors.
+ * Without `authors` the room header would show whatever a stranger points at it.
  *
- * Serverseitig entschieden, also die billigere Schicht: kein Browser, kein Alpine, kein
- * Relay (dasselbe Muster wie `ArticleMetricRelaysTest.php`).
+ * Decided server-side, so the cheaper layer: no browser, no Alpine, no relay (the same
+ * shape as `ArticleMetricRelaysTest.php`).
  */
 
-/** Beliebiger 64-hex-Pubkey für eine „angemeldete" Session (Server-Gate, kein Signer). */
+/** Any 64-hex pubkey for a "logged in" session (server gate, no signer). */
 function calendarFakeSessionPubkey(): string
 {
     return str_repeat('d', 64);
@@ -50,13 +47,13 @@ function calendarHtml(TestResponse $res): string
     $content = $res->getContent();
 
     if ($content === false) {
-        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
+        throw new RuntimeException('Response::getContent() returned false — the response has no body.');
     }
 
     return $content;
 }
 
-test('Ohne konfigurierte Kalenderquelle steht KEINE der beiden Variablen im Dokument', function () {
+test('without a configured calendar source NEITHER variable is in the document', function () {
     config()->set('group.calendar_relay_urls', null);
     config()->set('group.calendar_authors', null);
 
@@ -64,19 +61,18 @@ test('Ohne konfigurierte Kalenderquelle steht KEINE der beiden Variablen im Doku
         ->get(route('group.room', ['h' => 'anyroom']))
         ->assertOk();
 
-    // Die Variablennamen stehen als LITERAL. Ein Vergleich gegen eine Konstante wäre das
-    // Symbol gegen sich selbst: benennt jemand `window.__nostrCalendarRelays` um, ohne
-    // `js/calendar.ts` mitzuziehen, liest die Insel dauerhaft `undefined` — und die
-    // Terminkarte fiele still auf den HTTP-Rückfallweg zurück, ohne dass irgendetwas
-    // kaputt aussähe.
+    // The variable names stand here as LITERALS. Comparing against a constant would be
+    // the symbol against itself: rename `window.__nostrCalendarRelays` without pulling
+    // `js/calendar.ts` along and the island reads `undefined` forever — the date card
+    // would fall back to HTTP silently, without anything looking broken.
     expect(calendarHtml($res))->not->toContain('__nostrCalendarRelays');
     expect(calendarHtml($res))->not->toContain('__nostrCalendarAuthors');
 });
 
-test('Mit konfigurierter Kalenderquelle reicht der Server BEIDE Werte wörtlich in die Insel', function () {
-    // Kommagetrennt, mit einem Leerzeichen — genau die Schreibweise, die ein Mensch in
-    // eine `.env` tippt. Der Server reicht den Rohwert durch; das Zerlegen, Normalisieren
-    // und das Verwerfen von Nicht-Hex macht `js/calendar.ts` (dort geprüft).
+test('with a configured calendar source the server hands BOTH values through verbatim', function () {
+    // Comma separated, with a space — exactly the way a human types it into a `.env`.
+    // The server passes the raw value on; splitting, normalising and dropping non-hex is
+    // `js/calendar.ts`'s job (and is tested there).
     config()->set('group.calendar_relay_urls', 'wss://nos.lol, wss://relay.damus.io');
     config()->set('group.calendar_authors', 'daf83d92768b5d0005373f83e30d4203c0b747c170449e02fea611a0da125ee6');
 
@@ -85,22 +81,22 @@ test('Mit konfigurierter Kalenderquelle reicht der Server BEIDE Werte wörtlich 
         ->assertOk();
     $html = calendarHtml($res);
 
-    // `@js()` escaped die Schrägstriche (`wss:\/\/…`) — die Erwartung steht deshalb in
-    // genau der Form, die im Dokument ankommt, nicht in der, die in der `.env` steht.
+    // `@js()` escapes the slashes (`wss:\/\/…`), so the expectation is written in the
+    // form that arrives in the document, not the one that goes into the `.env`.
     expect($html)->toContain('wss:\/\/nos.lol, wss:\/\/relay.damus.io');
     expect($html)->toContain('daf83d92768b5d0005373f83e30d4203c0b747c170449e02fea611a0da125ee6');
-    // `??` und nicht `=`: ein per `addInitScript` vorbesetzter Wert muss gewinnen, sonst
-    // könnte ein E2E-Lauf die Fremdadressen nicht mehr wegnehmen — und genau das tut
-    // `tests/e2e/meetup-calendar.spec.ts`, das sie auf den worker-eigenen Relay zieht.
+    // `??` and not `=`: a value pre-set by `addInitScript` has to win, or an E2E run
+    // could not take the foreign addresses away again — which is exactly what
+    // `tests/e2e/meetup-calendar.spec.ts` does when it pulls them onto the worker relay.
     expect($html)->toContain('window.__nostrCalendarRelays = window.__nostrCalendarRelays ??');
     expect($html)->toContain('window.__nostrCalendarAuthors = window.__nostrCalendarAuthors ??');
 });
 
-test('Die zwei Hälften sind UNABHÄNGIG geschaltet — eine allein reicht der Insel nicht', function () {
-    // Der Client verlangt beide (`calendarConfigured()` in `js/calendar.ts`). Sie stehen
-    // trotzdem in ZWEI `@if`, damit eine halbe Konfiguration am Dokument sichtbar ist
-    // statt sich als „gar nichts konfiguriert" zu tarnen: wer die Relays setzt und die
-    // Autoren vergisst, findet den einen Namen im HTML und den anderen nicht.
+test('the two halves are switched INDEPENDENTLY — one alone is not enough for the island', function () {
+    // The client requires both (`calendarConfigured()` in `js/calendar.ts`). They still
+    // sit in TWO `@if`, so that a half configuration is visible at the document instead
+    // of disguising itself as "nothing configured": whoever sets the relays and forgets
+    // the authors finds one name in the HTML and not the other.
     config()->set('group.calendar_relay_urls', 'wss://nos.lol');
     config()->set('group.calendar_authors', null);
 
@@ -114,49 +110,49 @@ test('Die zwei Hälften sind UNABHÄNGIG geschaltet — eine allein reicht der I
     expect($html)->not->toContain('__nostrCalendarAuthors');
 });
 
-test('BEIDE head-Partials tragen die Zeilen — sonst tut P2 auf einem der zwei Wege still nichts', function () {
+test('BOTH head partials carry the lines — otherwise P2 silently does nothing on one of the two paths', function () {
     /*
-     * **Der Baum hat zwei head-Partials, und beide werden produktiv gerendert:**
-     * `resources/views/partials/head.blade.php` ist der normale Web-Head, das
-     * gleichnamige im Paket der Minimal-Head für den Portal-/Fremdhost-Betrieb (aktiv
-     * über `config('group.head_partial')`).
+     * **The tree has two head partials, and both are rendered in production:**
+     * `resources/views/partials/head.blade.php` is the normal web head, the one with the
+     * same name inside the package is the minimal head for portal/foreign-host operation
+     * (switched on by `config('group.head_partial')`).
      *
-     * **Beim Bau dieser Phase ist genau der Fehler passiert**, gegen den dieser Test
-     * steht — derselbe, der schon P6 der Artikelfläche gekostet hat: die zwei Zeilen
-     * standen zuerst NUR im Paket-Partial. Gefunden hat es keine Suite, sondern eine
-     * Messung am laufenden Server (`curl … | grep __nostrCalendar` lieferte nichts,
-     * während `config('group.calendar_relay_urls')` den Wert hatte). Die E2E-Spec war
-     * dabei GRÜN, weil sie die Variablen per `addInitScript` selbst setzt und den Head
-     * damit gar nicht befragt.
+     * **Exactly the mistake this test stands against happened while building this phase**
+     * — the same one that already cost P6 of the article surface: the two lines were in
+     * the package partial only. No suite caught it. The E2E spec was GREEN throughout,
+     * because it sets the variables itself per `addInitScript` and never asks the head at
+     * all. It surfaced from a measurement against a running server: `curl … | grep
+     * __nostrCalendar` returned nothing while `config('group.calendar_relay_urls')` had
+     * the value.
      *
-     * Geprüft wird der VARIABLENNAME als Literal, nicht ein Symbol: `js/calendar.ts`
-     * liest `globalThis.__nostrCalendarRelays`, und ein Tippfehler auf einer der beiden
-     * Seiten ergibt dauerhaft `undefined` statt eines Fehlers.
+     * What is checked is the VARIABLE NAME as a literal, not a symbol: `js/calendar.ts`
+     * reads `globalThis.__nostrCalendarRelays`, and a typo on either side yields a
+     * permanent `undefined` rather than an error.
      */
-    $pfade = [
+    $paths = [
         base_path('resources/views/partials/head.blade.php'),
         base_path('packages/einundzwanzig-group/resources/views/partials/head.blade.php'),
     ];
 
-    foreach ($pfade as $pfad) {
-        expect(file_exists($pfad))->toBeTrue("Head-Partial nicht gefunden: {$pfad}");
-        $quelle = (string) file_get_contents($pfad);
+    foreach ($paths as $path) {
+        expect(file_exists($path))->toBeTrue("head partial not found: {$path}");
+        $source = (string) file_get_contents($path);
 
-        // `str_contains` + `toBeTrue` statt `toContain($needle, $meldung)`: Pests
-        // `toContain` nimmt VARIADISCH weitere Needles, kein Message-Argument — ein
-        // zweiter Parameter würde als zusätzliche gesuchte Zeichenkette geprüft und die
-        // Zusage wäre wertlos.
-        expect(str_contains($quelle, 'window.__nostrCalendarRelays = window.__nostrCalendarRelays ??'))->toBeTrue(
-            "Die P2-Relay-Zeile fehlt in {$pfad} — auf diesem Rendering-Weg bekommt die Insel die Kalender-Relays nie."
+        // `str_contains` + `toBeTrue` instead of `toContain($needle, $message)`: Pest's
+        // `toContain` takes further needles VARIADICALLY, not a message argument — a
+        // second parameter would be checked as an additional searched string and the
+        // promise would be worthless.
+        expect(str_contains($source, 'window.__nostrCalendarRelays = window.__nostrCalendarRelays ??'))->toBeTrue(
+            "The P2 relay line is missing in {$path} — on this rendering path the island never gets the calendar relays."
         );
-        expect(str_contains($quelle, 'window.__nostrCalendarAuthors = window.__nostrCalendarAuthors ??'))->toBeTrue(
-            "Die P2-Autoren-Zeile fehlt in {$pfad} — ohne sie fragt die Terminkarte dort gar nichts ab."
+        expect(str_contains($source, 'window.__nostrCalendarAuthors = window.__nostrCalendarAuthors ??'))->toBeTrue(
+            "The P2 author line is missing in {$path} — without it the date card asks for nothing there."
         );
-        expect(str_contains($quelle, "config('group.calendar_relay_urls')"))->toBeTrue(
-            "In {$pfad} steht die Relay-Zeile, liest aber einen anderen Konfigurationsschlüssel."
+        expect(str_contains($source, "config('group.calendar_relay_urls')"))->toBeTrue(
+            "In {$path} the relay line is there but reads a different configuration key."
         );
-        expect(str_contains($quelle, "config('group.calendar_authors')"))->toBeTrue(
-            "In {$pfad} steht die Autoren-Zeile, liest aber einen anderen Konfigurationsschlüssel."
+        expect(str_contains($source, "config('group.calendar_authors')"))->toBeTrue(
+            "In {$path} the author line is there but reads a different configuration key."
         );
     }
 });

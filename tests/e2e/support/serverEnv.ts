@@ -115,18 +115,18 @@ export const testServerEnv = ({ slot, mitBoard = false, ohneWorkspace = false }:
         // vierter Tab auf `/forge`. Ohne ihn rendert dieselbe Spec auf einem Rechner mit
         // `.env`-Eintrag anders als auf einem ohne, und kein Test sagt einem das.
         NOSTR_WORKSPACE_URL: ohneWorkspace ? '' : workerRelay,
-        // P2 — die NIP-52-Kalenderquelle. IMMER leer, ohne Option, und das ist die
-        // Entscheidung: die Terminkarte im Raumkopf braucht serverseitig gar nichts —
-        // ihr Markup steht unabhängig von der Konfiguration im HTML, und die Insel
-        // entscheidet im Browser, ob sie fragt. Ein Spec, der die Karte messen will,
-        // setzt `window.__nostrCalendarRelays`/`…Authors` per `addInitScript` auf den
-        // worker-eigenen Relay (`meetup-calendar.spec.ts`) — das gewinnt gegen das `??`
-        // im Head-Partial und braucht keinen zweiten `serve`-Prozess wie das Board.
+        // P2 — the NIP-52 calendar source. ALWAYS empty, with no option, and that is the
+        // decision: the date card in the room header needs nothing server-side — its
+        // markup is in the HTML regardless of the configuration, and the island decides
+        // in the browser whether to ask. A spec that wants to measure the card sets
+        // `window.__nostrCalendarRelays`/`…Authors` per `addInitScript` to the worker's
+        // own relay (`meetup-calendar.spec.ts`); that beats the `??` in the head partial
+        // and needs no second `serve` process the way the board does.
         //
-        // Leer ist hier keine Formalie: die empfohlenen Werte in `.env.example` sind
-        // `wss://nos.lol,wss://relay.damus.io`. Stünden sie im Testlauf, öffnete JEDER
-        // Meetup-Raum eine Verbindung ins öffentliche Internet — und der Relay-Wächter
-        // machte jeden Test rot, der einen Meetup-Raum berührt.
+        // Empty is not a formality here: the recommended values in `.env.example` are
+        // `wss://nos.lol,wss://relay.damus.io`. With those in the environment EVERY
+        // meetup room would open a connection to the public internet — and the relay
+        // guard would turn every test that touches a meetup room red.
         NOSTR_CALENDAR_RELAYS: '',
         NOSTR_CALENDAR_AUTHORS: '',
 
