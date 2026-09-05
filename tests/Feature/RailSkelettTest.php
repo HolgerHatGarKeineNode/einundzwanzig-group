@@ -255,8 +255,25 @@ test('the placeholder reserves exactly as many footer area rows as the rail carr
         $platzhalter = railSkelettHtmlAus($ganz);
         $rail = str_replace($platzhalter, '', $ganz);
 
-        expect($flaechenzeilen($platzhalter))->toBe($erwartet);
-        expect($anker($rail))->toBe($erwartet);
+        $inDerRail = $anker($rail);
+        $imPlatzhalter = $flaechenzeilen($platzhalter);
+
+        // CALIBRATION first, and only on the side that is the source of truth. Without
+        // it the promise below is satisfiable by two probes that both find nothing —
+        // `0 === 0` is an equality, not a measurement.
+        expect($inDerRail)
+            ->toBe($erwartet, "the rail renders {$inDerRail} footer anchors, expected {$erwartet}");
+
+        // THE PROMISE: the placeholder is measured AGAINST the rail, not against the same
+        // literal a second time. Two literals compared to a third are a constant checked
+        // against itself: they fall together when the row disappears, but they say
+        // nothing about the COUPLING that `rail-skelett.blade.php` promises in prose and
+        // `desktop-boot-geometrie.spec.ts` pays for in pixels.
+        expect($imPlatzhalter)->toBe(
+            $inDerRail,
+            "the placeholder reserves {$imPlatzhalter} area rows while the rail renders {$inDerRail} — that difference is a boot jump of ".
+            (abs($imPlatzhalter - $inDerRail) * 38).' px'
+        );
     }
 });
 
