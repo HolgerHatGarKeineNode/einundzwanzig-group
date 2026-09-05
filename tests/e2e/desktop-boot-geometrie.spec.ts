@@ -55,9 +55,16 @@
  *
  * | Lage | Kopf | Suchfeld | Liste | Fußzeile |
  * |---|---|---|---|---|
- * | mit `workspace_url`, Space ungeladen | 60 | 36 | 494 | 302 |
- * | ohne `workspace_url`, Space ungeladen | 60 | 36 | 532 | **264** |
- * | mit `workspace_url`, Space MIT Beschreibung | **64** | 36 | **490** | 302 |
+ * | mit `workspace_url`, Space ungeladen | 60 | 36 | 456 | 340 |
+ * | ohne `workspace_url`, Space ungeladen | 60 | 36 | 494 | **302** |
+ * | mit `workspace_url`, Space MIT Beschreibung | **64** | 36 | **452** | 340 |
+ *
+ * RE-MEASURED 2026-09-05: another 38 px moved from the list into the footer (302 → 340
+ * with a workspace, 264 → 302 without). The cause is a FOURTH area row, „Verschlüsselt"
+ * — the fixed place in the chrome for `/messages`, added next to „Lesezeichen" because
+ * the screen had none and a user went looking for it in vain. Unlike the P2 case below,
+ * `rail-skelett.blade.php` was changed in the SAME edit, so `rail).toEqual(platzhalter)`
+ * never went red: only the four literals moved, and both sides were measured afresh.
  *
  * RE-MEASURED 2026-09-04: the footer grew by 38 px (264 → 302 with a workspace,
  * 226 → 264 without), the list gave the same 38 px back. The cause is a THIRD area
@@ -410,9 +417,9 @@ test('Platzhalter und echte Rail sind Block für Block dimensionsgleich — MIT 
 
     expect(rail).toEqual(platzhalter)
     // Und die Zahlen selbst, damit ein gemeinsamer Umbau beider Seiten auffällt statt
-    // stillschweigend „gleich" zu bleiben. Kopf 60 · Suchfeld 36 · Liste 494 · Fußzeile
-    // 302 (drei Flächenzeilen, drei Nav-Zeilen, Profilzeile).
-    expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 494, 302])
+    // stillschweigend „gleich" zu bleiben. Kopf 60 · Suchfeld 36 · Liste 456 · Fußzeile
+    // 340 (vier Flächenzeilen, drei Nav-Zeilen, Profilzeile).
+    expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 456, 340])
 })
 
 testOhneWorkspace(
@@ -433,16 +440,29 @@ testOhneWorkspace(
         const { platzhalter, rail } = await vergleich(page)
 
         expect(rail).toEqual(platzhalter)
-        // 264 = 302 − 36 (`min-h-9`) − 2 (`mt-0.5`): genau die fehlende Forge-Zeile.
+        // 302 = 340 − 36 (`min-h-9`) − 2 (`mt-0.5`): genau die fehlende Forge-Zeile.
         // Die Liste bekommt die 38 px, weil sie die einzige Fläche mit `flex-1` ist.
-        expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 532, 264])
+        expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 494, 302])
     },
 )
 
+/**
+ * Die Fensterhöhe, ab der die Liste die 4 px des gewachsenen Kopfes VOLLSTÄNDIG federt.
+ *
+ * As ONE constant, because it stood as the literal `418` in three places — the case list,
+ * the `teilweise` branch and the prose — and the footer has now moved it twice. Three
+ * copies of a number that moves with every footer row are two copies too many.
+ *
+ * The value is not asserted from this constant alone: the two cases straddling it
+ * (`FEDER_GRENZE_PX` = alles, `FEDER_GRENZE_PX - 1` = teilweise) only both pass at the
+ * TRUE boundary, so the run measures it rather than trusting the arithmetic.
+ */
+const FEDER_GRENZE_PX = 456
+
 for (const { hoehe, gibtDieListeAb } of [
     { hoehe: 900, gibtDieListeAb: 'alles' },
-    { hoehe: 418, gibtDieListeAb: 'alles' },
-    { hoehe: 417, gibtDieListeAb: 'teilweise' },
+    { hoehe: FEDER_GRENZE_PX, gibtDieListeAb: 'alles' },
+    { hoehe: FEDER_GRENZE_PX - 1, gibtDieListeAb: 'teilweise' },
     { hoehe: 360, gibtDieListeAb: 'nichts' },
 ] as const) {
     test(`die Space-Beschreibung ist die eine Höhe, die der Server nicht kennt — 1440×${hoehe}`, async ({ page }) => {
@@ -464,12 +484,18 @@ for (const { hoehe, gibtDieListeAb } of [
         // als 1440×379 weiter (gemessen: 376 und tiefer = „nichts", 377–379 = Teil-Fall,
         // 380 und höher = „alles").
         //
-        // MOVED AGAIN 2026-09-04, and this time not by a fraction: the boundary is at
+        // MOVED AGAIN 2026-09-04, and this time not by a fraction: the boundary was at
         // **418 px**, because the footer grew by 38 px (the bookmarks row of P2, see the
         // head of this file). The 380 in the paragraph above is history — what carries
         // the number today is the formula and the measured series below. The four cases
-        // moved with it: 418 is the boundary, 417 the partial case, 360 stays the deep
+        // moved with it: 418 was the boundary, 417 the partial case, 360 stays the deep
         // one. Nothing about the RULE changed, only the height at which it kicks in.
+        //
+        // AND AGAIN 2026-09-05, by the same 38 px and for the same kind of reason: the
+        // „Verschlüsselt" row is the fourth area row of the footer. The boundary is now
+        // **456 px**, and it lives in `FEDER_GRENZE_PX` instead of as a literal in three
+        // places. That the rule survived two moves untouched is the point of writing it
+        // as a formula rather than as a table of heights.
         //
         // Zwei Fassungen dieses Absatzes waren vorher falsch, und beide auf dieselbe
         // Weise: sie behaupteten mehr, als gemessen war.
@@ -484,17 +510,20 @@ for (const { hoehe, gibtDieListeAb } of [
         // SOLANGE sie Spiel hat, und ihr Boden ist das eigene `pb-2` (8 px). Der Platz,
         // den die Spalte im gewachsenen Zustand braucht, ist
         //
-        //     64 (Kopf MIT Beschreibung) + 36 (Suchfeld) + 8 (mb-2) + 302 (Fußzeile)
-        //   +  8 (pb-2 der Liste)                                         = **418 px**
+        //     64 (Kopf MIT Beschreibung) + 36 (Suchfeld) + 8 (mb-2) + 340 (Fußzeile)
+        //   +  8 (pb-2 der Liste)                                         = **456 px**
         //
         // Ab da federt die Liste vollständig, darunter teilt sie sich die 4 px mit der
         // Fußzeile, und sobald mehr als 4 px fehlen, wandert die Fußzeile ganz.
         //
         // Am gerenderten Element gemessen (2026-09-04, Sonde über zwölf Höhen; die Reihe
         // vom 2026-08-21 stand bis dahin hier und lag um dieselben 38 px tiefer):
+        // IT STANDS AS HISTORY: every height in it is 38 px too low since 2026-09-05, and
+        // the series is deliberately NOT rebased. A shifted table would claim a
+        // measurement nobody ran.
         //   1440×900  Kopf +4 · Liste −4 · Fußzeile-y ±0
         //   1440×424  Kopf +4 · Liste −4 · Fußzeile-y ±0
-        //   1440×418  Kopf +4 · Liste −4 · Fußzeile-y ±0     ← genau die Grenze
+        //   1440×418  Kopf +4 · Liste −4 · Fußzeile-y ±0     ← die Grenze VON DAMALS
         //   1440×417  Kopf +4 · Liste −3 · Fußzeile-y **+1**
         //   1440×416  Kopf +4 · Liste −2 · Fußzeile-y **+2**
         //   1440×415  Kopf +4 · Liste −1 · Fußzeile-y **+3**
@@ -506,6 +535,11 @@ for (const { hoehe, gibtDieListeAb } of [
         // Fall: eine Regel, die nur an einer Stelle geprüft ist, ist keine Regel,
         // sondern ein Messpunkt, und zwei Stellen haben den Teilbereich dazwischen
         // gerade übersehen.
+        //
+        // What pins the boundary TODAY is not that table but the two cases straddling
+        // `FEDER_GRENZE_PX` in this very loop: 456 asserts `fussWandert === 0`, 455
+        // asserts `fussWandert === 1`. Both hold only if the boundary is exactly 456, so
+        // every run re-measures it — that is why the constant may be written down at all.
         //
         // DIE ZUSAGE, die in ALLEN drei Lagen gilt und deshalb unten zuerst steht:
         // was der Kopf gewinnt, geben Liste und Fußzeile zusammen ab. Nichts leckt
@@ -543,9 +577,9 @@ for (const { hoehe, gibtDieListeAb } of [
             expect(listeGibtAb).toBeCloseTo(4, 2)
             expect(fussWandert).toBe(0)
         } else if (gibtDieListeAb === 'teilweise') {
-            // 418 − 417 = 1 px fehlt der Spalte, genau der wandert.
-            expect(fussWandert).toBeCloseTo(418 - hoehe, 2)
-            expect(listeGibtAb).toBeCloseTo(4 - (418 - hoehe), 2)
+            // 456 − 455 = 1 px fehlt der Spalte, genau der wandert.
+            expect(fussWandert).toBeCloseTo(FEDER_GRENZE_PX - hoehe, 2)
+            expect(listeGibtAb).toBeCloseTo(4 - (FEDER_GRENZE_PX - hoehe), 2)
         } else {
             // Mehr als 4 px fehlen: die Liste steht auf ihrem Boden, die Fußzeile
             // nimmt alles.

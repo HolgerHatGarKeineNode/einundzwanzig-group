@@ -227,6 +227,39 @@ test('die Zeilen des Platzhalters folgen der KONFIGURATION, nicht einer Zahl', f
     }
 });
 
+test('the placeholder reserves exactly as many footer area rows as the rail carries anchors', function () {
+    // The contract `rail-skelett.blade.php` states in prose and `desktop-boot-geometrie`
+    // measures in pixels: whoever adds a row to the rail footer adds it to the placeholder
+    // too. It has broken once already — the bookmarks row of P2 stood in the rail and not
+    // in the placeholder, worth a 38 px jump at boot (302 px vs. 264 px at 1440×900).
+    //
+    // Latched here as well as in the browser because the count is a SERVER decision
+    // (`@php($flaechen = config('group.workspace_url') ? … )`), so a Pest run catches it
+    // before an E2E run has to. Same principle as the nav-row test above: measure the
+    // COUPLING, not today's number — hence both configurations.
+    //
+    // The two sides are counted with DIFFERENT probes on purpose, because neither probe
+    // works on both sides:
+    //   · placeholder → the class fingerprint. It has no anchors, it is decoration.
+    //   · rail → `data-rail-fuss`. The fingerprint is NOT unique in the rail: the „Alle
+    //     Räume & Entdecken" link at the foot of the scroller carries the same class list
+    //     and is not a footer row. Counting it would have made this test read 5 and 4.
+    $flaechenzeilen = fn (string $html): int => substr_count($html, 'min-h-9 items-center gap-2 rounded-tile px-2');
+    $anker = fn (string $html): int => substr_count($html, 'data-rail-fuss="');
+
+    foreach ([['wss://buzz.test/', 4], [null, 3]] as [$workspace, $erwartet]) {
+        config(['group.workspace_url' => $workspace]);
+        config(['nativephp-internal.running' => false]);
+
+        $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+        $platzhalter = railSkelettHtmlAus($ganz);
+        $rail = str_replace($platzhalter, '', $ganz);
+
+        expect($flaechenzeilen($platzhalter))->toBe($erwartet);
+        expect($anker($rail))->toBe($erwartet);
+    }
+});
+
 test('der Platzhalter bleibt unter einem Kilobyte auf der Leitung', function () {
     // Der Preis, den JEDES Telefon zahlt: unterhalb `xl` ist der Platzhalter `hidden`
     // (kein Layout, kein Paint, keine Insel), im DOM steht er trotzdem. Der Docblock

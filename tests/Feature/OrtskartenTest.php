@@ -420,6 +420,49 @@ test('ohne Workspace-Config bleibt die Forge-Zeile der Fußzeile aus', function 
     expect($html)->not->toContain('data-rail-fuss="forge"');
 });
 
+test('the rail footer carries the encrypted-messages row, right after bookmarks', function () {
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+
+    $html = (string) alsMitglied($this, 'group.spaces')->assertOk()->getContent();
+
+    // WHY this row exists: `/messages` had no fixed place in the chrome. Its three ways
+    // in — the command palette, the DM modal's footer link and the profile popover of
+    // `⚡spaces.blade.php` — are all things you OPEN. A user went looking for the screen
+    // and did not find it.
+    //
+    // Anchored on `data-rail-fuss` and not on the label, for the same reason the Artikel/
+    // Forge test above gives: „Verschlüsselt" also stands in the command palette and in
+    // the profile popover, so a text probe would hit any of the three.
+    $lesezeichen = strpos($html, 'data-rail-fuss="lesezeichen"');
+    $messages = strpos($html, 'data-rail-fuss="messages"');
+    if ($lesezeichen === false || $messages === false) {
+        throw new RuntimeException('Bookmarks or encrypted row missing from the rail footer — this test measures nothing.');
+    }
+
+    // Order, not just presence: the profile popover lists Lesezeichen → Verschlüsselt →
+    // Einstellungen, and two orderings of the same places are two vocabularies.
+    expect($lesezeichen)->toBeLessThan($messages);
+
+    // The row is a LINK to `group.messages`, not a label that merely reads like one. The
+    // slice runs from the `<a` that OWNS the anchor to the closing tag, so a `href`
+    // belonging to a neighbouring row cannot satisfy it. Cutting at the anchor itself was
+    // the first try and it measured nothing: Blade emits `href` BEFORE `data-rail-fuss`.
+    $auf = strrpos(substr($html, 0, $messages), '<a ');
+    $zu = strpos($html, '</a>', $messages);
+    if ($auf === false || $zu === false) {
+        throw new RuntimeException('The encrypted row is not inside an <a> element — markup rebuilt?');
+    }
+    $zeile = substr($html, $auf, $zu - $auf);
+    expect($zeile)->toContain('href="'.route('group.messages').'"');
+    expect($zeile)->toContain('Verschlüsselt');
+
+    // Unconditional, unlike Forge: the inbox hangs on the user, not on a config.
+    config(['group.workspace_url' => null]);
+    $ohne = (string) alsMitglied($this, 'group.spaces')->assertOk()->getContent();
+    expect($ohne)->toContain('data-rail-fuss="messages"');
+    expect($ohne)->not->toContain('data-rail-fuss="forge"');
+});
+
 // ── 33ab: ein Glyph, zwei Bedeutungen ───────────────────────────────────────────────
 
 /**
