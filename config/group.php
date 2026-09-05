@@ -35,7 +35,12 @@ return [
      * klingt die Oberfläche aus" — im Gegensatz zu `account`/`session`, die dem
      * Konto gehören.
      *
+     * `mutes` (P6, NIP-51 kind 10000) sits between `blossom` and `appearance`: it
+     * belongs to the SPACE block (what do I see of this space), not to the presentation
+     * block (how does it look). It is also the only way back — a hidden person is gone
+     * from the chat list, so their profile card cannot be reached from there any more.
+     *
      * @var list<string>
      */
-    'settings' => ['account', 'space', 'blossom', 'appearance', 'language', 'session'],
+    'settings' => ['account', 'space', 'blossom', 'mutes', 'appearance', 'language', 'session'],
 ];

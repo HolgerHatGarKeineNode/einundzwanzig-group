@@ -485,7 +485,30 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // in der Liste wiederfinden, in offenem UND privatem Forum, plus die
         // Ausschließlichkeit der zwei Bauformen). Wer die Träger hier sucht,
         // sucht am falschen Ort.
-        'room' => 37,
+        //
+        // **P2 of the community plan (2026-09-05): 37 -> 42.** The multiset diff
+        // (`array_count_values`, `git show HEAD:…⚡room.blade.php` against the working
+        // tree) is ONE-SIDED — additions only, not a single deletion:
+        //
+        //     aria-hidden="true"                               3 -> 4
+        //     aria-pressed="false"                             0 -> 2
+        //     x-bind:aria-pressed="myStatus === 'accepted' …"  0 -> 1
+        //     x-bind:aria-pressed="myStatus === 'declined' …"  0 -> 1
+        //
+        // All five sit in the new NIP-52 date card. The two `aria-pressed` PAIRS are the
+        // point: accept and decline are ONE toggle with two states, and a screen reader
+        // should hear the current one rather than only see the highlight. The static
+        // `false` in the markup plus the binding beside it — same rule as the search
+        // button in the header: the static value has to be right BEFORE Alpine boots, or
+        // the screen reader announces a button without a state for the first moment.
+        //
+        // The fourth `aria-hidden` sits on the "·" separator between date and venue.
+        // Decorative, not text — the same shape as in the meetup tile.
+        //
+        // **The date card has no component file of its own**, it stands entirely in this
+        // view. It is therefore the rare case where this count really does cover the new
+        // surface COMPLETELY — for the forum topics above it explicitly did not.
+        'room' => 42,
         'directory' => 3,
         'spaces' => 9,
         // **P1 des Gitea-Sprache-Plans (2026-08-26): 20 → 16.** Multiset-Diff

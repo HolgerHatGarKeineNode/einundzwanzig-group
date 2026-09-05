@@ -272,18 +272,60 @@ describe('Bundle-Grenze: der Renderer bleibt aus dem Boot-Pfad', () => {
         )
     })
 
+    /**
+     * **The mark: an UPPER bound, not a target.**
+     *
+     * It fires when a large library slides back into the boot path — including one other
+     * than markdown-it, which the case above does not know at all. 90 069 B gzip measured
+     * (2026-08-21); the first mark sat at 110 000, roughly 22 % above it.
+     *
+     * ── MOVED ONCE, on 2026-09-05, and here is why ──────────────────────────────────
+     *
+     * Until then the mark was 110 000 and had never been touched. The sentence that stood
+     * here — *"it never moves under normal growth"* — was **falsified** that day: P6 of the
+     * plan `2026-09-05T0125-community-features-herbst` (hiding a person, NIP-51 kind
+     * 10000) broke it with about 1 kB of OWN code and no new library at all. Three builds,
+     * measured rather than estimated:
+     *
+     * | state | app chunk gzip |
+     * |---|---|
+     * | HEAD before P6 (`3ff09d0` / package `e240271`) | **109 542** — 458 B of headroom |
+     * | P6 as the chat filter only, without the Alpine store | 109 791 |
+     * | P6 whole | **110 592** — 592 B above the old mark |
+     *
+     * **What was tried and rejected:** taking the Alpine store (801 of those 1 050 B) out
+     * of the boot path behind an `import()`, the way `js/longformFeed.ts` does it. Rejected
+     * because `$store.mutes` would then not exist at the first render — the profile card
+     * sits on EVERY page — and because a dynamic import fails silently in this house
+     * (`js/core.ts` writes out exactly that difference). A protective surface that is
+     * sometimes absent and says nothing is worse than 800 B.
+     *
+     * **Why the rest is indivisible:** filter, store and models hang on the boot path
+     * because the chat list needs them for the FIRST paint. It is not an import that can be
+     * deferred, it is the surface itself.
+     *
+     * **The new mark is 112 000**, leaving ~1.4 kB of headroom. It still catches exactly
+     * what the latch was built for: markdown-it (139 559) and the QR renderer (+9 115) are
+     * both far above it.
+     *
+     * **The decision belongs to the client, not to the builder.** P6's builder left the
+     * number alone and reported the breach; raising it is an explicit instruction of
+     * 2026-09-05. Raising it quietly would be the point at which a size promise stops
+     * carrying — it is built to hurt at the first push.
+     *
+     * **And the sentence without which the next raise becomes a habit: if the mark falls a
+     * SECOND time under normal growth, the problem is not the number, it is the boot
+     * path.** Then it does not get added to, it gets split.
+     */
     test('der app-Chunk bleibt unter der Marke, die vor der Regression galt', () => {
-        // Eine OBERgrenze, kein Sollwert: sie bewegt sich bei normalem Wachstum nie und
-        // schlägt an, wenn wieder eine große Bibliothek in den Boot-Pfad rutscht — auch
-        // bei einer anderen als markdown-it, die der Fall darüber gar nicht kennt.
-        // 90 069 B gzip gemessen (2026-08-21); die Marke liegt rund 22 % darüber.
+        const MARKE = 112_000
         const mf = manifest()
         const entry = Object.entries(mf).find(([schluessel, e]) => e.isEntry && schluessel.endsWith('.ts'))![1]
         const gzip = gzipSync(readFileSync(join(buildDir, entry.file))).length
 
         assert.ok(
-            gzip < 110_000,
-            `Der app-Chunk ist auf ${gzip} B gzip gewachsen (Marke: 110 000). Vor der markdown-it-Regression waren es 90 069 B, mit ihr 139 559 B — sieh nach, was neu im Boot-Pfad hängt.`,
+            gzip < MARKE,
+            `Der app-Chunk ist auf ${gzip} B gzip gewachsen (Marke: ${MARKE}). Vor der markdown-it-Regression waren es 90 069 B, mit ihr 139 559 B — sieh nach, was neu im Boot-Pfad hängt. Die Marke wurde am 2026-09-05 EINMAL von 110 000 auf ${MARKE} gehoben (Begründung im Docblock); ein zweiter Fall unter normalem Wachstum ist eine Aussage über den Boot-Pfad, nicht über die Zahl.`,
         )
     })
 })
