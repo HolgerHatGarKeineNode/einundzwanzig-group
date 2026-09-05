@@ -227,6 +227,56 @@ test('die Zeilen des Platzhalters folgen der KONFIGURATION, nicht einer Zahl', f
     }
 });
 
+test('the placeholder reserves exactly as many footer area rows as the rail carries anchors', function () {
+    // The contract `rail-skelett.blade.php` states in prose and `desktop-boot-geometrie`
+    // measures in pixels: whoever adds a row to the rail footer adds it to the placeholder
+    // too. It has broken once already — the bookmarks row of P2 stood in the rail and not
+    // in the placeholder, worth a 38 px jump at boot (302 px vs. 264 px at 1440×900).
+    //
+    // Latched here as well as in the browser because the count is a SERVER decision
+    // (`@php($flaechen = config('group.workspace_url') ? … )`), so a Pest run catches it
+    // before an E2E run has to. Same principle as the nav-row test above: measure the
+    // COUPLING, not today's number — hence both configurations.
+    //
+    // The two sides are counted with DIFFERENT probes on purpose, because neither probe
+    // works on both sides:
+    //   · placeholder → the class fingerprint. It has no anchors, it is decoration.
+    //   · rail → `data-rail-fuss`. The fingerprint is NOT unique in the rail: the „Alle
+    //     Räume & Entdecken" link at the foot of the scroller carries the same class list
+    //     and is not a footer row. Counting it would have made this test read 5 and 4.
+    $flaechenzeilen = fn (string $html): int => substr_count($html, 'min-h-9 items-center gap-2 rounded-tile px-2');
+    $anker = fn (string $html): int => substr_count($html, 'data-rail-fuss="');
+
+    foreach ([['wss://buzz.test/', 4], [null, 3]] as [$workspace, $erwartet]) {
+        config(['group.workspace_url' => $workspace]);
+        config(['nativephp-internal.running' => false]);
+
+        $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+        $platzhalter = railSkelettHtmlAus($ganz);
+        $rail = str_replace($platzhalter, '', $ganz);
+
+        $inDerRail = $anker($rail);
+        $imPlatzhalter = $flaechenzeilen($platzhalter);
+
+        // CALIBRATION first, and only on the side that is the source of truth. Without
+        // it the promise below is satisfiable by two probes that both find nothing —
+        // `0 === 0` is an equality, not a measurement.
+        expect($inDerRail)
+            ->toBe($erwartet, "the rail renders {$inDerRail} footer anchors, expected {$erwartet}");
+
+        // THE PROMISE: the placeholder is measured AGAINST the rail, not against the same
+        // literal a second time. Two literals compared to a third are a constant checked
+        // against itself: they fall together when the row disappears, but they say
+        // nothing about the COUPLING that `rail-skelett.blade.php` promises in prose and
+        // `desktop-boot-geometrie.spec.ts` pays for in pixels.
+        expect($imPlatzhalter)->toBe(
+            $inDerRail,
+            "the placeholder reserves {$imPlatzhalter} area rows while the rail renders {$inDerRail} — that difference is a boot jump of ".
+            (abs($imPlatzhalter - $inDerRail) * 38).' px'
+        );
+    }
+});
+
 test('der Platzhalter bleibt unter einem Kilobyte auf der Leitung', function () {
     // Der Preis, den JEDES Telefon zahlt: unterhalb `xl` ist der Platzhalter `hidden`
     // (kein Layout, kein Paint, keine Insel), im DOM steht er trotzdem. Der Docblock
