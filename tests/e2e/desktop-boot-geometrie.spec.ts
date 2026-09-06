@@ -397,11 +397,45 @@ test('NEGATIVKONTROLLE: dieselbe Sonde sieht den Fehler, wenn man das alte Marku
  * Ein Lauf: Platzhalter messen, auf die Rail warten, Rail messen. Die Rail wird SOFORT
  * nach ihrem Erscheinen gemessen — der Austauschmoment ist der Prüfgegenstand, nicht der
  * Ruhezustand zehn Sekunden später.
+ *
+ * **Die eine Ausnahme, und warum sie keine ist: `wartetAufBeschreibung`.** Die drei
+ * Aufrufer dieser Funktion messen VERSCHIEDENE Kopfhöhen, weil sie verschiedene
+ * Voraussetzungen mitbringen — `ohneSpaceMetadaten: true` (zwei Aufrufer) sorgt dafür,
+ * dass die Beschreibung NIE eintrifft, der dritte lässt sie über den echten Relay
+ * eintreffen und erwartet Kopf 64. Ohne diese Option wird GENAU DIESER dritte Fall
+ * intermittent rot: `[data-rail]` erscheint, sobald Alpine die Vorlage auswertet — das
+ * ist synchron mit dem Boot. `space.description` kommt dagegen über eine WebSocket-
+ * Antwort des Relays, ein Ereignis, das den Boot-Task immer erst NACH diesem Frame
+ * erreicht. Ob es rechtzeitig vor der Messung ankommt, ist reine Zufallssache aus
+ * Systemlast und Event-Loop-Reihenfolge.
+ *
+ * **Reproduziert, deterministisch genug für eine Mutationsprobe:** `verzugMs` unter den
+ * Produktions-Default (2500) senken verkürzt das Zeitfenster zwischen Boot und Messung
+ * und drückt den Ausgang der Relay-Antwort dichter an die Messung heran — bei `verzugMs:
+ * 0`/`50` bricht das allerdings eine ANDERE Voraussetzung von `vergleich()` (der
+ * Platzhalter selbst wird dann manchmal schon VOR der ersten `bloecke()`-Messung
+ * ausgeblendet, alle vier Blöcke lesen `0`). `verzugMs: 300` bleibt unterhalb dieser
+ * zweiten Schwelle und trifft nur die hier gesuchte Lücke: ohne `wartetAufBeschreibung`
+ * fielen bei `verzugMs: 300` **6 von 40 Läufen** exakt mit `rail[0].h === platzhalter[0].h
+ * === 60` (die Beschreibung kam zu spät); mit der Wartebedingung waren es **0 von 40**
+ * unter identischen Bedingungen.
+ *
+ * Das ist KEINE Lockerung des Grundsatzes „sofort nach dem Erscheinen": es wartet nicht
+ * auf einen Ruhezustand, sondern auf das eine noch fehlende Datum, dessen Ankunft die
+ * Zusage dieses Falls überhaupt erst bewertbar macht. Ein Aufrufer, der die Beschreibung
+ * NICHT erwartet, darf auf sie auch nicht warten — sie kommt dort nie, ein pauschales
+ * Warten liefe für die beiden `ohneSpaceMetadaten`-Fälle in den Timeout.
  */
-async function vergleich(page: Page): Promise<{ platzhalter: Kasten[]; rail: Kasten[] }> {
+async function vergleich(
+    page: Page,
+    { wartetAufBeschreibung = false } = {},
+): Promise<{ platzhalter: Kasten[]; rail: Kasten[] }> {
     await page.waitForSelector('[data-rail-skelett]')
     const platzhalter = await bloecke(page, '[data-rail-skelett]')
     await page.waitForSelector('[data-rail]')
+    if (wartetAufBeschreibung) {
+        await page.waitForSelector('[data-rail-space-beschreibung]', { state: 'visible' })
+    }
     const rail = await bloecke(page, '[data-rail]')
 
     return { platzhalter, rail }
@@ -546,7 +580,7 @@ for (const { hoehe, gibtDieListeAb } of [
         // woandershin, und keine Lage ist ein Sonderfall — nur die Aufteilung wandert.
         await page.setViewportSize({ width: BREITE, height: hoehe })
         await vorDemBoot(page)
-        const { platzhalter, rail } = await vergleich(page)
+        const { platzhalter, rail } = await vergleich(page, { wartetAufBeschreibung: true })
 
         // Kopf: +4 px, in beiden Lagen. Der Wert steht als Literal da, damit stilles
         // Wachsen auffällt. `toBeCloseTo` bleibt, obwohl der Betrag seit P4 ganzzahlig
