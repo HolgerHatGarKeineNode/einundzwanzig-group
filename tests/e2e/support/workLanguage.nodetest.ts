@@ -319,24 +319,31 @@ test('CALIBRATION: English words that look German are not evidence', () => {
  *
  * **How the list was arrived at, because "files the scanner is quiet on" would be
  * circular.** Every candidate was scanned at a threshold of ONE marker and the hits were
- * read. Two candidates dropped out and neither was a scanner error: `dms.ts` carries a
+ * read. Two candidates dropped out and neither was a scanner error: `dms.ts` carried a
  * German passage quoted from `groups.ts` inside an English docblock, and
- * `dmRoomNames.test.ts` has five German comment lines of its own from P7b. Both are
- * protected stock and stay as they are — they simply cannot serve as an English yardstick.
+ * `dmRoomNames.test.ts` had five German comment lines of its own from P7b. Both were
+ * protected stock and simply could not serve as an English yardstick.
  * `workLanguage.ts` is out for a third reason: it spells out `ä/ö/ü/ß` in prose, which is
  * a true umlaut hit about umlauts.
+ *
+ * **Corrected on 2026-09-06, and the latch is why.** Three entries — `dmModels.ts`,
+ * `dmHeaderName.test.ts`, `paletteDmRooms.test.ts` — were files of the Buzz DM channels
+ * and went away with that transport (P8), as did the E2E spec `buzz-dm-names.spec.ts`.
+ * The `existsSync` assertion below caught all four in the same run and says what to do:
+ * correct the corpus, never the threshold. Their replacements are the NIP-17 files, which
+ * were written in English from the start.
  */
 const ENGLISH_CORPUS = [
-    join(PACKAGE, 'js', 'dmModels.ts'),
+    join(PACKAGE, 'js', 'privateMessageModels.ts'),
     join(PACKAGE, 'js', 'calendarWiring.test.ts'),
     join(PACKAGE, 'js', 'calendar.ts'),
     join(PACKAGE, 'js', 'calendarModels.ts'),
     join(PACKAGE, 'js', 'moderationAudit.ts'),
-    join(PACKAGE, 'js', 'dmHeaderName.test.ts'),
-    join(PACKAGE, 'js', 'paletteDmRooms.test.ts'),
+    join(PACKAGE, 'js', 'giftWrap.ts'),
+    join(PACKAGE, 'js', 'wrapOrigin.ts'),
     join(PACKAGE, 'js', 'bookmarks.ts'),
     join(PACKAGE, 'js', 'reminders.ts'),
-    join(ROOT, 'tests', 'e2e', 'buzz-dm-names.spec.ts'),
+    join(ROOT, 'tests', 'e2e', 'buzz-private-messages.spec.ts'),
     join(ROOT, 'tests', 'e2e', 'support', 'workLanguage.nodetest.ts'),
 ]
 
