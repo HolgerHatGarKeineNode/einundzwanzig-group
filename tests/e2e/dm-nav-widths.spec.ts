@@ -46,6 +46,8 @@ async function messeNav(page: Page): Promise<{
     handyKopfText: string
     handyNeu: Kasten | null
     handyNeuSichtbar: boolean
+    /** How many unread pills the surface renders — `unread-badge` uses `x-if`. */
+    pillen: number
     /** The Buzz DM dialog. It must not exist any more, at either width. */
     buzzDialoge: number
 }> {
@@ -84,6 +86,11 @@ async function messeNav(page: Page): Promise<{
             handyNeu: kasten(neu),
             handyNeuSichtbar: neu ? neu.checkVisibility() : false,
             buzzDialoge: document.querySelectorAll('[data-modal="dm"]').length,
+            // `unread-badge` renders through `x-if`, so a zero count leaves NO node at
+            // all — the pill is the `.bg-brand-500.rounded-pill` span it draws. On a fresh
+            // relay with no conversation there is nothing unread, so the number belongs in
+            // the log as the state of the run, not as an assertion.
+            pillen: (gruppe ?? panel)?.querySelectorAll('.rounded-pill.bg-brand-500').length ?? 0,
         }
     })
 }
@@ -231,5 +238,89 @@ test('the profile card offers writing and following — measured at 375 px and 1
         ).toBeLessThanOrEqual(4)
 
         await page.keyboard.press('Escape')
+    }
+})
+
+test('the unread pill: rendered from the store, measured at 375 px and 1280 px', async ({ page }) => {
+    test.setTimeout(120_000)
+
+    // ── What this case measures, and what it deliberately does not ──────────────────
+    // It measures the RENDER CHAIN: store value → pill on screen, at both widths. The
+    // rows are placed into `$store.privateMessages.conversations` directly instead of
+    // being earned through a second signer and a real gift wrap.
+    //
+    // That is a conscious cut, and the reason it is honest here: the run above showed
+    // `pillen: 0` at both widths — a fresh relay has nothing unread, so an assertion on
+    // the pill would have been an absence measurement without a positive control, green
+    // for a surface that can never draw one. The COUNTING is proven where it lives
+    // (`privateMessageModels.test.ts`, six cases incl. calibration); what no unit test
+    // can answer is whether the number reaches the markup at all — and that is this case.
+    await useZooid(page)
+    await loginNsec(page, NSEC)
+
+    const zeilen = [
+        { key: 'aaaa,bbbb', participants: ['aaaa', 'bbbb'], others: ['bbbb'], lastAt: 1, preview: 'x', count: 3, unread: 3, title: 'Alice' },
+        { key: 'aaaa,cccc', participants: ['aaaa', 'cccc'], others: ['cccc'], lastAt: 1, preview: 'y', count: 1, unread: 0, title: 'Bob' },
+    ]
+
+    for (const [breite, hoehe, anker] of [[1280, 800, '#rail-group-dms'], [375, 800, '[data-dm-panel]']] as const) {
+        await page.setViewportSize({ width: breite, height: hoehe })
+        await page.goto('/spaces')
+        await expect(page.locator(anker), `${breite}px: the surface never appeared`).toBeAttached({ timeout: 20_000 })
+
+        await page.evaluate((rows) => {
+            const store = (window as unknown as { Alpine: { store(n: string): Record<string, unknown> } })
+                .Alpine.store('privateMessages')
+            store.conversations = rows
+            store.unreadTotal = rows.reduce((sum, row) => sum + row.unread, 0)
+        }, zeilen)
+
+        const gemessen = await page.evaluate(async (sel) => {
+            const rund = (n: number): number => Math.round(n * 100) / 100
+            const wurzel = document.querySelector(sel)
+            const pillen = [...(wurzel?.querySelectorAll<HTMLElement>('.rounded-pill.bg-brand-500') ?? [])]
+            // ── Wait the `chip-in` animation out before measuring ────────────────────
+            // It scales from 0.8, so a box read while it runs is 20 % too small — the
+            // first run measured 12.80 px for a 16 px pill, which is exactly 16 × 0.8.
+            // `unread-badge.blade.php` states the same trap in its own header, for its own
+            // font measurement. `finished` rejects on a cancelled animation, hence catch.
+            await Promise.all(pillen.flatMap((el) => el.getAnimations().map((a) => a.finished.catch(() => {}))))
+
+            return {
+                anzahl: pillen.length,
+                texte: pillen.map((el) => (el.textContent ?? '').trim()),
+                kaesten: pillen.map((el) => {
+                    const r = el.getBoundingClientRect()
+
+                    return { x: rund(r.x), w: rund(r.width), h: rund(r.height) }
+                }),
+                docScrollWidth: document.documentElement.scrollWidth,
+            }
+        }, breite === 1280 ? '#rail-group-dms' : '[data-dm-panel]')
+        // eslint-disable-next-line no-console
+        console.log(`[dm-nav] pills @${breite}x${hoehe}: ${JSON.stringify(gemessen)}`)
+
+        // ── The two surfaces carry a DIFFERENT number of pills, and both are right ──
+        // The phone section shows two levels, exactly like the neighbouring room
+        // sections: the heading carries the SUM (`unreadTotal`, 16 px — a marker next to
+        // the label) and the row carries its own (20 px — a free-standing pill at the end
+        // of a row, house rule §9). The rail shows one: its group heading only carries a
+        // summary while the group is CLOSED, and it is open here.
+        //
+        // What both must show is the same thing, and it is what this case is for: the
+        // second conversation has `unread: 0` and draws NO pill. Three pills on the phone
+        // would mean `unread-badge`'s `x-if` stopped holding; zero anywhere would mean the
+        // number never left the store.
+        const erwartet = breite === 1280 ? 1 : 2
+        expect(gemessen.anzahl, `${breite}px: expected exactly ${erwartet} unread pill(s)`).toBe(erwartet)
+        expect(gemessen.texte, `${breite}px: a pill shows the wrong number`).toEqual(Array(erwartet).fill('3'))
+        // 16 px marker, 20 px free-standing pill — measured rather than assumed, because
+        // the size is a prop and a wrong one would look almost right.
+        expect(gemessen.kaesten.map((k) => k.h), `${breite}px: a pill has the wrong height`)
+            .toEqual(breite === 1280 ? [16] : [16, 20])
+        expect(
+            gemessen.docScrollWidth,
+            `${breite}px: the pill pushed the document into horizontal overflow`,
+        ).toBeLessThanOrEqual(breite)
     }
 })
