@@ -66,42 +66,53 @@ test('der DM-Abschnitt hängt an der Breite UND am Tab — nicht nur an einem vo
     expect($html)->toContain('tab === &#039;rooms&#039; &amp;&amp; !focusMode() &amp;&amp; !$store.viewport?.desktop');
 });
 
-// ── Der Dialog ist umgezogen, und zwar vollständig ──────────────────────────────────
+// ── The Buzz DM dialog is gone, and the NIP-17 store took its place ────────────────
 
-test('der DM-Dialog steht genau EINMAL im Dokument, und nicht mehr in der Rail', function () {
+test('the Buzz DM dialog is nowhere in the document any more', function () {
     $html = (string) mitSitzung($this, 'group.spaces')->assertOk()->getContent();
 
-    // `flux:modal name="dm"` rendert `data-modal="dm"` — genau einer. Zwei wären zwei
-    // `<dialog>` unter demselben Namen, und `dispatchModal(DM_MODAL)` träfe beide.
-    expect(substr_count($html, 'data-modal="dm"'))->toBe(1);
+    // `flux:modal name="dm"` renders `data-modal="dm"`. Until P7 it stood there exactly
+    // once; now that the unencrypted conversations are gone it belongs nowhere — a new
+    // conversation is created in the person picker on `/messages`.
+    expect(substr_count($html, 'data-modal="dm"'))->toBe(0);
 
-    // Und die eigentliche Aussage: er hängt nicht mehr AN DER RAIL. „Einmal vorhanden"
-    // wäre auch dann grün, wenn er dort geblieben wäre — die Rail steht auf dieser
-    // Seite ja im DOM. Geprüft wird deshalb die Quelle, mit entfernten Kommentaren:
-    // `desktop-rail.blade.php` ERKLÄRT den Umzug in Prosa, ein roher Textvergleich
-    // fände also seine eigene Begründung.
+    // And the component itself is deleted — "not in the HTML" would also be green if it
+    // were merely unreferenced and living on as dead code.
+    $views = __DIR__.'/../../packages/einundzwanzig-group/resources/views/components/';
+    expect(file_exists($views.'dm-modal.blade.php'))->toBeFalse();
+});
+
+test('the wrap store is mounted on EVERY page behind the gate — exactly once', function () {
+    // This is the promise that justifies the location: `app-frame` is the root of exactly
+    // those pages, and the wrap subscription is the one request whose answers cost the
+    // signer. A second mount would be a second reason to keep it alive; none would leave
+    // the rail and the overview with an empty list.
+    foreach (['group.spaces', 'group.directory', 'group.bookmarks', 'group.updates'] as $route) {
+        $html = (string) mitSitzung($this, $route)->assertOk()->getContent();
+
+        expect(substr_count($html, 'x-data="nostrPrivateMessages"'))->toBe(1, $route);
+    }
+
+    // CONTROL: the rail does NOT mount the store itself. "Exactly once" above would also
+    // be green if the mount had moved from `app-frame` into the rail — and then it would
+    // stand nowhere on a phone. Checked at the source with comments stripped, because
+    // `desktop-rail.blade.php` EXPLAINS the location in prose.
     $views = __DIR__.'/../../packages/einundzwanzig-group/resources/views/components/';
     $ohneKommentare = fn (string $datei): string => (string) preg_replace(
         '/\{\{--[\s\S]*?--\}\}/', '', (string) file_get_contents($views.$datei)
     );
 
-    expect($ohneKommentare('desktop-rail.blade.php'))->not->toContain('<x-group::dm-modal');
-    expect($ohneKommentare('app-frame.blade.php'))->toContain('<x-group::dm-modal');
+    expect($ohneKommentare('desktop-rail.blade.php'))->not->toContain('nostrPrivateMessages');
+    expect($ohneKommentare('app-frame.blade.php'))->toContain('x-data="nostrPrivateMessages"');
 
-    // CONTROL: der Kommentar-Entferner entfernt wirklich — sonst prüfte der Fall Prosa.
-    expect(file_get_contents($views.'desktop-rail.blade.php'))->toContain('dm-modal');
-});
-
-test('der Dialog steht auf JEDER Seite hinter dem Gate — dort, wo auch der Store angemeldet wird', function () {
-    // Das ist die Zusage, die den Ort begründet: `app-frame` ist die Wurzel genau
-    // dieser Seiten, und `$store.dms.mount()` läuft in derselben Datei. Ein Dialog auf
-    // einer Seite ohne Store hätte `canDm === false` und eine leere Vorschlagsliste.
-    foreach (['group.spaces', 'group.directory', 'group.bookmarks', 'group.updates'] as $route) {
-        $html = (string) mitSitzung($this, $route)->assertOk()->getContent();
-
-        expect(substr_count($html, 'data-modal="dm"'))->toBe(1, $route);
-        expect($html)->toContain('$store.dms?.mount()');
-    }
+    // CONTROL: the comment stripper really strips. Anchored on a string the rail carries
+    // ONLY in prose — "wrap subscription" stands in the paragraph explaining why the mount
+    // lives elsewhere. Without this control the assertion above would also be green if
+    // `preg_replace` swallowed the whole file (`null` → `''` through the string cast), and
+    // then the case would check nothing at all.
+    $railRoh = (string) file_get_contents($views.'desktop-rail.blade.php');
+    expect($railRoh)->toContain('wrap subscription');
+    expect($ohneKommentare('desktop-rail.blade.php'))->not->toContain('wrap subscription');
 });
 
 // ── Der eigene Präsenzpunkt ─────────────────────────────────────────────────────────
