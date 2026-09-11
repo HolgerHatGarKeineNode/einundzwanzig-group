@@ -15,7 +15,7 @@ declare(strict_types=1);
  */
 
 it('verlinkt Issue- und Pull-Request-Zeilen auf ihre EINZELROUTEN — Patches nicht', function () {
-    $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+    $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->get(route('group.forge.repo', ['naddr' => 'naddr1beispiel']))->assertOk()->getContent();
 
     expect($html)->toContain("vorgangHrefFuer(issue, 'issue')")
@@ -30,7 +30,7 @@ it('trägt den Kopier-Knopf auf beiden EINZELANSICHTEN — argumentlos, die Inse
     $hex = str_repeat('a', 64);
 
     foreach (['issues' => 'group.forge.issue', 'pulls' => 'group.forge.pull'] as $segment => $route) {
-        $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+        $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
             ->get(route($route, ['naddr' => 'naddr1beispiel', 'id' => $hex]))->assertOk()->getContent();
 
         expect($html)->toContain('data-forge-vorgang-copy')
@@ -59,7 +59,7 @@ it('lässt den serverseitigen /spaces-Redirect unberührt', function () {
  */
 
 it('rendert die drei Bestandskacheln als Links — und die Patch-Zelle bewusst nicht', function () {
-    $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+    $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->get(route('group.forge'))->assertOk()->getContent();
 
     foreach (['repos', 'issues', 'pulls'] as $ziel) {
@@ -77,7 +77,7 @@ it('rendert die drei Bestandskacheln als Links — und die Patch-Zelle bewusst n
 });
 
 it('baut den Listen-Umschalter als Button-Gruppe, nicht als Tablist', function () {
-    $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+    $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->get(route('group.forge'))->assertOk()->getContent();
 
     /*
@@ -92,7 +92,7 @@ it('baut den Listen-Umschalter als Button-Gruppe, nicht als Tablist', function (
 });
 
 it('führt die drei Listen der linken Spur als eigene Regionen', function () {
-    $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+    $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->get(route('group.forge'))->assertOk()->getContent();
 
     // Die Region-Marken sind zugleich die Sprungziele von `_springZuRegion`:
@@ -103,7 +103,7 @@ it('führt die drei Listen der linken Spur als eigene Regionen', function () {
 });
 
 it('lässt die mobile Tab-Reihe bei DREI Reitern', function () {
-    $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+    $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->get(route('group.forge'))->assertOk()->getContent();
 
     /*

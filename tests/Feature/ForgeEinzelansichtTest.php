@@ -15,7 +15,6 @@
  * Pest lädt alle Feature-Dateien in EINEN Prozess — eine zweite Deklaration
  * wäre ein Fatal Error.
  */
-
 const NADDR = 'naddr1qvzqqqr4xgypqy2z6m4qc9tchk6qjlpxkm6m3v0ukv2rn8wfn8rsz3qhc4sdxl4c';
 
 test('Die Einzelroute einer Issue rendert die Einzelansicht', function () {
@@ -23,7 +22,7 @@ test('Die Einzelroute einer Issue rendert die Einzelansicht', function () {
     $id = str_repeat('a', 64);
 
     $antwort = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get("/forge/".NADDR."/issues/{$id}");
+        ->get('/forge/'.NADDR."/issues/{$id}");
 
     $antwort->assertOk();
     expect($antwort->content())->toContain('nostrForgeVorgang');
@@ -34,7 +33,7 @@ test('Die Einzelroute eines Pull Requests rendert die Einzelansicht', function (
     $id = str_repeat('b', 64);
 
     $antwort = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get("/forge/".NADDR."/pulls/{$id}");
+        ->get('/forge/'.NADDR."/pulls/{$id}");
 
     $antwort->assertOk();
     expect($antwort->content())->toContain('nostrForgeVorgang');
@@ -44,24 +43,24 @@ test('Alt-Link einer Issue leitet serverseitig auf die Route (302)', function ()
     $id = str_repeat('c', 64);
 
     $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get("/forge/".NADDR."?issue={$id}")
-        ->assertRedirect("/forge/".NADDR."/issues/{$id}");
+        ->get('/forge/'.NADDR."?issue={$id}")
+        ->assertRedirect('/forge/'.NADDR."/issues/{$id}");
 });
 
 test('Alt-Link eines Pull Requests leitet serverseitig auf die Route (302)', function () {
     $id = str_repeat('d', 64);
 
     $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get("/forge/".NADDR."?pr={$id}")
-        ->assertRedirect("/forge/".NADDR."/pulls/{$id}");
+        ->get('/forge/'.NADDR."?pr={$id}")
+        ->assertRedirect('/forge/'.NADDR."/pulls/{$id}");
 });
 
 test('Großbuchstaben in der Alt-Id werden kleingeschrieben weitergeleitet', function () {
     $id = strtoupper(str_repeat('e', 64));
 
     $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get("/forge/".NADDR."?issue={$id}")
-        ->assertRedirect("/forge/".NADDR."/issues/".strtolower($id));
+        ->get('/forge/'.NADDR."?issue={$id}")
+        ->assertRedirect('/forge/'.NADDR.'/issues/'.strtolower($id));
 });
 
 test('ZWEI Ziele sind kein Ziel: ?issue= UND ?pr= leiten NICHT weiter', function () {

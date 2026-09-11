@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Http\Response;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -27,6 +28,10 @@ use Tests\TestCase;
  * also das, was ein Server-Test entscheiden kann. Die Geometrie (44-px-Ziele, kein
  * Überlauf bei 320 px, die Position des Abschnitts) ist am gerenderten Element gemessen
  * worden und gehört nicht hierher: eine CSS-Klassen-Assertion ist keine Messung.
+ */
+/**
+ * @param  array<string, mixed>  $params
+ * @return TestResponse<Response>
  */
 function mitSitzung(TestCase $t, string $route, array $params = []): TestResponse
 {

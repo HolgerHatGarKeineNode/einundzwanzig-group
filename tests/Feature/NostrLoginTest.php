@@ -20,7 +20,13 @@ use swentel\nostr\Sign\Sign;
  */
 function signHttpAuth(string $url, string $method, string $challenge, int $createdAtOffset = 0): array
 {
-    $key = (new Key)->generatePrivateKey();
+    // Left-padded because the generator drops leading zero bytes: measured over 20000
+    // keys, 84 came back short (83x 62 chars, 1x 60) — 0.42%. SchnorrSigner rejects
+    // anything but 64 hex chars, so the suite failed roughly one run in four with
+    // "Private key must be a 32-byte hex string" and no connection to the test at hand.
+    // Padding restores the canonical 32-byte encoding of the same key, it does not
+    // pick a different one.
+    $key = str_pad((new Key)->generatePrivateKey(), 64, '0', STR_PAD_LEFT);
 
     $tags = [
         ['u', $url],
