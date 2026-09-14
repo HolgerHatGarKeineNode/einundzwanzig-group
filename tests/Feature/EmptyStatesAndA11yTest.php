@@ -214,6 +214,7 @@ test('REGRESSION: gatedOut-Zustand bleibt handlungslos — verein-gate trägt de
  * aria-relevant, aria-modal, aria-expanded, aria-haspopup, aria-checked,
  * aria-pressed, aria-hidden.
  *
+ * @param  string|list<string>  $path  one file, or every file a view is assembled from
  * @return list<string> die rohen Attribut-Strings, z.B. 'role="log"'
  */
 function ariaCarriersFromSource(string|array $path): array
