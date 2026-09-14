@@ -75,6 +75,42 @@ export default defineConfig({
                     if (/\/packages\/einundzwanzig-group\/js\/welshman[A-Z]\w*\.ts$/.test(id)) {
                         return 'welshman';
                     }
+                    // **`profileMerge.ts` back where it was before the directory island
+                    // became lazy** (2026-09-15). It is import-free rule code that four
+                    // graphs reach — the entry, the `publishResult` chunk, the lazy
+                    // `readStateSync` chunk and now the lazy `directoryIsland` chunk. That
+                    // fourth reacher changed its reachability set, and Rolldown answered by
+                    // giving it a chunk of its own: a SEVENTH boot chunk, i.e. one more HTTP
+                    // request on every page in both hosts, for 620 B gzip.
+                    //
+                    // Measured, `npm run build` each time:
+                    //
+                    //   Variant                             boot chunks   app chunk gzip
+                    //   no rule, island still in bridge.ts  6             112 160
+                    //   no rule, island lazy                7             108 484
+                    //   this rule, island lazy              6             108 447
+                    //
+                    // In the first line `profileMerge` has no chunk of its own — it rides in
+                    // one of the two shared app-code chunks. In the second it has one, and
+                    // that chunk IS the seventh request. The third line buys that request
+                    // back for 0.47 kB gzip in `nip98` (0.56 → 1.03), which is the same code
+                    // in one file fewer, not new weight.
+                    //
+                    // The target is an existing boot chunk on purpose: a name of its own
+                    // would be the seventh chunk again, whatever it is called. `nip98` and
+                    // not `publishResult` for one reason only — Rolldown keeps the auto-name
+                    // of the big chunk, so a group called `publishResult` produces TWO files
+                    // named `publishResult-*.js` and nobody reading `public/build` can tell
+                    // them apart. `js/nip98.ts` is the same kind of module (app code shared
+                    // between the boot graph and the lazy graphs) and the same size class.
+                    //
+                    // If `js/nip98.ts` is ever renamed or dropped, this rule makes a chunk of
+                    // its own again and the boot-chunk count in
+                    // `tests/e2e/support/bundleGrenze.nodetest.ts` goes to 7 and red. That is
+                    // the intended direction: it fails loudly, not silently.
+                    if (/\/packages\/einundzwanzig-group\/js\/profileMerge\.ts$/.test(id)) {
+                        return 'nip98';
+                    }
                 },
             },
         },

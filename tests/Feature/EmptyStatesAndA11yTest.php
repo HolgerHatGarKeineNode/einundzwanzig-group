@@ -216,21 +216,38 @@ test('REGRESSION: gatedOut-Zustand bleibt handlungslos — verein-gate trägt de
  *
  * @return list<string> die rohen Attribut-Strings, z.B. 'role="log"'
  */
-function ariaCarriersFromSource(string $path): array
+function ariaCarriersFromSource(string|array $path): array
 {
-    $src = file_get_contents($path);
-    if ($src === false) {
-        throw new RuntimeException("kann $path nicht lesen");
+    // **A view may sit in more than one file, and this reader does not follow `@include`.**
+    // Measured 2026-09-15: the directory's wait state moved into
+    // `partials/directory-skeleton.blade.php` when the island left the boot path, and its
+    // `aria-busy`/`aria-live` kept rendering while silently dropping out of the count —
+    // a latch losing reach reads exactly like a surface losing carriers. Passing the list
+    // of files a view is actually assembled from is the fix; following `@include` from
+    // here would mean re-implementing Blade.
+    $carriers = [];
+    foreach ((array) $path as $one) {
+        $src = file_get_contents($one);
+        if ($src === false) {
+            throw new RuntimeException("kann $one nicht lesen");
+        }
+        $stripped = preg_replace('/\{\{--.*?--\}\}/s', '', $src);
+        preg_match_all('/(?:x-bind:)?:?(role|aria-(?!label)[a-z]+)="[^"]*"/', $stripped, $m);
+        $carriers = [...$carriers, ...$m[0]];
     }
-    $stripped = preg_replace('/\{\{--.*?--\}\}/s', '', $src);
-    preg_match_all('/(?:x-bind:)?:?(role|aria-(?!label)[a-z]+)="[^"]*"/', $stripped, $m);
 
-    return $m[0];
+    return $carriers;
 }
 
 $ariaFiles = [
     'room' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡room.blade.php',
-    'directory' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡directory.blade.php',
+    // Two files since the island left the boot path (2026-09-15): the wait state lives in a
+    // partial the shell includes twice. `@include` is NOT followed from here — a file
+    // missing from this list keeps rendering its carriers and stops being counted anyway.
+    'directory' => [
+        __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡directory.blade.php',
+        __DIR__.'/../../packages/einundzwanzig-group/resources/views/partials/directory-skeleton.blade.php',
+    ],
     'spaces' => __DIR__.'/../../packages/einundzwanzig-group/resources/views/⚡spaces.blade.php',
     // Schritt 5, Plan `2026-08-24T1810-forge-navigation-buzz-vorbild.md` (P1) — VOR jeder
     // Layout-Phase (Kachelraster, Segment-Umschalter, Steckbrief-Spur, FAB, Bottom-Sheet,
@@ -509,7 +526,29 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // view. It is therefore the rare case where this count really does cover the new
         // surface COMPLETELY — for the forum topics above it explicitly did not.
         'room' => 42,
-        'directory' => 3,
+        // **P4 of the follow plan (2026-09-15): 3 -> 9.** Multiset diff with
+        // `array_count_values` over `ariaCarriersFromSource()`, `16ac5c3` against the
+        // working tree — ONE-SIDED, additions only, not a single deletion:
+        //
+        //     aria-hidden="true"                                      1 -> 2
+        //     role="group"                                            0 -> 1
+        //     x-bind:aria-busy="bulkBusy ? …"                         0 -> 2
+        //     x-bind:aria-disabled="bulkPrimaryBlocked() ? …"         0 -> 1
+        //     x-bind:aria-disabled="bulkBusy || bulkPlan?.add === 0 …" 0 -> 1
+        //
+        // 3 + 6 = 9. All six belong to the bulk surface: the bar is a `role="group"` with
+        // two actions, both action surfaces report their run through `aria-busy`, and the
+        // two `aria-disabled` are the two DIFFERENT reasons signing is not possible —
+        // the list has not been read yet (bar) and "you already follow all of them"
+        // (dialog). Two bindings rather than one, or a screen reader would hear the same
+        // thing in both cases.
+        //
+        // **Taking the island out of the boot path did NOT move this number:** 9 -> 9, as
+        // soon as the skeleton partial is listed in `$ariaFiles['directory']`. Without that
+        // entry it would read 7, and the missing two would not be carriers lost from the
+        // surface but reach lost from the counter — the most expensive mistake this test
+        // can make.
+        'directory' => 9,
         'spaces' => 9,
         // **P1 des Gitea-Sprache-Plans (2026-08-26): 20 → 16.** Multiset-Diff
         // (`array_count_values`, `git show HEAD:…⚡forge.blade.php` gegen den
