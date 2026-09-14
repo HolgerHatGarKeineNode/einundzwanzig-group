@@ -45,7 +45,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import {
     GERMAN_MARKERS,
@@ -462,51 +463,59 @@ test('CALIBRATION: a MOVED German line is exempt, a NEW one is not', () => {
     //
     // `bundleGrenze.nodetest.ts` prescribes splitting a module out of the boot path when
     // it falls a second time. A split moves existing code into a new file, and to this
-    // scanner a new file is added IN FULL — so ~115 pre-existing German comment lines
-    // read as new work and the latch went red on a change that wrote none of them
-    // (2026-09-15, the `nostrDirectory` extraction). The rule is now: a line whose exact
-    // content already existed in this area at the merge base is not new work.
+    // scanner a new file is added IN FULL — so the pre-existing German comment lines of
+    // that block read as new work and the latch went red on a change that wrote none of
+    // them (2026-09-15, the `nostrDirectory` extraction). The rule is now: a line whose
+    // exact content already existed in this area at the merge base is not new work.
     //
     // That is an exemption, and an exemption without a case is a hole. This one fixes
     // BOTH halves in the same run: the moved line must pass AND the new line must still
     // be reported. Delete either assertion and the other stops meaning anything.
-    const area: Area = { root: ROOT, name: 'host', paths: ['tests/e2e'] }
-
-    // The moved line is taken from the corpus at runtime rather than hardcoded: a fixed
-    // quote would rot the day somebody rewrites that comment, and it would rot GREEN —
-    // `existedAtBase` would answer "no", the calibration would look like a caught finding
-    // and nobody would learn that the probe had stopped being a probe.
-    // Candidates come from the area's own tracked specs — not from one hardcoded file,
-    // which would rot the day that file is rewritten, and rot GREEN.
-    const candidates = execFileSync('git', ['-C', ROOT, 'ls-tree', '-r', '--name-only', BASE, '--', 'tests/e2e'], {
-        encoding: 'utf8',
-    })
-        .split('\n')
-        .filter((entry) => entry.endsWith('.spec.ts') && existsSync(join(ROOT, entry)))
-        .slice(0, 12)
-    const corpus = candidates
-        .flatMap((entry) => commentsOf(join(ROOT, entry)))
-        .filter((line) => line.length > 40 && isGerman(line))
-        .filter((line) => existedAtBase(area, BASE, line))
-    assert.ok(
-        corpus.length > 0,
-        'No German comment line of the corpus survives at `' + BASE + '` across '
-            + candidates.length + ' scanned specs. Then this calibration can no longer tell a '
-            + 'moved line from a new one and the exemption above is unwatched — widen the '
-            + 'source of the probe, do not delete the case.',
-    )
-    const moved = corpus[0]
-    const fresh = 'Diese Zeile wurde für genau diesen Kalibrierfall frisch erfunden und steht nirgends sonst.'
-    assert.equal(isGerman(fresh), true, 'the fresh line has to READ as German, or it proves nothing')
-    assert.equal(existedAtBase(area, BASE, fresh), false, 'and it must not exist at the base')
-
-    const dir = join(ROOT, 'tests/e2e/support/__movecal__')
-    const file = join(dir, 'probe.ts')
+    //
+    // ── And it builds its OWN repository, in a temp directory ────────────────────────
+    //
+    // The first version wrote its probe file into `tests/e2e/support/` of the real tree
+    // and cleaned it up in a `finally`. An auditor caught that within the hour: a second
+    // gate running beside this one — which is the normal case here, two reviewers on one
+    // frozen SHA — sees that file in its own `scanArea` and reports the deliberately
+    // invented German line as a finding with no cause anywhere in its diff. A calibration
+    // that makes a neighbour red is not a calibration.
+    //
+    // A throwaway repo also makes the case say more, not less: the corpus line and the
+    // base are both constructed here, so the assertion no longer depends on what happens
+    // to be committed on `master` today.
+    const dir = mkdtempSync(join(tmpdir(), 'movecal-'))
     try {
-        mkdirSync(dir, { recursive: true })
-        writeFileSync(file, ['// ' + moved, '// ' + fresh, 'export const x = 1', ''].join('\n'), 'utf8')
+        const run = (...args: string[]): void => {
+            execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] })
+        }
+        run('init', '--initial-branch=main')
+        run('config', 'user.email', 'calibration@example.invalid')
+        run('config', 'user.name', 'calibration')
 
-        const report = scanArea(area, BASE)
+        const moved = 'Diese Zeile stand vorher schon im Bestand und wird nur verschoben, nicht geschrieben.'
+        const fresh = 'Diese Zeile wurde für genau diesen Kalibrierfall frisch erfunden und steht nirgends sonst.'
+        assert.equal(isGerman(moved), true, 'the corpus line has to READ as German, or the exemption is untested')
+        assert.equal(isGerman(fresh), true, 'and so does the fresh one, or the counter-half proves nothing')
+
+        mkdirSync(join(dir, 'js'), { recursive: true })
+        writeFileSync(join(dir, 'js', 'alt.ts'), ['// ' + moved, 'export const a = 1', ''].join('\n'), 'utf8')
+        run('add', '-A')
+        run('commit', '-m', 'base')
+
+        const area: Area = { root: dir, name: 'probe', paths: ['js'] }
+        assert.equal(existedAtBase(area, 'main', moved), true, 'the corpus line must be findable at the base')
+        assert.equal(existedAtBase(area, 'main', fresh), false, 'and the fresh one must not be')
+
+        // The split: the same line moves into a NEW, untracked file — the exact shape that
+        // turned the latch red — and one genuinely new German line rides along with it.
+        writeFileSync(
+            join(dir, 'js', 'neu.ts'),
+            ['// ' + moved, '// ' + fresh, 'export const b = 2', ''].join('\n'),
+            'utf8',
+        )
+
+        const report = scanArea(area, 'main')
         const texts = report.findings.map((f) => f.text)
 
         assert.ok(texts.includes(fresh), 'the NEW German line must still be reported — otherwise the '
