@@ -628,6 +628,66 @@ export type Report = {
     addedLineTotal: number
     /** Files of a kind this scanner is responsible for that the diff touched. */
     addedFiles: number
+    /**
+     * German lines that were NOT reported because they already existed at the merge base.
+     *
+     * In the report rather than swallowed: an exemption nobody can count is an exemption
+     * nobody notices growing. A branch that moves a module shows a number here; one that
+     * writes new German shows findings instead.
+     */
+    moved: number
+}
+
+/**
+ * Did this exact text already exist in this area at `base`?
+ *
+ * ── Why this question is asked at all (2026-09-15) ───────────────────────────────────
+ *
+ * Because two latches of this house were in direct conflict, and a build hit both at
+ * once. `tests/e2e/support/bundleGrenze.nodetest.ts` fell a second time and its docblock
+ * prescribes the answer: *"it does not get added to, it gets split"* — take a module out
+ * of the boot path. Doing that means moving a block of existing code into a new file.
+ * And to THIS scanner a new file is added in full (see {@link addedLines}, the
+ * `ls-files --others` branch), so ~115 pre-existing German comment lines read as new
+ * work and the latch went red on a change that wrote none of them.
+ *
+ * Committing does not help: a partial move out of a large file is not a rename, so
+ * rename detection never fires and the block stays "added" for good.
+ *
+ * The doctrine already answers what to do with those lines — the corpus stays in its
+ * language, because the comments quote measurements, log lines and dates, and a
+ * translation is what takes their force away. Moving code does not make its comments new
+ * work. So the rule is: **a line whose exact content already existed in this area at the
+ * merge base is not new work.**
+ *
+ * **What this forgives, stated rather than discovered later:** a genuinely new German
+ * comment that happens to be character-for-character identical to one already in the
+ * area. That is the price, it is narrow, and it is the corpus rule taken literally —
+ * such a line IS in the corpus. What it does not forgive is a new German comment in any
+ * other shape; the calibration in the accompanying test pins exactly that, and it must
+ * stay there or this exemption becomes a hole nobody is watching.
+ */
+export const existedAtBase = (area: Area, base: string, text: string): boolean => {
+    const needle = text.trim()
+    if (needle === '') {
+        return true
+    }
+    try {
+        execFileSync(
+            'git',
+            [
+                '-c', 'core.quotepath=false', '-C', area.root,
+                'grep', '--fixed-strings', '--quiet', '-e', needle, base, '--', ...area.paths,
+            ],
+            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'ignore', 'ignore'] },
+        )
+        return true
+    } catch {
+        // Exit 1 is "no match", which is the answer we want; any other failure would be a
+        // scanner that cannot see its own history, and treating that as "existed" would
+        // turn this latch off silently. So: only a clean exit means yes.
+        return false
+    }
 }
 
 /** Walk one area and report every added German comment line and test name. */
@@ -638,6 +698,7 @@ export const scanArea = (area: Area, base: string): Report => {
     let files = 0
     let addedLineTotal = 0
     let addedFiles = 0
+    let moved = 0
 
     for (const [file, lines] of perFile) {
         if (readerFor(file) === null) {
@@ -667,6 +728,13 @@ export const scanArea = (area: Area, base: string): Report => {
             examined++
             const markers = germanMarkersIn(text)
             if (markers.length >= MIN_MARKERS) {
+                // A moved line is not written work — see `existedAtBase`. Asked only when
+                // a finding would otherwise be raised, so the cost is one `git grep` per
+                // finding and none at all on a clean branch.
+                if (existedAtBase(area, base, text)) {
+                    moved++
+                    continue
+                }
                 findings.push({ file: `${area.name}:${file}`, line, kind, text, markers })
             }
         }
@@ -675,7 +743,7 @@ export const scanArea = (area: Area, base: string): Report => {
         }
     }
 
-    return { findings, examined, files, addedLineTotal, addedFiles }
+    return { findings, examined, files, addedLineTotal, addedFiles, moved }
 }
 
 /** All comment lines of a file on disk — the corpus of the calibration cases. */
