@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures'
-import { useBuzz, BUZZ_USER_NSEC, BUZZ_OWNER_NSEC, BUZZ_OWNER_SEC_HEX, BUZZ_ROOM_WELCOME, BUZZ_PORT } from './support/buzz'
+import { useBuzzAsWorkspace, BUZZ_USER_NSEC, BUZZ_OWNER_NSEC, BUZZ_OWNER_SEC_HEX, BUZZ_ROOM_WELCOME, BUZZ_PORT } from './support/buzz'
 import { loginNsec } from './support/login'
 import { spawnSync } from 'node:child_process'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -87,8 +87,13 @@ function roomEvents(h: string): RelayRow[] {
 test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
     test.skip(process.env.E2E_RELAY !== 'buzz', 'nur im Buzz-Modus (E2E_RELAY=buzz) relevant')
 
+    // `useBuzzAsWorkspace`, not `useBuzz`: the attachment case below leaves a kind 9 with
+    // an `imeta` on `http://localhost:<buzz>/media/…` in the welcome room, and every later
+    // case that opens that room renders it. With an empty workspace the client media guard
+    // is inert and that url goes to the server image proxy — reasoning and measurement at
+    // the helper.
     test.beforeEach(async ({ page }) => {
-        await useBuzz(page)
+        await useBuzzAsWorkspace(page)
     })
 
     /**
@@ -360,7 +365,7 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         // weil die Seite längst auf /spaces stand).
         const ctx = await browser.newContext({ baseURL })
         const page2 = await ctx.newPage()
-        await useBuzz(page2)
+        await useBuzzAsWorkspace(page2)
         await loginNsec(page2, nsecEncode(sk))
         const tileAsAdmin = page2.locator('div.group', { hasText: roomName })
         await expect(tileAsAdmin).toBeVisible({ timeout: 20_000 })

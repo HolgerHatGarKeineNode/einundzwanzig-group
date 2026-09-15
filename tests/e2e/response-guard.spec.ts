@@ -11,13 +11,20 @@
  * Both cases below stand in `ALLOWANCES` with a title AND a url pattern; without that
  * entry the status they provoke themselves would rightly make the guard red in teardown.
  *
- * **Not in `BUZZ_SPECS` (`playwright.config.ts`), and that is a gap rather than a
- * decision.** The two hermetics self-proofs are listed there by name because the thing
- * they check is the run itself, which is equally sharp in the Buzz arm — the same is true
- * of this guard, and the same sentence applies: a bolt proven in one of two arms says
- * nothing about the other. It is left out here because the Buzz arm was not measured
- * before this guard was armed, and adding the file without that measurement would put a
- * fail-closed judgement on traffic nobody has looked at.
+ * **In `BUZZ_SPECS` (`playwright.config.ts`) since 2026-09-15 — and the sentence that
+ * stood here before was wrong.** It said that leaving the file out avoided putting „a
+ * fail-closed judgement on traffic nobody has looked at" on the Buzz arm. Leaving it out
+ * never did that: the `relayWaechter` fixture that throws the verdict is `{ auto: true }`,
+ * and every Buzz spec draws its `test` from `./support/fixtures` — `support/specImporte
+ * .nodetest.ts` holds that down by name. The guard judged every test in the Buzz arm from
+ * the first run; only its SELF-PROOF was missing there. A comment that describes a
+ * protection which does not exist is the most expensive kind, because the next reader
+ * budgets for a gap that is already open.
+ *
+ * The traffic has been looked at since (2026-09-15, `E2E_RELAY=buzz`, full arm,
+ * `E2E_RESPONSE_REPORT`): five observed error responses, one of them an intended 403 that
+ * now stands in `ALLOWANCES`, the other four a fixture defect repaired in
+ * `support/buzz.ts`. The numbers are in the head of `support/responseGuard.ts`.
  */
 import { test, expect } from './support/fixtures'
 

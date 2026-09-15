@@ -63,7 +63,15 @@ const isBuzz = process.env.E2E_RELAY === 'buzz'
  * dort aber nicht mit. Ein Riegel, der nur in einem von zwei Armen nachgewiesen ist,
  * sagt über den anderen nichts.
  */
-const BUZZ_SPECS = /(?:^|\/)(?:buzz-.*|pin-room|relay-guard|relay-praevention)\.spec\.ts$/
+/*
+ * `response-guard.spec.ts` stands here for exactly that sentence, since 2026-09-15. Its
+ * absence never withheld the response guard's JUDGEMENT from the Buzz arm — the
+ * `relayWaechter` fixture is `{ auto: true }` and every Buzz spec draws its `test` from
+ * `support/fixtures` (counted by `support/specImporte.nodetest.ts`), so the guard has
+ * judged every test there from its first run. What was missing was only its SELF-PROOF,
+ * and its own header said the opposite until this line was added.
+ */
+const BUZZ_SPECS = /(?:^|\/)(?:buzz-.*|pin-room|relay-guard|relay-praevention|response-guard)\.spec\.ts$/
 
 /**
  * Host-Chromium, kein von Playwright heruntergeladenes Binary — gilt für JEDES Projekt.

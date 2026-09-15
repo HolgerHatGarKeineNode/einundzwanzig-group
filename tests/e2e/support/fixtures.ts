@@ -178,8 +178,12 @@ const sichere = async (context: BrowserContext): Promise<void> => {
          * Workers. Ein Socket, der in einem dieser Fenster aufgeht, wird nicht bewacht und
          * fällt auch niemandem auf.
          *
-         * Heute folgenlos: vier Specs haben ein `beforeAll`, keines davon öffnet eine
-         * Seite, alle publizieren über `nak`. **Ein künftiges `beforeAll`, das eine Seite
+         * Without consequence today. The number that said so used to read „four specs",
+         * from `d310014`; counted again at `641d1ab` with a brace-matched scan over every
+         * `.spec.ts`, it is **17 specs carrying 18 `beforeAll` blocks**, and NONE of them
+         * opens a page or a context — they publish through `nak`. The conclusion held, the
+         * number did not, which is why it now carries the date it was taken.
+         * **Ein künftiges `beforeAll`, das eine Seite
          * öffnet, wäre unbewacht** — und das ist der Satz, wegen dem dieser Kommentar hier
          * steht und nicht in einem Dokument, das beim Schreiben eines `beforeAll` niemand
          * liest.
@@ -218,6 +222,17 @@ const sichere = async (context: BrowserContext): Promise<void> => {
          *
          * An ABORTED request (`route.abort`) has no response and therefore never arrives
          * here — a test that kills a request on purpose needs no allowance for it.
+         *
+         * **This guard is a pure DETECTOR — it has no prevention half, unlike the WebSocket
+         * guard above it.** That one carries two layers: `--host-resolver-rules` in the
+         * Chromium arguments and the `WebSocket` wrapper from `hermetik.ts`, which STOP a
+         * connection to a foreign origin from ever opening, and only then report it. Here
+         * there is nothing to stop: the request is the app's own doing against its own
+         * server, and a `page.route` that answered it would change what the test measures
+         * rather than protect anything. The consequence is worth stating plainly, because
+         * it is the same shape as the fail-open window described further up: this guard
+         * says AFTERWARDS that a status came back, in the teardown of the test that got it.
+         * Whatever the surface did with that status has already happened.
          */
         page.on('response', (res) => {
             if (res.status() >= 400) {

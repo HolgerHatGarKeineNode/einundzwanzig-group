@@ -119,8 +119,29 @@ export const responseMessage = (title: string, hits: readonly Response[]): strin
  * Measured over the full suite before the guard was armed (2026-09-15, 649 cases,
  * chromium + desktop). Every entry below names the test that provokes it and why the
  * status is the RIGHT answer there.
+ *
+ * **The Buzz arm has been measured too, and separately** (2026-09-15,
+ * `E2E_RELAY=buzz E2E_SLOT_OFFSET=150`, 172 cases, `E2E_RESPONSE_REPORT`): 5 observed
+ * error responses, and exactly ONE of them belongs in this list. The other four were the
+ * same `/img/msg` 403 on three different cases, and they are NOT allowed here — they were
+ * a fixture defect (an empty `__nostrWorkspace` made the CLIENT media guard inert, so a
+ * relay-private `/media/` url went to the server image proxy at all). That is repaired at
+ * `support/buzz.ts useBuzzAsWorkspace`, where the measurement stands. An allowance would
+ * have written „the Buzz arm proxies relay media" down as intended, which it is not.
  */
 export const ALLOWANCES: Allowance[] = [
+    {
+        title: /buzz-moderations-historie\.spec\.ts.*without moderation rights: 403/,
+        url: /:\d+\/moderation\/(?:reports|audit)\?/,
+        status: 403,
+        reason:
+            'The 403 IS the subject of that case: a key without moderation rights drives the audit '
+            + 'island\'s load path directly and the case asserts the status itself '
+            + '(`expect(statuses).toContain(403)`), plus that it raises no toast, no retry storm and '
+            + 'no text. Without the status there would be nothing to measure. The url half covers '
+            + 'BOTH endpoints because the island asks for both — `reports` and `audit` — while the '
+            + 'case only names `audit`; measured in the Buzz arm, both come back 403 for this key.',
+    },
     {
         title: /forge-pr-diff\.spec\.ts.*Kostenansage steht VOR dem Download/,
         url: /\/git\/.*info\/refs/,
