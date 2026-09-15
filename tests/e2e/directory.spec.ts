@@ -1,13 +1,20 @@
 import { test, expect, type Locator, type Page } from './support/fixtures'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createServer } from 'node:http'
-import type { Duplex } from 'node:stream'
-import type { AddressInfo } from 'node:net'
 import { useZooid, ZOOID_PORT, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
-import { freshKeypair, testKeys } from './support/keys'
+import { testKeys } from './support/keys'
 import { cleanupRooms, trackRoom } from './support/rooms'
+// The wire fixtures of the follow tests — shared with `follow.spec.ts` and
+// `follow-bulk.spec.ts` since P6, so that the throwaway readers, the seeded contact lists
+// and the silent relay have ONE definition rather than three that can drift apart.
+import {
+    admitReader,
+    releaseAdmittedReaders,
+    seedFollowList,
+    seedRelayList,
+    startSilentRelay,
+} from './support/followWire'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 // Relay-Owner-Secret (Pubkey = relay.self) — der einzige NIP-86-Admin des zooid.
@@ -374,20 +381,11 @@ test('P4b: Admin lehnt eine Beitritts-Anfrage ab (banevent)', async ({ page }) =
 // before it may read the directory or publish at all — and that call also puts it into
 // the relay-signed 13534, measured: the member grid went from 3 rows to 4 the moment one
 // was admitted. `unallowpubkey` in the `afterAll` below takes them back out.
-
-/** Every throwaway reader this file let onto the relay — taken back out in the afterAll. */
-const admitted: string[] = []
-
-/** A throwaway reader the relay lets in. The key is generated, never read from `.env`. */
-type BulkReader = { pk: string; nsec: string; hex: string }
-
-function admitReader(): BulkReader {
-    const key = freshKeypair()
-    admitted.push(key.pk)
-    mgmt(`{"method":"allowpubkey","params":["${key.pk}"]}`)
-
-    return { pk: key.pk, nsec: key.nsec, hex: Buffer.from(key.sk).toString('hex') }
-}
+//
+// `admitReader`, the two seeds and the silent relay live in `support/followWire.ts` since
+// P6, where `follow.spec.ts` and `follow-bulk.spec.ts` use the same ones. They were
+// copied out of this file unchanged; the reasoning above is theirs and is repeated in
+// that module's header.
 
 /**
  * Two pubkeys that are nobody in this space. They exist so the seeded contact list has a
@@ -395,65 +393,6 @@ function admitReader(): BulkReader {
  * reader can check, „grows from 1 to 2" would be true of an unread base as well.
  */
 const FOLLOW_FILLER = ['c'.repeat(64), 'd'.repeat(64)]
-
-/** The authoritative base of the preview: one kind 3 of known size under a fresh key. */
-function seedFollowList(reader: BulkReader, targets: readonly string[]): void {
-    execFileSync(NAK, [
-        'event', '--auth', '--sec', reader.hex, '-k', '3',
-        ...targets.flatMap((pk) => ['-t', `p=${pk}`]), ZOOID_WS,
-    ])
-}
-
-/** A kind 10002 under a fresh key: this reader declares where their contact list lives. */
-function seedRelayList(reader: BulkReader, urls: readonly string[]): void {
-    execFileSync(NAK, [
-        'event', '--auth', '--sec', reader.hex, '-k', '10002',
-        ...urls.flatMap((url) => ['-t', `r=${url}`]), ZOOID_WS,
-    ])
-}
-
-/**
- * **A relay that completes the handshake and then says nothing** — the F3 reader.
- *
- * Not a dead port: „connection refused" and „connected, never answers" end at the same
- * verdict (`answered: false`), but only the second one is the state the bar was built
- * for. The read stands open until `READ_TIMEOUT_MS` (6 s, `js/follows.ts`), and that is
- * the wait that used to leave „Lädt…" on the bar for the rest of the session.
- *
- * Port 0, so the kernel picks a free one: this cannot collide with any slot port of a
- * parallel worker (serve 8137+, board 8437+, zooid 3335+, buzz 3001+).
- */
-async function startSilentRelay(): Promise<{ url: string; label: string; close: () => Promise<void> }> {
-    const open: Duplex[] = []
-    const server = createServer()
-    server.on('upgrade', (req, socket) => {
-        open.push(socket)
-        const key = String(req.headers['sec-websocket-key'] ?? '')
-        const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64')
-        socket.write(
-            'HTTP/1.1 101 Switching Protocols\r\n'
-            + 'Upgrade: websocket\r\n'
-            + 'Connection: Upgrade\r\n'
-            + `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
-        )
-        // And nothing after this line, ever. That is the whole fixture.
-    })
-    await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', resolve)
-    })
-    const port = (server.address() as AddressInfo).port
-
-    return {
-        url: `ws://127.0.0.1:${port}/`,
-        // How `relayLabel` in `js/follows.ts` renders it into the refusal.
-        label: `127.0.0.1:${port}`,
-        close: () => new Promise<void>((resolve) => {
-            // An upgraded socket keeps `close()` waiting, so they go first.
-            open.forEach((socket) => socket.destroy())
-            server.close(() => resolve())
-        }),
-    }
-}
 
 /** The shell around the lazily imported island (`nostrDirectoryShell`, `js/bridge.ts`). */
 const shellState = (page: Page): Promise<{ hydrated: boolean; failed: boolean }> =>
@@ -689,16 +628,7 @@ test('P4: a silent own relay offers the load step again and names the relay that
  *
  * Silent on failure, for the reason the room cleanup below carries.
  */
-test.afterAll(() => {
-    for (const pk of admitted) {
-        try {
-            mgmt(`{"method":"unallowpubkey","params":["${pk}"]}`)
-        } catch {
-            // A cleanup that throws overwrites the finding of the test with an
-            // infrastructure error.
-        }
-    }
-})
+test.afterAll(() => releaseAdmittedReaders())
 
 /**
  * Jeder hier angelegte Wegwerf-Raum wird wieder gelöscht (kind 9008).

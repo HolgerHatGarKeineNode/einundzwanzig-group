@@ -211,6 +211,21 @@ test('the profile card offers writing and following — measured at 375 px and 1
         }, FREMD)
         await expect(page.locator('[data-person-dm]'), `${breite}px: the write button never appeared`)
             .toBeVisible({ timeout: 20_000 })
+        // ── Wait for the follow button to SETTLE, and expect the third state ───────────
+        // This case measured „Folgen" and got „Lädt…" from the day P1 landed. Both were
+        // right at the moment they were taken: the label is a function of the arming pass,
+        // and the arming pass had not come back yet. What the reader of this suite is
+        // (`NOSTR_TEST_NSEC`, no kind 10002 anywhere on the test relay) resolves to
+        // `OutboxKnowledge = 'confirmed-none'`, and for that reader P2/D8 deliberately does
+        // NOT read the contact list on a page load — asking four public relays on every
+        // view is a presence signal for nothing. So the settled label is the one that
+        // invites the read, and it never becomes „Folgen" without a click.
+        //
+        // Waiting for it is the measurement, not a workaround: before the arming pass
+        // answers there is no truthful direction to render, and a case that races it
+        // measures the window rather than the surface.
+        await expect(page.locator('[data-person-follow]'), `${breite}px: the follow button never settled`)
+            .toHaveText('Kontaktliste laden', { timeout: 30_000 })
 
         const karte = await messeKarte()
         // eslint-disable-next-line no-console
@@ -219,7 +234,7 @@ test('the profile card offers writing and following — measured at 375 px and 1
         // Both actions are there, side by side, and each takes half the row.
         expect(karte.dm?.h, `${breite}px: the write button has no height`).toBeGreaterThan(0)
         expect(karte.folgen?.h, `${breite}px: the follow button has no height`).toBeGreaterThan(0)
-        expect(karte.folgenText, `${breite}px: the follow button carries the wrong label`).toBe('Folgen')
+        expect(karte.folgenText, `${breite}px: the follow button carries the wrong label`).toBe('Kontaktliste laden')
         // Same row: their vertical centres agree within a pixel.
         const mitteDm = (karte.dm as Kasten).y + (karte.dm as Kasten).h / 2
         const mitteFolgen = (karte.folgen as Kasten).y + (karte.folgen as Kasten).h / 2
