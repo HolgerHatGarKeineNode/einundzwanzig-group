@@ -460,6 +460,17 @@ export const test = base.extend<
              * is untouched by it — the variable cannot switch the guard off, only record.
              */
             const bericht = process.env.E2E_RESPONSE_REPORT
+            if (bericht !== undefined && /^(1|true|yes|on)$/i.test(bericht.trim())) {
+                // It reads like a flag and it is a PATH. Set to `1` it silently appends a
+                // file literally named `1` in the working directory — measured 2026-09-15,
+                // in the repo root, untracked and matched by no ignore rule. Two readers in
+                // two days took it for a boolean, so it says so instead of obeying.
+                throw new Error(
+                    `E2E_RESPONSE_REPORT takes a PATH, not a flag — got \`${bericht}\`, which would `
+                        + 'write a file of that name into the working directory. '
+                        + 'Use e.g. E2E_RESPONSE_REPORT=/tmp/response-report.jsonl',
+                )
+            }
             if (bericht && lauf.antworten.length > 0) {
                 appendFileSync(
                     bericht,
