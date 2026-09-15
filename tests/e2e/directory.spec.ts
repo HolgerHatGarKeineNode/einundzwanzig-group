@@ -384,8 +384,10 @@ test('P4b: Admin lehnt eine Beitritts-Anfrage ab (banevent)', async ({ page }) =
 //
 // `admitReader`, the two seeds and the silent relay live in `support/followWire.ts` since
 // P6, where `follow.spec.ts` and `follow-bulk.spec.ts` use the same ones. They were
-// copied out of this file unchanged; the reasoning above is theirs and is repeated in
-// that module's header.
+// moved out of this file; the reasoning above is theirs and is repeated in that module's
+// header. `admitReader`, `seedRelayList` and the silent relay are byte-identical (checked
+// programmatically); `seedFollowList` gained an `options` parameter, so with no options
+// the call is the same and the word „unchanged" — which stood here — is not.
 
 /**
  * Two pubkeys that are nobody in this space. They exist so the seeded contact list has a

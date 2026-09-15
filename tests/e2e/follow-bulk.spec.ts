@@ -419,7 +419,11 @@ test('the bulk flow makes no console noise, and the channel that says so is live
     const reader = admitReader()
     const admin = pubOf(RELAY_OWNER_SEC)
     const shared = testKeys().pk
-    seedFollowList(reader, [BASE_A, BASE_B])
+    // `admin` is seeded into the base ON PURPOSE: it is what makes the second preview below
+    // the INERT one. A gate found the earlier shape of this case describing an inert branch
+    // it never reached — `admin` was not followed, the button was not disabled, and the
+    // click performed a real bulk write. Three sentences, three measurements against them.
+    seedFollowList(reader, [BASE_A, BASE_B, admin])
     seedRelayList(reader, [ZOOID_URL])
 
     await openDirectory(page, reader)
@@ -428,12 +432,23 @@ test('the bulk flow makes no console noise, and the channel that says so is live
     await modal.getByRole('button', { name: 'Abbrechen' }).click()
     await expect(modal).toBeHidden()
 
-    // The inert branch: everybody selected is already followed, the confirm button
-    // announces itself as disabled and the press has to do nothing — through the keyboard,
-    // because that is the only way an `aria-disabled` control is reachable.
+    // The inert branch: everybody left selected is already followed, so the confirm button
+    // announces itself as disabled and the press has to do nothing — through the KEYBOARD,
+    // because Playwright's `click()` refuses an `aria-disabled` control with a 30 s timeout
+    // and the house pattern for inert buttons is reachable no other way.
     await page.locator(`[data-directory-row][data-pubkey="${shared}"] [data-directory-row-check]`).click()
     await openBulkPreview(page)
-    await page.locator('[data-directory-bulk-confirm]').click()
+    const confirm = page.locator('[data-directory-bulk-confirm]')
+    // These two assertions are the case, not scenery: without them the keypress below is
+    // green whatever the button does, which is exactly how the earlier shape passed while
+    // measuring the opposite branch.
+    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
+    await expect(page.locator('[data-directory-bulk-growth]'))
+        .toHaveText(/ändert sich nicht/)
+    await confirm.focus()
+    await page.keyboard.press('Enter')
+    await expect(modal).toBeVisible()
+    await modal.getByRole('button', { name: 'Abbrechen' }).click()
     await expect(modal).toBeHidden({ timeout: 40_000 })
 
     // …and back out of selection mode, which removes the bar and moves the focus.
