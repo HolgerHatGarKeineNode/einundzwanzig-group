@@ -45,7 +45,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import {
     GERMAN_MARKERS,
     MIN_MARKERS,
@@ -53,6 +55,7 @@ import {
     commentLines,
     commentsOf,
     envCommentLines,
+    existedAtBase,
     germanMarkersIn,
     isGerman,
     parseDiff,
@@ -455,12 +458,84 @@ test('FAIL-CLOSED: an unresolvable cut-off throws instead of reporting a clean t
     )
 })
 
+test('CALIBRATION: a MOVED German line is exempt, a NEW one is not', () => {
+    // ── Why this exemption exists, and why it needs a case of its own ────────────────
+    //
+    // `bundleGrenze.nodetest.ts` prescribes splitting a module out of the boot path when
+    // it falls a second time. A split moves existing code into a new file, and to this
+    // scanner a new file is added IN FULL — so the pre-existing German comment lines of
+    // that block read as new work and the latch went red on a change that wrote none of
+    // them (2026-09-15, the `nostrDirectory` extraction). The rule is now: a line whose
+    // exact content already existed in this area at the merge base is not new work.
+    //
+    // That is an exemption, and an exemption without a case is a hole. This one fixes
+    // BOTH halves in the same run: the moved line must pass AND the new line must still
+    // be reported. Delete either assertion and the other stops meaning anything.
+    //
+    // ── And it builds its OWN repository, in a temp directory ────────────────────────
+    //
+    // The first version wrote its probe file into `tests/e2e/support/` of the real tree
+    // and cleaned it up in a `finally`. An auditor caught that within the hour: a second
+    // gate running beside this one — which is the normal case here, two reviewers on one
+    // frozen SHA — sees that file in its own `scanArea` and reports the deliberately
+    // invented German line as a finding with no cause anywhere in its diff. A calibration
+    // that makes a neighbour red is not a calibration.
+    //
+    // A throwaway repo also makes the case say more, not less: the corpus line and the
+    // base are both constructed here, so the assertion no longer depends on what happens
+    // to be committed on `master` today.
+    const dir = mkdtempSync(join(tmpdir(), 'movecal-'))
+    try {
+        const run = (...args: string[]): void => {
+            execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] })
+        }
+        run('init', '--initial-branch=main')
+        run('config', 'user.email', 'calibration@example.invalid')
+        run('config', 'user.name', 'calibration')
+
+        const moved = 'Diese Zeile stand vorher schon im Bestand und wird nur verschoben, nicht geschrieben.'
+        const fresh = 'Diese Zeile wurde für genau diesen Kalibrierfall frisch erfunden und steht nirgends sonst.'
+        assert.equal(isGerman(moved), true, 'the corpus line has to READ as German, or the exemption is untested')
+        assert.equal(isGerman(fresh), true, 'and so does the fresh one, or the counter-half proves nothing')
+
+        mkdirSync(join(dir, 'js'), { recursive: true })
+        writeFileSync(join(dir, 'js', 'alt.ts'), ['// ' + moved, 'export const a = 1', ''].join('\n'), 'utf8')
+        run('add', '-A')
+        run('commit', '-m', 'base')
+
+        const area: Area = { root: dir, name: 'probe', paths: ['js'] }
+        assert.equal(existedAtBase(area, 'main', moved), true, 'the corpus line must be findable at the base')
+        assert.equal(existedAtBase(area, 'main', fresh), false, 'and the fresh one must not be')
+
+        // The split: the same line moves into a NEW, untracked file — the exact shape that
+        // turned the latch red — and one genuinely new German line rides along with it.
+        writeFileSync(
+            join(dir, 'js', 'neu.ts'),
+            ['// ' + moved, '// ' + fresh, 'export const b = 2', ''].join('\n'),
+            'utf8',
+        )
+
+        const report = scanArea(area, 'main')
+        const texts = report.findings.map((f) => f.text)
+
+        assert.ok(texts.includes(fresh), 'the NEW German line must still be reported — otherwise the '
+            + 'exemption swallows the thing this latch exists for. Reported: ' + JSON.stringify(texts))
+        assert.ok(!texts.includes(moved), 'the MOVED German line must NOT be reported: it is corpus, not '
+            + 'written work. Reported: ' + JSON.stringify(texts))
+        assert.ok(report.moved >= 1, 'and the exemption has to be COUNTED — an exemption nobody can count '
+            + 'is one nobody notices growing')
+    } finally {
+        rmSync(dir, { recursive: true, force: true })
+    }
+})
+
 const describe = (finding: Finding): string =>
     `  ${finding.file}:${finding.line} [${finding.kind}] {${finding.markers.join(', ')}}\n      ${finding.text}`
 
 test('the lines this branch ADDED are English — comments and test names', () => {
     let examinedTotal = 0
     let addedLineTotal = 0
+    let movedTotal = 0
     const findings: Finding[] = []
     const empty: string[] = []
 
@@ -472,6 +547,7 @@ test('the lines this branch ADDED are English — comments and test names', () =
         const report = scanArea(area, BASE)
         examinedTotal += report.examined
         addedLineTotal += report.addedLineTotal
+        movedTotal += report.moved
         findings.push(...report.findings)
         // **The floor, and the only form of it that is honest.** A bare `examined > N`
         // would be wrong on `master`, where an empty diff is the correct answer, and
@@ -507,5 +583,6 @@ test('the lines this branch ADDED are English — comments and test names', () =
     )
 
     console.log(`[work-language] ${examinedTotal} added comment lines / test names examined against ${BASE} `
-        + `(out of ${addedLineTotal} added lines in files this scanner reads), ${findings.length} objected to`)
+        + `(out of ${addedLineTotal} added lines in files this scanner reads), ${findings.length} objected to, `
+        + `${movedTotal} exempt as MOVED corpus (identical text already at ${BASE})`)
 })

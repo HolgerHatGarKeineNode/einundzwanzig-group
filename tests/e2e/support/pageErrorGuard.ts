@@ -176,6 +176,21 @@ export const ERLAUBNISLISTE: ErlaubnisEintrag[] = [
             'tatsächlich ankommenden Fehler wären die vier Zusagen darüber vakuum-grün (siehe Kommentar dort).',
     },
     {
+        titel: /follow\.spec\.ts.*console noise, and the channel that says so is live/,
+        text: /FOLGEN-KONSOLE-POSITIVKONTROLLE/,
+        begruendung:
+            'Positive control of the console channel in follow.spec.ts (P6): the promise „the follow flow puts '
+            + 'nothing on the console" is worth exactly as much as the proof that the channel is recording in '
+            + 'THIS run — a listener that has silently come off looks identical to a clean surface.',
+    },
+    {
+        titel: /follow-bulk\.spec\.ts.*console noise, and the channel that says so is live/,
+        text: /MASSEN-FOLGEN-KONSOLE-POSITIVKONTROLLE/,
+        begruendung:
+            'The same positive control for the bulk-follow surface (follow-bulk.spec.ts, P6) — its own text, so '
+            + 'that this entry cannot also cover the case in the neighbouring file.',
+    },
+    {
         titel: /page-error-guard\.spec\.ts.*Standard-Seite: ein absichtlich ausgelöster Fehler wird beobachtet/,
         text: /SELBSTTEST-page-error-guard/,
         begruendung: 'Selbstnachweis dieses Wächters (page-error-guard.spec.ts): Wiring über `page`.',

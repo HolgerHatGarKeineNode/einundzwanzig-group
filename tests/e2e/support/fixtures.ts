@@ -1,5 +1,6 @@
 import { test as base, expect, type BrowserContext, type Page, type Locator } from '@playwright/test'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { appendFileSync } from 'node:fs'
 import { erlaubteHerkuenfte, herkunft, verstoesse, verstossMeldung, type Herkunft } from './relayGuard'
 import { LOOPBACK_HOSTS, MELDE_BINDUNG, SPERR_MARKE, istLoopbackHerkunft, sperrVermerk, wrapperQuelle } from './hermetik'
 import { testServerEnv } from './serverEnv'
@@ -10,6 +11,12 @@ import {
     verstoesse as pageFehlerVerstoesse,
     type PageFehler,
 } from './pageErrorGuard'
+import {
+    ALLOWANCES,
+    responseMessage,
+    violations as antwortVerstoesse,
+    type Response as Antwort,
+} from './responseGuard'
 
 /**
  * Pro-Worker-Backend-Isolation für echte Parallelität (§Test-Speed): jeder Playwright-
@@ -77,7 +84,7 @@ const waitForHttp = async (url: string, timeoutMs = 60_000): Promise<void> => {
  * Umweg wird gebraucht, weil die Beobachtung an einem WORKER-Objekt hängt (`browser`),
  * das Urteil aber zu einem TEST gehört.
  */
-type Aufzeichnung = { gesehen: string[]; zusaetzlich: Herkunft[]; quittiert: string[]; pageFehler: PageFehler[] }
+type Aufzeichnung = { gesehen: string[]; zusaetzlich: Herkunft[]; quittiert: string[]; pageFehler: PageFehler[]; antworten: Antwort[] }
 
 let aufzeichnung: Aufzeichnung | null = null
 
@@ -171,8 +178,12 @@ const sichere = async (context: BrowserContext): Promise<void> => {
          * Workers. Ein Socket, der in einem dieser Fenster aufgeht, wird nicht bewacht und
          * fällt auch niemandem auf.
          *
-         * Heute folgenlos: vier Specs haben ein `beforeAll`, keines davon öffnet eine
-         * Seite, alle publizieren über `nak`. **Ein künftiges `beforeAll`, das eine Seite
+         * Without consequence today. The number that said so used to read „four specs",
+         * from `d310014`; counted again at `641d1ab` with a brace-matched scan over every
+         * `.spec.ts`, it is **17 specs carrying 18 `beforeAll` blocks**, and NONE of them
+         * opens a page or a context — they publish through `nak`. The conclusion held, the
+         * number did not, which is why it now carries the date it was taken.
+         * **Ein künftiges `beforeAll`, das eine Seite
          * öffnet, wäre unbewacht** — und das ist der Satz, wegen dem dieser Kommentar hier
          * steht und nicht in einem Dokument, das beim Schreiben eines `beforeAll` niemand
          * liest.
@@ -201,6 +212,38 @@ const sichere = async (context: BrowserContext): Promise<void> => {
                 aufzeichnung?.pageFehler.push({ quelle: 'console', text: msg.text() })
             }
         })
+        /**
+         * **The response-code guard (`responseGuard.ts`) — the third source, and the only
+         * one that can see a 500 on an XHR at all.** That is a rejected promise:
+         * `pageerror` does not fire, and the only thing reaching the console is Chromium's
+         * own „Failed to load resource:", which the filter above deliberately discards.
+         * Same blind spot outside a test as the two listeners above (`aufzeichnung?.`),
+         * for the same reason given there.
+         *
+         * An ABORTED request (`route.abort`) has no response and therefore never arrives
+         * here — a test that kills a request on purpose needs no allowance for it.
+         *
+         * **This guard is a pure DETECTOR — it has no prevention half, unlike the WebSocket
+         * guard above it.** That one carries two layers: `--host-resolver-rules` in the
+         * Chromium arguments and the `WebSocket` wrapper from `hermetik.ts`, which STOP a
+         * connection to a foreign origin from ever opening, and only then report it. Here
+         * there is nothing to stop: the request is the app's own doing against its own
+         * server, and a `page.route` that answered it would change what the test measures
+         * rather than protect anything. The consequence is worth stating plainly, because
+         * it is the same shape as the fail-open window described further up: this guard
+         * says AFTERWARDS that a status came back, in the teardown of the test that got it.
+         * Whatever the surface did with that status has already happened.
+         */
+        page.on('response', (res) => {
+            if (res.status() >= 400) {
+                aufzeichnung?.antworten.push({
+                    url: res.url(),
+                    status: res.status(),
+                    method: res.request().method(),
+                    resourceType: res.request().resourceType(),
+                })
+            }
+        })
     }
     context.pages().forEach(anSeite)
     context.on('page', anSeite)
@@ -222,7 +265,15 @@ export type PageErrorWaechter = {
     gesehen: () => readonly PageFehler[]
 }
 
-export const test = base.extend<{ relayWaechter: RelayWaechter; pageErrorWaechter: PageErrorWaechter }, { workerBackend: void }>({
+/** Dasselbe für den Antwortcode-Wächter (`response-guard.spec.ts`), gleiche Begründung. */
+export type ResponseWaechter = {
+    gesehen: () => readonly Antwort[]
+}
+
+export const test = base.extend<
+    { relayWaechter: RelayWaechter; pageErrorWaechter: PageErrorWaechter; responseWaechter: ResponseWaechter },
+    { workerBackend: void }
+>({
     // Worker-scoped + auto: läuft EINMAL je Worker vor dessen Tests. Seedet die worker-
     // eigene zooid-Instanz (blockierend, race-frei) und startet den worker-eigenen serve.
     workerBackend: [
@@ -329,7 +380,7 @@ export const test = base.extend<{ relayWaechter: RelayWaechter; pageErrorWaechte
      */
     relayWaechter: [
         async ({}, use, testInfo) => {
-            const lauf: Aufzeichnung = { gesehen: [], zusaetzlich: [], quittiert: [], pageFehler: [] }
+            const lauf: Aufzeichnung = { gesehen: [], zusaetzlich: [], quittiert: [], pageFehler: [], antworten: [] }
             aufzeichnung = lauf
             const erlaubt = (): Herkunft[] => [
                 ...erlaubteHerkuenfte({ slot: testInfo.parallelIndex + SLOT_OFFSET }),
@@ -397,6 +448,37 @@ export const test = base.extend<{ relayWaechter: RelayWaechter; pageErrorWaechte
             // beide zugleich treffen.
             const pageTitel = testInfo.titlePath.join(' > ')
             const pageTreffer = pageFehlerVerstoesse(lauf.pageFehler, pageTitel, ERLAUBNISLISTE)
+            const antwortTreffer = antwortVerstoesse(lauf.antworten, pageTitel, ALLOWANCES)
+
+            /**
+             * **The measuring channel of the response guard — it writes, it never judges.**
+             *
+             * `E2E_RESPONSE_REPORT=<path>` appends EVERY error response of this run as
+             * JSONL, allowance list or not. It exists so that curating that list is a
+             * MEASUREMENT rather than a memory: whoever adds or drops an entry runs the
+             * suite once with it and reads what actually comes up today. The verdict below
+             * is untouched by it — the variable cannot switch the guard off, only record.
+             */
+            const bericht = process.env.E2E_RESPONSE_REPORT
+            if (bericht !== undefined && /^(1|true|yes|on)$/i.test(bericht.trim())) {
+                // It reads like a flag and it is a PATH. Set to `1` it silently appends a
+                // file literally named `1` in the working directory — measured 2026-09-15,
+                // in the repo root, untracked and matched by no ignore rule. Two readers in
+                // two days took it for a boolean, so it says so instead of obeying.
+                throw new Error(
+                    `E2E_RESPONSE_REPORT takes a PATH, not a flag — got \`${bericht}\`, which would `
+                        + 'write a file of that name into the working directory. '
+                        + 'Use e.g. E2E_RESPONSE_REPORT=/tmp/response-report.jsonl',
+                )
+            }
+            if (bericht && lauf.antworten.length > 0) {
+                appendFileSync(
+                    bericht,
+                    lauf.antworten
+                        .map((a) => `${JSON.stringify({ titel: pageTitel, ...a })}\n`)
+                        .join(''),
+                )
+            }
 
             // Beide Urteile werden VOR dem ersten Wurf berechnet und, falls nötig, in
             // EINER Meldung zusammengeführt — sonst verdeckt ein früher Wurf den zweiten
@@ -407,6 +489,9 @@ export const test = base.extend<{ relayWaechter: RelayWaechter; pageErrorWaechte
             }
             if (pageTreffer.length > 0) {
                 meldungen.push(pageFehlerMeldung(pageTitel, pageTreffer))
+            }
+            if (antwortTreffer.length > 0) {
+                meldungen.push(responseMessage(pageTitel, antwortTreffer))
             }
             if (meldungen.length > 0) {
                 throw new Error(meldungen.join('\n\n'))
@@ -419,6 +504,11 @@ export const test = base.extend<{ relayWaechter: RelayWaechter; pageErrorWaechte
     // nötig: der Zugriff passiert im Testrumpf, wenn `aufzeichnung` längst gesetzt ist.
     pageErrorWaechter: async ({}, use) => {
         await use({ gesehen: () => [...(aufzeichnung?.pageFehler ?? [])] })
+    },
+
+    // Read-only, same reasoning as the `pageErrorWaechter` above.
+    responseWaechter: async ({}, use) => {
+        await use({ gesehen: () => [...(aufzeichnung?.antworten ?? [])] })
     },
 
     /**

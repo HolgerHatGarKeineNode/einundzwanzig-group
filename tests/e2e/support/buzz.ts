@@ -100,3 +100,42 @@ export async function useBuzz(page: Page): Promise<void> {
         ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = ''
     }, BUZZ_URL)
 }
+
+/**
+ * {@link useBuzz}, and then the workspace pointed at the SAME local relay — the shape a
+ * Buzz space actually runs in.
+ *
+ * ── Why the empty workspace above is not the production shape ──────────────────────
+ *
+ * `useBuzz` writes `__nostrWorkspace = ''` to keep the machine's `.env` from opening a
+ * second connection to the PRODUCTION Buzz (the reason is at the line itself, and it
+ * stands). Pointing the value at the local relay keeps that protection — it is not the
+ * production address — and repairs what the empty string breaks: `js/mediaGuard.ts` keys
+ * on exactly this value. With `''` the client guard is INERT, so a `/media/` blob of the
+ * relay is handed to the server image proxy instead of being fetched with the reader's
+ * key over Blossom.
+ *
+ * Measured on the module itself (2026-09-15, `node --experimental-strip-types`), for
+ * `http://localhost:3151/media/52dc24c0….webp`:
+ *
+ *     mayProxifyMedia(url, '')                     → true   (goes to /img/msg)
+ *     mayProxifyMedia(url, 'ws://localhost:3151/') → false  (Blossom marker instead)
+ *
+ * In the arm that ran without it, the surface therefore requested
+ * `/img/msg?src=http%3A%2F%2Flocalhost%3A3151%2Fmedia%2F….webp` and the server answered
+ * 403 — its own media guard, on the right verdict for the wrong premise (it compares the
+ * HOST, and on loopback the worker's zooid workspace and the Buzz media port share
+ * `localhost`). Nothing in the surface says so: the image is simply missing, and until
+ * the response guard existed nobody saw the status.
+ *
+ * The decision itself is not new here — `buzz-chat-attachments.spec.ts` already writes
+ * the same three lines by hand with the same reasoning („On a Buzz space the relay IS the
+ * workspace in production"), as do twelve further Buzz specs. This function is that
+ * decision in ONE place, so the fourteenth spec does not have to rediscover it.
+ */
+export async function useBuzzAsWorkspace(page: Page): Promise<void> {
+    await useBuzz(page)
+    await page.addInitScript((url) => {
+        ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
+    }, BUZZ_URL)
+}

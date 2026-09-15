@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { getPublicKey } from 'nostr-tools/pure'
 import { decode } from 'nostr-tools/nip19'
 import { useZooid, ZOOID_WS } from './support/zooid'
-import { useBuzz, BUZZ_WS, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_OWNER_NSEC, BUZZ_USER_NSEC } from './support/buzz'
+import { useBuzzAsWorkspace, BUZZ_WS, BUZZ_PORT, BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, BUZZ_OWNER_NSEC, BUZZ_USER_NSEC } from './support/buzz'
 import { loginNsec } from './support/login'
 import { cleanupRooms, trackRoom } from './support/rooms'
 import { publishVerified } from './support/publishVerified'
@@ -358,8 +358,13 @@ test.describe('Pin/Unpin (C, zooid)', () => {
 // D — echter Browser, Buzz (E2E_RELAY=buzz)
 // ════════════════════════════════════════════════════════════════════════════════════
 
+// `useBuzzAsWorkspace`, not `useBuzz`: the welcome room carries a kind 9 with an `imeta`
+// on `http://localhost:<buzz>/media/…` (published by the attachment case in
+// `buzz-room.spec.ts`), and these cases render it. With an empty workspace the client
+// media guard is inert and that url goes to the server image proxy — reasoning and
+// measurement at the helper.
 async function openBuzzWelcomeAs(page: Page, nsec: string): Promise<void> {
-    await useBuzz(page)
+    await useBuzzAsWorkspace(page)
     await loginNsec(page, nsec)
     await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
 }
