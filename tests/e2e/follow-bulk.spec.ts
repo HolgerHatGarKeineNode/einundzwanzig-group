@@ -56,12 +56,24 @@ async function openDirectory(page: Page, reader: WireReader): Promise<void> {
     await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 20_000 })
 }
 
-/** Turn on selection mode and tick the rows of `targets`. */
-async function enterSelection(page: Page, targets: readonly string[]): Promise<void> {
-    await page.locator('[data-directory-select-toggle]').click()
+/**
+ * Tick the rows of `targets`, with selection mode ALREADY on.
+ *
+ * Separate from {@link enterSelection} because a successful bulk write clears the selection
+ * and leaves the mode ON — `[data-directory-select-toggle]` is the ENTRY button and is gone
+ * while the mode runs, so calling `enterSelection` a second time waits 180 s for an element
+ * that will never come back. Measured 2026-09-15; the failure reads like a hung page.
+ */
+async function tickRows(page: Page, targets: readonly string[]): Promise<void> {
     for (const pk of targets) {
         await page.locator(`[data-directory-row][data-pubkey="${pk}"] [data-directory-row-check]`).click()
     }
+}
+
+/** Turn on selection mode and tick the rows of `targets`. */
+async function enterSelection(page: Page, targets: readonly string[]): Promise<void> {
+    await page.locator('[data-directory-select-toggle]').click()
+    await tickRows(page, targets)
 }
 
 /**
@@ -411,32 +423,53 @@ test('the bulk bar and its preview, measured at 375 px and 1280 px', async ({ pa
  * Same construction and same reason as the case in `follow.spec.ts`: a server-side test
  * never sees the browser that runs the markup, and this surface is 301 lines of Blade plus
  * ~190 lines of island methods that no browser-side error channel had ever watched. The
- * walk goes through selection mode, the bar, the preview, a refusal and a write, because a
- * handler that only ever runs on the happy path is half measured.
+ * walk goes through selection mode, the bar, the preview, a REAL write and an INERT press,
+ * because a handler that only ever runs on the happy path is half measured.
+ *
+ * **Both halves are load-bearing wording, and this sentence has been wrong twice.** It first
+ * promised an inert branch the walk never took; the repair made the branch real and left the
+ * sentence promising a write the walk no longer did. The walk now does both, and the
+ * assertions below say which is which — a docblock nobody can fail is how this file lost the
+ * claim twice.
  */
 test('the bulk flow makes no console noise, and the channel that says so is live', async ({ page, pageErrorWaechter }) => {
     test.setTimeout(180_000)
     const reader = admitReader()
     const admin = pubOf(RELAY_OWNER_SEC)
     const shared = testKeys().pk
-    // `admin` is seeded into the base ON PURPOSE: it is what makes the second preview below
-    // the INERT one. A gate found the earlier shape of this case describing an inert branch
-    // it never reached — `admin` was not followed, the button was not disabled, and the
-    // click performed a real bulk write. Three sentences, three measurements against them.
+    // `admin` is seeded into the base ON PURPOSE: it is what makes the FIRST preview add
+    // exactly one person, and the second one inert. A gate found an earlier shape of this
+    // case describing an inert branch it never reached — `admin` was not followed, the
+    // button was not disabled, and the click performed a real bulk write.
     seedFollowList(reader, [BASE_A, BASE_B, admin])
     seedRelayList(reader, [ZOOID_URL])
 
     await openDirectory(page, reader)
+
+    // ── First half: a real write, signed and confirmed at the relay ───────────────────
+    //
+    // `admin` is already in the base, `shared` is not, so this preview adds exactly one and
+    // the confirm button is live. The wire check is what makes „a write" a measurement:
+    // without it the press is green whether or not anything was ever signed.
+    const before = relayFollowList(reader)
     await enterSelection(page, [admin, shared])
     const modal = await openBulkPreview(page)
-    await modal.getByRole('button', { name: 'Abbrechen' }).click()
-    await expect(modal).toBeHidden()
+    await expect(page.locator('[data-directory-bulk-confirm]')).not.toHaveAttribute('aria-disabled', 'true')
+    await page.locator('[data-directory-bulk-confirm]').click()
+    await expect(modal).toBeHidden({ timeout: 40_000 })
+    await expect
+        .poll(() => relayFollowList(reader)?.p.includes(shared) ?? false, { timeout: 30_000 })
+        .toBe(true)
+    const after = relayFollowList(reader)
+    expect(after?.id, 'the bulk write produced no new event at the relay').not.toBe(before?.id)
 
-    // The inert branch: everybody left selected is already followed, so the confirm button
-    // announces itself as disabled and the press has to do nothing — through the KEYBOARD,
-    // because Playwright's `click()` refuses an `aria-disabled` control with a 30 s timeout
-    // and the house pattern for inert buttons is reachable no other way.
-    await page.locator(`[data-directory-row][data-pubkey="${shared}"] [data-directory-row-check]`).click()
+    // ── Second half: the inert press ──────────────────────────────────────────────────
+    //
+    // Everybody selected is now already followed, so the confirm button announces itself as
+    // disabled and the press has to do nothing — through the KEYBOARD, because Playwright's
+    // `click()` refuses an `aria-disabled` control with a 30 s timeout and the house pattern
+    // for inert buttons is reachable no other way.
+    await tickRows(page, [admin, shared])
     await openBulkPreview(page)
     const confirm = page.locator('[data-directory-bulk-confirm]')
     // These two assertions are the case, not scenery: without them the keypress below is
