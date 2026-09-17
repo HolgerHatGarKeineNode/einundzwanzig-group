@@ -8,7 +8,7 @@
 test('setzt window.__nostrSpace, wenn NOSTR_SPACE_URL/config gesetzt ist', function () {
     config()->set('group.space_url', 'wss://group.einundzwanzig.space/');
 
-    $this->get('/')
+    $this->get('/start')
         ->assertOk()
         ->assertSee('window.__nostrSpace', false)
         ->assertSee('group.einundzwanzig.space', false);
@@ -17,7 +17,7 @@ test('setzt window.__nostrSpace, wenn NOSTR_SPACE_URL/config gesetzt ist', funct
 test('injiziert nichts, wenn die Space-URL leer ist (Dev-Default)', function () {
     config()->set('group.space_url', null);
 
-    $this->get('/')
+    $this->get('/start')
         ->assertOk()
         ->assertDontSee('window.__nostrSpace', false);
 });

@@ -139,7 +139,7 @@ test('Eine LEERE .env-Zeile schaltet den Verweis ab — der Default greift dann 
     config()->set('group.media_public_url', '');
 
     $res = $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])
-        ->get(route('group.articles'))
+        ->get(route('group.bereich.artikel'))
         ->assertOk();
 
     expect(medienHtml($res))->not->toContain('__nostrMedia');
@@ -222,7 +222,7 @@ test('Mit konfigurierter Basis reicht der Server sie WÖRTLICH in die Insel', fu
     config()->set('group.media_public_url', 'https://media.example.test/#');
 
     $res = $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])
-        ->get(route('group.articles'))
+        ->get(route('group.bereich.artikel'))
         ->assertOk();
     $html = medienHtml($res);
 
@@ -266,7 +266,7 @@ test('Die Profilkarte trägt sie ebenfalls — sie ist die Fläche, die BISHER k
 
     // Die Karte hängt in `app-frame` und steht damit auf jeder Fläche der Shell.
     $res = $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])
-        ->get(route('group.articles'))
+        ->get(route('group.bereich.artikel'))
         ->assertOk();
     $html = medienHtml($res);
 
@@ -278,7 +278,7 @@ test('OHNE Konfiguration steht auf beiden Flächen KEINE Verweis-Zeile', functio
     config()->set('group.board_relay_url', 'wss://relay.example.test');
     config()->set('group.media_public_url', '');
 
-    foreach ([route('group.articles'), '/articles/autor/'.str_repeat('a', 63).'b'] as $url) {
+    foreach ([route('group.bereich.artikel'), '/articles/autor/'.str_repeat('a', 63).'b'] as $url) {
         $html = medienHtml(
             $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])->get($url)->assertOk()
         );

@@ -154,7 +154,7 @@ async function messeFuss(page: Page): Promise<Messung> {
 test('the new-conversation footer clears the bottom bar: measured at 375 px and 1280 px', async ({ page }) => {
     await useZooid(page)
     await loginNsec(page, NSEC)
-    await page.goto('/messages')
+    await page.goto('/postfach?ansicht=direkt')
     await expect(page.locator('[data-pm-liste]')).toBeVisible({ timeout: 45_000 })
 
     // Three widths and not the project default. 320 px is the one WCAG 1.4.10 names for

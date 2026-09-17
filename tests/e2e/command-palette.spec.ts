@@ -541,13 +541,13 @@ async function paletteBackgroundColors(page: Page): Promise<{ card: string; item
 
 /** Theme über die Einstellungen setzen (wie `theme.spec.ts`), dann zur Palette. */
 async function setThemeAndOpenPalette(page: Page, radioLabel: 'Hell' | 'Dunkel' | 'Automatisch'): Promise<void> {
-    await page.goto('/settings/space')
+    await page.goto('/ich/einstellungen')
     await expect(page.getByRole('heading', { name: 'Darstellung' })).toBeVisible({ timeout: 15_000 })
     await page.locator(`ui-radio[aria-label="${radioLabel}"]`).click()
 
     // Persistiert über `flux.appearance` (localStorage) + flackerfreies Head-Skript
     // (`@fluxAppearance`) — ein voller Seitenwechsel reicht, kein Reload nötig.
-    await page.goto('/spaces')
+    await page.goto('/bereich/chat')
     await expect(page.getByText('Zooid Test Space').first()).toBeVisible({ timeout: 15_000 })
     await openPaletteViaKeyboard(page)
 }

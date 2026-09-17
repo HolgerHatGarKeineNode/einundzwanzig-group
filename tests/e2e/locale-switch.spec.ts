@@ -56,7 +56,7 @@ test('P2: die Sprachwahl überlebt wire:navigate (Cookie bleibt, <html lang> ble
     // 1279px ist nur die zweite (Bottom-Bar) sichtbar, die erste ist `hidden`
     // und darauf klicken würde mit einem Actionability-Timeout scheitern.
     await page.locator('a[href$="/spaces"]').last().click()
-    await page.waitForURL('**/spaces')
+    await page.waitForURL('**/start')
     await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 
     await page.locator('a[href$="/settings"]').last().click()

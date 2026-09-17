@@ -584,7 +584,7 @@ test.describe('Buzz-Space-Verwaltung (E2E, nur E2E_RELAY=buzz)', () => {
         )
         await page.waitForURL('**/rooms/**')
         await page.evaluate(() => (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/spaces'))
-        await page.waitForURL('**/spaces')
+        await page.waitForURL('**/start')
         // Erst wenn die Liste wieder steht, ist eine Zählung darauf etwas wert — sonst
         // wäre „Kachel weg" schon während des Seitenwechsels erfüllt.
         await expect(roomTile(page, 'E2E-Welcome')).toBeVisible({ timeout: 30_000 })

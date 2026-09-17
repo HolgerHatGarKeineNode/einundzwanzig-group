@@ -106,7 +106,7 @@ test('Leerer Raum: genau EIN CTA, Fokus-Kaskade nach Zustand (Mitglied → Compo
 
 test('Leere Mitgliederliste: Einladen-CTA existiert NUR unter isAdmin, sonst handlungslos', function () {
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.directory'))
+        ->get(route('group.bereich.leute'))
         ->assertOk();
     $html = responseHtml($res);
 
@@ -122,7 +122,7 @@ test('Leere Mitgliederliste: Einladen-CTA existiert NUR unter isAdmin, sonst han
 
 test('Mitgliedersuche ohne Treffer: "Suche leeren" führt den Fokus per x-ref zurück ins Suchfeld', function () {
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.directory'))
+        ->get(route('group.bereich.leute'))
         ->assertOk();
     $html = responseHtml($res);
 
@@ -134,7 +134,7 @@ test('Mitgliedersuche ohne Treffer: "Suche leeren" führt den Fokus per x-ref zu
 
 test('Spaces :530 aufgeteilt: Suche-ohne-Treffer trägt "Suche leeren", der reine Bestandsfall bewusst KEINEN Button', function () {
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.spaces'))
+        ->get(route('group.bereich.chat'))
         ->assertOk();
     $html = responseHtml($res);
 
@@ -162,7 +162,7 @@ test('Spaces :530 aufgeteilt: Suche-ohne-Treffer trägt "Suche leeren", der rein
 
 test('Space ohne Räume: "Raum anlegen" nur unter isAdmin', function () {
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.spaces'))
+        ->get(route('group.bereich.chat'))
         ->assertOk();
     $html = responseHtml($res);
 
@@ -183,7 +183,7 @@ test('Space ohne Räume: "Raum anlegen" nur unter isAdmin', function () {
 
 test('REGRESSION: gatedOut-Zustand bleibt handlungslos — verein-gate trägt den Weg, kein neuer Button', function () {
     $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.spaces'))
+        ->get(route('group.bereich.chat'))
         ->assertOk();
     $html = responseHtml($res);
 
@@ -550,7 +550,19 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
         // surface but reach lost from the counter — the most expensive mistake this test
         // can make.
         'directory' => 9,
-        'spaces' => 9,
+        // **P2 of the navigation rebuild (2026-09-18): 9 → 7.** The multiset diff
+        // (`array_count_values`, `git show HEAD:…⚡spaces.blade.php` against the working
+        // tree) is ONE-SIDED — none was added, exactly two fell away:
+        //   −1 `aria-haspopup="true"`
+        //   −1 `:aria-expanded="open"`
+        // Both belonged to the profile CHIP and its popover. That is gone with Concept C:
+        // the identity now stands as an avatar in the header and leads to „Ich"
+        // (`components/me-avatar.blade.php`), where the popover's entries live as a page of
+        // their own. A popover that no longer exists needs no `aria-expanded` — the two
+        // carriers went with their surface, they did not fall off it. The bell, which went
+        // in the same edit, carried only an `aria-label`, and that is explicitly excluded
+        // here (doc block above).
+        'spaces' => 7,
         // **P1 des Gitea-Sprache-Plans (2026-08-26): 20 → 16.** Multiset-Diff
         // (`array_count_values`, `git show HEAD:…⚡forge.blade.php` gegen den
         // Arbeitsbaum) ist EINSEITIG — eine einzige veränderte Zeichenkette,
@@ -761,9 +773,9 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     $room = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.room', ['h' => 'anyroom']))->assertOk());
     $directory = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.directory'))->assertOk());
+        ->get(route('group.bereich.leute'))->assertOk());
     $spaces = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.spaces'))->assertOk());
+        ->get(route('group.bereich.chat'))->assertOk());
 
     // `forge`/`forge-repo` rendern ihre Werkbank nur MIT konfiguriertem Workspace (sonst
     // der Leerzustand aus `OrtskartenTest.php`, ohne die gezählten Träger) — Config nach
@@ -771,7 +783,7 @@ test('REGRESSION: alle strukturellen ARIA-Träger aus room/directory/spaces blei
     // die Umgebung laufen, gegen die sie kalibriert wurden.
     config(['group.workspace_url' => 'wss://buzz.test/']);
     $forge = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
-        ->get(route('group.forge'))->assertOk());
+        ->get(route('group.bereich.forge'))->assertOk());
     $forgeRepo = responseHtml($this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.forge.repo', ['naddr' => 'naddr1beispiel']))->assertOk());
     $hexId = str_repeat('a', 64);

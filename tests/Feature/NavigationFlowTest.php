@@ -8,45 +8,75 @@ declare(strict_types=1);
  * der Marken-Fehlerseiten und des OG-Share-Bilds. Verhalten deckt Playwright ab.
  */
 test('Einstellungen-Tab: Abmelden ist erreichbar (Flow Settings→Logout bricht nicht)', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.ich.einstellungen'))->assertOk();
 
     $res->assertSee('x-data="nostrAuth"', false);
     $res->assertSee('doLogout()', false);
     $res->assertSee('Abmelden');
 });
 
-test('Bottom-Nav-Tabs tragen den Brand-Mark-Header, keinen Zurück-Pfeil', function () {
-    foreach (['group.directory', 'group.settings'] as $name) {
+test('hub surfaces carry the brand-mark header, no back arrow', function () {
+    // Start, Postfach and Ich are the level BELOW the address bar — between them there is no
+    // "back", there is "somewhere else". The brand mark links to Start; a back arrow would
+    // claim a hierarchy that does not exist between them.
+    //
+    // `/bereich/*` is deliberately NOT in this list: an area sits below Start and does have
+    // an UP target (see `WalletBackTest`).
+    foreach (['group.start', 'group.postfach', 'group.ich'] as $name) {
         $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route($name))->assertOk();
 
-        // Brand-Mark verlinkt zur Startseite …
         $res->assertSee('aria-label="Startseite"', false);
-        // … statt eines Zurück-Pfeils zwischen gleichrangigen Tabs.
         $res->assertDontSee('aria-label="Zurück"', false);
     }
 });
 
-test('Native-Host (config group.exit): Vollbild-Chat zeigt sichtbaren Rücksprung statt Brand-Mark', function () {
-    // Host (z.B. Mobile-App) reicht eine Rücksprung-Route + Label — der Chat ist
-    // ein Vollbild-Takeover, ohne Ausgang säße der Nutzer fest. 'home' als
-    // Test-Ziel (im Web-Repo existent; die Mobile-App setzt 'meetups').
-    config(['group.exit' => ['route' => 'home', 'label' => 'Meetups']]);
+test('the avatar is the way to Ich — and a guest is not turned away there', function () {
+    // Until P2 the counter-proof for the host exit (`config('group.exit')`) stood here: the
+    // app ran the chat as a full-screen takeover next to its own bar, and without a visible
+    // exit the user was stuck. The key is gone with Concept C — one shell in both hosts, so
+    // no border to jump back across.
+    //
+    // What takes its place is the avatar: a corner of the frame, not a fourth nav slot. Both
+    // things a server can decide are checked — that it is there, and that „Ich" answers
+    // WITHOUT a session too (D4). A guest whom the avatar sends into a login redirect never
+    // learned what an account gives him.
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.start'))->assertOk();
 
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
+    $res->assertSee('data-app-header-avatar', false);
+    $res->assertSee('href="'.route('group.ich').'"', false);
 
-    // Sichtbarer „‹ Meetups"-Ausgang, der DIREKT zur Host-Route springt …
-    $res->assertSee('Meetups');
-    $res->assertSee('aria-label="Zurück zu Meetups"', false);
-    $res->assertSee('href="'.route('home').'"', false);
-    // … statt des (für einen App-Tab sinnlosen) Brand-Marks.
-    $res->assertDontSee('aria-label="Startseite"', false);
+    $alsGast = $this->get(route('group.ich'))->assertOk();
+    $alsGast->assertSee('Noch nicht angemeldet');
+    // And signing in runs through the store, not through a server redirect — otherwise the
+    // app would lose its state (its login lives only in `localStorage`).
+    $alsGast->assertSee('$store.authGate.requireAuth', false);
 });
 
 test('Empty-Space-Liste ist keine Sackgasse: CTA zur Startseite', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.ich.einstellungen'))->assertOk();
 
     $res->assertSee('x-if="ready && spaces.length === 0"', false);
     $res->assertSee('Zur Startseite');
+});
+
+test('settings: a host may inject sections of its own into THIS hub', function () {
+    // The line that abolishes the second settings place. The companion had its app sections
+    // (region, push, portal connection, about) on a screen of its own and `settings_route`
+    // pointed there — two versions of the same sections, depending on which way you took.
+    // Since P2 a host hangs them into the registry with a `view:` prefix.
+    //
+    // Measured with a view that exists in the host (`errors.layout` renders a frame and needs
+    // no variables): the case proves the MECHANISM, not the companion's sections — those live
+    // in its own repository.
+    config(['group.settings' => ['account', 'view:errors.layout']]);
+
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.ich.einstellungen'))->assertOk();
+
+    // The host view is rendered …
+    $res->assertSee('id="settings-account"', false);
+    // … and is NOT looked up as a package partial (`group::partials.settings.view:…` does
+    // not exist; `@includeIf` would then have stayed silently empty).
+    expect((string) $res->getContent())->toContain('<html');
 });
 
 test('Marken-Fehlerseiten rendern im Dark-tauglichen Layout mit Rückweg', function () {
@@ -67,7 +97,9 @@ test('Marken-Fehlerseiten rendern im Dark-tauglichen Layout mit Rückweg', funct
 });
 
 test('OG-Share-Bild: große Preview-Karte statt Mini-Icon', function () {
-    $res = $this->get(route('home'))->assertOk();
+    // Measured on `/start` and no longer on `/`: since P2 the root is a 302 to Start, and
+    // Start is the surface that gets shared.
+    $res = $this->get(route('group.start'))->assertOk();
 
     $res->assertSee('summary_large_image', false);
     $res->assertSee('og.png', false);

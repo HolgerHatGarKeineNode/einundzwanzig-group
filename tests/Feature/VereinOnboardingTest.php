@@ -108,7 +108,7 @@ beforeEach(function () {
 // ── 1. Gate: Weg nach innen statt Link nach aussen ───────────────────────────
 
 test('mit konfigurierter Vereins-API führt das Gate in den Flow, nicht nach draussen', function () {
-    $html = vereinHtml(vereinGet($this, route('group.spaces'))->assertOk());
+    $html = vereinHtml(vereinGet($this, route('group.bereich.chat'))->assertOk());
 
     expect($html)->toContain('data-testid="verein-gate-beitreten"')
         ->and($html)->toContain(route('group.verein.join'))
@@ -121,7 +121,7 @@ test('ohne konfigurierte Vereins-API bleibt der ehrliche Weg nach draussen', fun
     // scheitert, wäre schlechter als der Link, der funktioniert.
     config()->set('group.verein_api_url', '');
 
-    $html = vereinHtml(vereinGet($this, route('group.spaces'))->assertOk());
+    $html = vereinHtml(vereinGet($this, route('group.bereich.chat'))->assertOk());
 
     expect($html)->toContain('data-testid="verein-gate-extern"')
         ->and($html)->not->toContain('data-testid="verein-gate-beitreten"');
@@ -130,7 +130,7 @@ test('ohne konfigurierte Vereins-API bleibt der ehrliche Weg nach draussen', fun
 test('beide bestehenden Einbindungen des Gates tragen den neuen Weg', function () {
     // Das Gate steht auf `/spaces` UND `/directory`. Eine Änderung an der
     // Komponente, die nur eine der beiden bedient, wäre ein halber Umbau.
-    foreach ([route('group.spaces'), route('group.directory')] as $url) {
+    foreach ([route('group.bereich.chat'), route('group.bereich.leute')] as $url) {
         expect(vereinHtml(vereinGet($this, $url)->assertOk()))
             ->toContain('data-testid="verein-gate-beitreten"');
     }

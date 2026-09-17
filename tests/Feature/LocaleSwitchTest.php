@@ -131,7 +131,7 @@ test('alle acht Sprachen bleiben wählbar — abgeschafft ist nur die AUTOMATIK'
 // ── 2. <html lang> je Sprache ────────────────────────────────────────────
 
 test('<html lang> folgt dem Cookie', function (string $locale) {
-    $response = $this->withUnencryptedCookie(SetLocale::COOKIE, $locale)->get('/');
+    $response = $this->withUnencryptedCookie(SetLocale::COOKIE, $locale)->get('/start');
 
     $response->assertOk();
     expect($response->getContent())->toContain('<html lang="'.$locale.'">');
@@ -140,7 +140,7 @@ test('<html lang> folgt dem Cookie', function (string $locale) {
 test('<html lang> bleibt de, auch wenn der Browser pt-BR verlangt', function () {
     // setUp() setzt "de-DE,de;q=0.9" als Default-Header — hier bewusst überschrieben,
     // damit der Fall wirklich einen fremdsprachigen Browser nachstellt.
-    $response = $this->withHeader('Accept-Language', 'pt-BR,pt;q=0.9')->get('/');
+    $response = $this->withHeader('Accept-Language', 'pt-BR,pt;q=0.9')->get('/start');
 
     $response->assertOk();
     expect($response->getContent())->toContain('<html lang="de">');

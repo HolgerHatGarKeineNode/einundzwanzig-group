@@ -2,32 +2,25 @@
 
 return [
     /*
-     * P2 (App-Shell-Verschmelzung §3.1/§8.2): der Web-Host ist ein eigenständiger
-     * self-host Chat+Wallet-Client — 3 Tabs, KEIN Meetups/Mehr/Portal (Umfang-
-     * Callout im Plan). Diese Config überschreibt nur `nav`; alle übrigen
-     * group-Keys (space_url, head_partial, exit=null …) füllt der Package-Default
-     * via mergeConfigFrom. `nav` ist ein String-Key → array_merge lässt den Host
-     * gewinnen (keine Listen-Konkatenation), die 3 Web-Tabs ersetzen die 3
-     * package-nativen Default-Tabs sauber.
+     * ── Since P2 the web host overrides NO nav any more ───────────────────────────
      *
-     * Einstellungen zeigt seit P5 den verschmolzenen Settings-Screen
-     * (group.settings, §6): Konto/Identität · Space & Räume · Wallet · Darstellung ·
-     * Abmelden. gate=nostr: der Tab liegt server-seitig hinter `nostr.auth`, der
-     * Tap-Intercept öffnet später (P6) das Login-Sheet statt zu navigieren.
+     * `nav` with three tabs (Chat · Wallet · Einstellungen) stood here. The registry is
+     * gone from every host with Concept C: the bottom bar has three FIXED slots
+     * (Start · Search · Postfach) as markup inside the package, and what a host may still
+     * redirect are the flat keys `start_route`, `me_route`, `settings_route`, `areas`. The
+     * web client takes the package default for all of them: it IS the host those defaults
+     * were written for.
+     *
+     * `areas` stays untouched as well — the "Meetups" and "Kurse" tiles therefore point at
+     * `portal_url` and leave the client. On web that is exactly what is wanted (D9: P4
+     * builds the readable Portal pages; management stays in the Portal for good).
      */
-    'nav' => [
-        // `match` weggelassen: nav-tab fällt via `$match ?? $route` auf die Route
-        // zurück, und alle drei Web-Tabs sind Ein-Routen-Tabs (Aktiv = exakte Route).
-        ['key' => 'chat', 'route' => 'group.spaces', 'icon' => 'chat-bubble-left-right', 'label' => 'Chat', 'gate' => 'nostr'],
-        ['key' => 'wallet', 'route' => 'group.wallet', 'icon' => 'bolt', 'label' => 'Wallet', 'gate' => 'nostr'],
-        ['key' => 'settings', 'route' => 'group.settings', 'icon' => 'cog-6-tooth', 'label' => 'Einstellungen', 'gate' => 'nostr'],
-    ],
 
     /*
      * Settings-Registry des Web-Hosts (§4.1): geordnete Section-Keys, die der
-     * verschmolzene Settings-Hub (`group.settings`) iteriert. Bewusst OHNE `wallet`
-     * (Wallet ist ein eigener Bottom-Nav-Peer-Tab, kein Hub-Eintrag → kein doppelter
-     * Einstieg) und OHNE `relays` (die read-only NIP-65-Liste ist Fachjargon/selten
+     * verschmolzene Settings-Hub (`group.ich.einstellungen`) iteriert. Bewusst OHNE `wallet`
+     * (the wallet is an AREA of its own with its own tile on Start, not a hub entry → no
+     * duplicate way in) and WITHOUT `relays` (the read-only NIP-65 list is jargon and rarely
      * gebraucht → nur auf dem Mobile-Host für Power-User). Reihenfolge = Nutzer-
      * Mentalmodell: Identität → Space → Medien → Darstellung → Sprache → Sitzung.
      *

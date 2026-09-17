@@ -380,19 +380,22 @@ test('ein Umschalten auf Spanisch ändert die Startseite sichtbar', function () 
         return $html;
     };
 
-    $deutsch = $ohneKatalog($seite($this->get('/')->assertOk()));
+    // Since P2 the measurement runs on `/start`: the landing page under `/` is gone with
+    // Concept C, and `/` forwards there. Start is therefore the page a guest sees first — so
+    // exactly the one where a translation that did not arrive would be most expensive.
+    $deutsch = $ohneKatalog($seite($this->get('/start')->assertOk()));
 
-    expect($deutsch)->toContain('Die Bitcoin-Community auf Nostr')
-        ->and($deutsch)->toContain('Zu deinem Space');
+    expect($deutsch)->toContain('Willkommen bei EINUNDZWANZIG')
+        ->and($deutsch)->toContain('Alle Bereiche');
 
     $spanisch = $ohneKatalog(
-        $seite($this->withUnencryptedCookie(SetLocale::COOKIE, 'es')->get('/')->assertOk())
+        $seite($this->withUnencryptedCookie(SetLocale::COOKIE, 'es')->get('/start')->assertOk())
     );
 
-    expect($spanisch)->toContain('La comunidad Bitcoin en Nostr')
-        ->and($spanisch)->toContain('A tu Space')
+    expect($spanisch)->toContain('Bienvenido a EINUNDZWANZIG')
+        ->and($spanisch)->toContain('Todas las áreas')
         // Und der deutsche Satz ist WEG — sonst hätte die Übersetzung nur danebengestanden.
-        ->and($spanisch)->not->toContain('Die Bitcoin-Community auf Nostr');
+        ->and($spanisch)->not->toContain('Willkommen bei EINUNDZWANZIG');
 });
 
 test('die Fehlerseiten folgen der Sprache — Hülle und Inhalt gemeinsam', function () {

@@ -52,7 +52,7 @@ test('Vereins-Relay in den Einstellungen zeigt einen Toast', async ({ page }) =>
     // Der fixierte Default-Space (lokaler zooid) ist der einzige Eintrag.
     await page.getByText(`localhost:${ZOOID_PORT}`).click()
 
-    await page.waitForURL('**/spaces')
+    await page.waitForURL('**/start')
     await expect(page.getByText(/Vereins-Relay/)).toBeVisible({ timeout: 10_000 })
 })
 
@@ -100,7 +100,7 @@ test('Mitglied: Räume erscheinen auch bei langsamer AUTH (verzögerter Signer)'
     await useZooid(page)
     await page.goto('/nostr-login')
     await page.getByRole('button', { name: /Browser-Erweiterung/ }).click()
-    await page.waitForURL('**/spaces')
+    await page.waitForURL('**/start')
 
     // Trotz 3 s AUTH-Verzögerung: Räume da, Gate bleibt aus.
     await expect(page.getByText('Dev')).toBeVisible({ timeout: 25_000 })

@@ -9,7 +9,7 @@ declare(strict_types=1);
  * sind — nicht das JS-Verhalten (das deckt Playwright ab).
  */
 test('Space-Seite: First-Paint-Skeleton statt nackter Fläche + echter Räume-Empty-State', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.bereich.chat'))->assertOk();
 
     // Skeleton solange die Space-Meta fehlt (kein x-show="space" mehr am Wrapper).
     $res->assertSee('x-show="!space && loading"', false);
@@ -19,7 +19,7 @@ test('Space-Seite: First-Paint-Skeleton statt nackter Fläche + echter Räume-Em
 });
 
 test('Directory: list-stagger setzt --i pro Karte + Skeleton meldet aria-busy', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.directory'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.bereich.leute'))->assertOk();
 
     $res->assertSee('list-stagger', false);
     $res->assertSee('--i:${idx}', false);
@@ -161,9 +161,9 @@ test('Raum (C5): Poll-Karte rendert Optionen/Vote + Erstellen-Trigger + Create-M
 });
 
 test('Space-Einstellungen: ready-Guard verhindert Empty-Flash', function () {
-    // space.settings → Redirect auf den verschmolzenen Hub (group.settings); der
+    // space.settings → Redirect auf den verschmolzenen Hub (group.ich.einstellungen); der
     // Space-Skeleton lebt jetzt dort (P1-Konsolidierung).
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.ich.einstellungen'))->assertOk();
 
     // Empty erst nach ready — Skeleton davor (Fix-A-Muster).
     $res->assertSee('x-if="!ready"', false);

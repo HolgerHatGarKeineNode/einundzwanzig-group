@@ -175,7 +175,7 @@ test('P2: ein Lesezeichen überlebt einen Reload (frisches Keypair)', async ({ p
     // `read-state-sync.spec.ts:303-311`): the write goes out optimistically, the relay
     // verdict follows, and the confirmation re-read follows that. A fixed sleep would
     // either be a flake or an unnecessarily slow test.
-    await page.goto('/bookmarks')
+    await page.goto('/ich/lesezeichen')
     const entry = page.getByText(MESSAGE)
     await expect
         .poll(() => entry.count(), { timeout: 20_000 })
@@ -225,7 +225,7 @@ test('P2 LAYOUT: /bookmarks bei schmal (390) und Desktop (1440) — echte Zahlen
 
     for (const width of [390, 1440]) {
         await page.setViewportSize({ width, height: 900 })
-        await page.goto('/bookmarks')
+        await page.goto('/ich/lesezeichen')
         const entry = page.getByText(MESSAGE)
         await expect(entry.first()).toBeVisible({ timeout: 20_000 })
 

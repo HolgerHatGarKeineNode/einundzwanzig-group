@@ -302,7 +302,7 @@ test('Anker 2: Lesen löscht den Punkt — hochgescrollt verlassen lässt ihn st
     await expect(page.getByText(seen, { exact: true })).toBeVisible({ timeout: 20_000 })
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/spaces$/, { timeout: 20_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 20_000 })
     await expect(roomDot(page)).toHaveCount(0, { timeout: 20_000 })
     await expect(navDot(page)).toHaveCount(0, { timeout: 20_000 })
 
@@ -339,7 +339,7 @@ test('Anker 2: Lesen löscht den Punkt — hochgescrollt verlassen lässt ihn st
     expect(beforeNav).toBeGreaterThan(60)
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/spaces$/, { timeout: 20_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 20_000 })
 
     // Diagnose VOR der Assertion. Ein Fehlschlag hier hat genau zwei mögliche
     // Ursachen, und die Zeile trennt sie ohne Nachfragen:
@@ -375,7 +375,7 @@ test('Anker 3: zweiter Tab verliert den Punkt ohne Reload', async ({ page, conte
 
     const tabB = await context.newPage()
     await useZooid(tabB)
-    await tabB.goto('/spaces')
+    await tabB.goto('/bereich/chat')
     await expect(tabB.getByRole('button', { name: new RegExp(ROOM_NAME) })).toBeVisible({ timeout: 20_000 })
     await tabB.evaluate(() => {
         ;(window as unknown as { __tabB: number }).__tabB = 1

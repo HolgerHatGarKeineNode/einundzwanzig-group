@@ -25,7 +25,7 @@ test.describe('Nostr-Login (E2E)', () => {
         await page.goto('/nostr-login')
         await page.getByRole('button', { name: /Browser-Erweiterung/ }).click()
 
-        await page.waitForURL('**/spaces')
+        await page.waitForURL('**/start')
         await expect(page.locator('body')).toContainText(npub)
     })
 

@@ -8,21 +8,9 @@ use Tests\TestCase;
 
 /**
  * P5 (App-Shell-Verschmelzung §6): der verschmolzene Einstellungen-Screen
- * (group.settings) bündelt Konto/Identität · Space & Räume · Wallet · Darstellung ·
+ * (group.ich.einstellungen) bündelt Konto/Identität · Space & Räume · Wallet · Darstellung ·
  * Abmelden an EINEM Ort. Web-Umfang: kein Portal-Konto/Meine-Inhalte/Sprache.
  */
-
-/**
- * `config()` ist ohne larastans `configDirectories`-Opt-in generisch `mixed`
- * getypt — `collect()` kann daraus keine Template-Typen auflösen. Die Shape
- * hier spiegelt `config/group.php` 1:1 (siehe dort).
- *
- * @return list<array{key: string, route: string, icon: string, label: string, gate: string}>
- */
-function navConfig(): array
-{
-    return config('group.nav');
-}
 
 /**
  * Nimmt `$this` explizit entgegen statt über `test()` zu gehen: `test()` liefert
@@ -35,12 +23,25 @@ function navConfig(): array
  */
 function settings(TestCase $test): TestResponse
 {
-    return $test->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.settings'))->assertOk();
+    return $test->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.ich.einstellungen'))->assertOk();
 }
 
-test('Web-Nav: der Einstellungen-Tab zeigt auf den verschmolzenen group.settings-Screen', function () {
-    expect(collect(navConfig())->firstWhere('key', 'settings')['route'])
-        ->toBe('group.settings');
+test('there is EXACTLY ONE settings place, and every way in names it from the same line', function () {
+    // Until P2 the question here was where the settings TAB of the bottom nav points. That
+    // tab no longer exists (three fixed slots, Concept C), and neither does the `nav`
+    // registry it came from. What remains — and what is the actual promise of this file — is:
+    // ONE place, and every way in reads it from `settings_route`.
+    expect(config('group.settings_route'))->toBe('group.ich.einstellungen');
+
+    // Since P2 the row on „Ich" is the visible main path (the avatar leads there).
+    $ich = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+        ->get(route('group.ich'))->assertOk()->getContent();
+
+    expect($ich)->toContain('href="'.route('group.ich.einstellungen').'"');
+
+    // And the hub answers 200 WITHOUT a session as well: its sections gate client-side (D4);
+    // a server redirect would take the app's state away from it.
+    $this->get(route('group.ich.einstellungen'))->assertOk();
 });
 
 test('Konto & Identität: npub kopierbar + Signer-Typ + Neu verbinden', function () {
