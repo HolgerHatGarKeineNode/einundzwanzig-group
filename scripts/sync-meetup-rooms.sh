@@ -22,7 +22,10 @@
 #          stattdessen in der UUID, die Kategorie als Praefix im `about`.
 #
 # Nutzung:  scripts/sync-meetup-rooms.sh
-# Env-Overrides: NAK, WS, ROOT, ENV_FILE, GATE_API, RELAY_MODE
+# Env-Overrides: NAK, WS, ROOT, ENV_FILE, GATE_API, RELAY_MODE, NOSTR_ROOM_NSEC
+#   NOSTR_ROOM_NSEC = Schreib-Key für 9007/9002 (Default: NOSTR_BOT_NSEC). zooid
+#   erlaubt Raum-Anlage/-Edit nur Owner (info.pubkey) oder Tenant-Self — der
+#   Bot-Key kann ausschließlich lesen; siehe ROOM_KEY-Kommentar unten.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,6 +55,17 @@ BOT=$(grep '^NOSTR_BOT_NSEC=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'
 GATE_TOKEN=$(grep '^VEREIN_GATE_TOKEN=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'"'')
 [ -z "$BOT" ] && { echo "FEHLER: NOSTR_BOT_NSEC leer/fehlt in $ENV_FILE" >&2; exit 1; }
 [ -z "$GATE_TOKEN" ] && { echo "FEHLER: VEREIN_GATE_TOKEN leer/fehlt in $ENV_FILE" >&2; exit 1; }
+
+# Schreib-Schlüssel für die Raumanlage (9007/9002): zooid erlaubt das NUR dem
+# Relay-Owner (info.pubkey) oder dem Tenant-Self (publik aus dem Config-`secret`
+# abgeleitet) — siehe CanManage in groups.go. Der Bot-Key ist bloß Member: Lesen
+# ja, Anlegen nie. Alle Bestandsräume sind vom Self-Key signiert; der Anlage-Pfad
+# war deshalb latent defekt, sobald er mit dem Bot-Key lief, und fiel erst auf,
+# als die ersten NEUEN Meetups gegatet wurden. NOSTR_ROOM_NSEC hält den
+# anlageberechtigten Schlüssel bereit (Prod: der zooid-Tenant-Self-Key); ohne ihn
+# fällt der WRITE-Pfad wie bisher auf den Bot-Key zurück.
+ROOM_KEY="${NOSTR_ROOM_NSEC:-}"
+[ -z "$ROOM_KEY" ] && ROOM_KEY="$BOT"
 
 RELAY_MODE="${RELAY_MODE:-zooid}"
 case "$RELAY_MODE" in
@@ -191,14 +205,14 @@ while IFS=$'\t' read -r H ID NAME SLUG LOGO; do
     fi
 
     # 9007 create (idempotent)
-    timeout 30 "$NAK" event --auth --sec "$BOT" -k 9007 -t "h=$H" "$WS" </dev/null >/dev/null 2>&1
+    timeout 30 "$NAK" event --auth --sec "$ROOM_KEY" -k 9007 -t "h=$H" "$WS" </dev/null >/dev/null 2>&1
 
     # 9002 metadata: ALLE Tags in EINEM Edit (zooid ersetzt das komplette 39000 pro 9002).
     ARGS=(-t "h=$H" -t "name=$NAME")
     [ -n "$LOGO" ] && ARGS+=(-t "picture=$LOGO")
     ARGS+=(-t "t=meetup" -t "i=meetup:$ID" -t "meetup_slug=$SLUG" -t "private")
 
-    if timeout 30 "$NAK" event --auth --sec "$BOT" -k 9002 "${ARGS[@]}" "$WS" </dev/null 2>&1 | grep -qi success; then
+    if timeout 30 "$NAK" event --auth --sec "$ROOM_KEY" -k 9002 "${ARGS[@]}" "$WS" </dev/null 2>&1 | grep -qi success; then
         created=$((created + 1))
         printf '  ok   %s (%s) — Raum neu angelegt\n' "$SLUG" "$H"
     else
