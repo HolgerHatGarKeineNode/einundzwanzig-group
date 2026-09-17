@@ -25,7 +25,8 @@
 # Env-Overrides: NAK, WS, ROOT, ENV_FILE, GATE_API, RELAY_MODE, NOSTR_ROOM_NSEC
 #   NOSTR_ROOM_NSEC = Schreib-Key für 9007/9002 (Default: NOSTR_BOT_NSEC). zooid
 #   erlaubt Raum-Anlage/-Edit nur Owner (info.pubkey) oder Tenant-Self — der
-#   Bot-Key kann ausschließlich lesen; siehe ROOM_KEY-Kommentar unten.
+#   Bot-Key kann ausschließlich lesen; siehe ROOM_KEY-Kommentar unten. Auflösung
+#   wie bei den anderen Keys: env-Override > ENV_FILE > Default.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,9 +63,10 @@ GATE_TOKEN=$(grep '^VEREIN_GATE_TOKEN=' "$ENV_FILE" | head -1 | cut -d= -f2- | t
 # ja, Anlegen nie. Alle Bestandsräume sind vom Self-Key signiert; der Anlage-Pfad
 # war deshalb latent defekt, sobald er mit dem Bot-Key lief, und fiel erst auf,
 # als die ersten NEUEN Meetups gegatet wurden. NOSTR_ROOM_NSEC hält den
-# anlageberechtigten Schlüssel bereit (Prod: der zooid-Tenant-Self-Key); ohne ihn
-# fällt der WRITE-Pfad wie bisher auf den Bot-Key zurück.
-ROOM_KEY="${NOSTR_ROOM_NSEC:-}"
+# anlageberechtigten Schlüssel bereit (Prod: der zooid-Tenant-Self-Key, in der
+# webclient-.env neben dem Bot-Key); Auflösung env > ENV_FILE > Bot-Fallback,
+# denn der Scheduler exportiert nichts.
+ROOM_KEY="${NOSTR_ROOM_NSEC:-$(grep '^NOSTR_ROOM_NSEC=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"'"'"'')}"
 [ -z "$ROOM_KEY" ] && ROOM_KEY="$BOT"
 
 RELAY_MODE="${RELAY_MODE:-zooid}"
