@@ -4,6 +4,7 @@ use App\Http\Controllers\ImageProxyController;
 use GuzzleHttp\Psr7\Request as PsrRequest;
 use GuzzleHttp\Psr7\Response as PsrResponse;
 use GuzzleHttp\Psr7\Uri;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -222,6 +223,19 @@ it('sends no raw curl options and caps size via on_headers instead (Guzzle 8 all
     // Ein Byte darüber: Abbruch, bevor der Body überhaupt lädt.
     expect(fn () => $onHeaders(new PsrResponse(200, ['Content-Length' => (string) (8 * 1024 * 1024 + 1)])))
         ->toThrow(RuntimeException::class, 'image exceeds size limit');
+});
+
+it('logs why a fetch failed instead of failing silently', function () {
+    // Regression Guzzle-8-Ausfall: der catch schluckte die Exception wochenlang
+    // ohne Log — der Ausfall war als 502 sichtbar, die Ursache nirgends.
+    Http::fake(fn () => throw new ConnectionException('DNS failure'));
+
+    Log::shouldReceive('warning')->once()->withArgs(
+        fn (string $message, array $context) => str_contains($context['exception'], 'ConnectionException')
+    );
+
+    // IP statt Host: besteht isSafeUrl ohne DNS-Lookup im Testlauf.
+    $this->get('/img/avatar?src='.urlencode('https://1.1.1.1/a.png'))->assertStatus(502);
 });
 
 /*

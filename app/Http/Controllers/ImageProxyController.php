@@ -213,7 +213,15 @@ class ImageProxyController extends Controller
                 : $image->scaleDown($spec['w'], $spec['h']);
 
             return [(string) $image->encode(new WebpEncoder(quality: 80)), 'image/webp'];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            // Der Ausnahmefresser war der Grund, warum der Guzzle-8-Allow-List-Bruch
+            // (CURLOPT_MAXFILESIZE, s. fetchOptions) wochenlang als stilles 502
+            // durchging — Ausfall und Ursache brauchen denselben Kanal.
+            Log::warning('Bild-Proxy: Fetch oder Encode fehlgeschlagen', [
+                'url' => $url,
+                'exception' => $e::class.': '.$e->getMessage(),
+            ]);
+
             return null;
         }
     }
