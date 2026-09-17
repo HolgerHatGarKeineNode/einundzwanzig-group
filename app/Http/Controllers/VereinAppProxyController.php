@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Support\VereinNip98;
+use App\Support\VereinUpstreamBudget;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
@@ -52,6 +54,13 @@ use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
  * ({@see VereinNip98::verifyWithoutSession()}) and forwards the header byte
  * for byte. Without a valid event nothing leaves this server. An unsigned
  * app `/me` would be exactly the status oracle the Verein refuses to offer.
+ *
+ * What the signature does NOT do: bind the event to whoever presents it.
+ * There is no session and no client secret on this branch, so the event is a
+ * bearer credential for its short lifetime (60 s window, single use at the
+ * Verein). Accepted residual risk: anyone who obtains a member's fresh,
+ * unspent read event can redeem it here once and read that member's status
+ * and payments — inherent to a keyless app client.
  */
 class VereinAppProxyController
 {
@@ -60,6 +69,9 @@ class VereinAppProxyController
 
     /** Path prefix of the SIGNED membership branch (NIP-98 required there). */
     private const SIGNED_API_PREFIX = '/api/v1/membership';
+
+    /** Signed reads per verified signer; checked only after the signature passed. */
+    private const SIGNER_READS_PER_MINUTE = 6;
 
     /**
      * Gleiche Grenzen wie der Web-Proxy: endlich, ohne retry — der Verein
@@ -150,6 +162,10 @@ class VereinAppProxyController
             $pending = $pending->withBody($body, 'application/json');
         }
 
+        if (($exhausted = VereinUpstreamBudget::reserve()) !== null) {
+            return $exhausted;
+        }
+
         try {
             $response = $pending->send(Str::upper($request->method()), $baseUrl.self::API_PREFIX.$path);
         } catch (ConnectionException) {
@@ -190,10 +206,27 @@ class VereinAppProxyController
         $target = $baseUrl.self::SIGNED_API_PREFIX.$path;
 
         try {
-            VereinNip98::verifyWithoutSession($request, $target);
+            $signer = VereinNip98::verifyWithoutSession($request, $target);
         } catch (HttpResponseException $denied) {
             return $denied->getResponse();
         }
+
+        // Per-signer bucket, counted only for VERIFIED signatures: a forged
+        // claim never reaches this line, so nobody can fill a chosen member's
+        // bucket without that member's key. Checked before the shared budget
+        // and hit only after it was granted, so a refusal by either costs the
+        // other nothing.
+        $signerKey = 'verein-app-read:signer:'.$signer;
+
+        if (RateLimiter::tooManyAttempts($signerKey, self::SIGNER_READS_PER_MINUTE)) {
+            return VereinUpstreamBudget::tooManyAttempts($signerKey);
+        }
+
+        if (($exhausted = VereinUpstreamBudget::reserve()) !== null) {
+            return $exhausted;
+        }
+
+        RateLimiter::hit($signerKey, 60);
 
         try {
             $response = Http::withHeaders([

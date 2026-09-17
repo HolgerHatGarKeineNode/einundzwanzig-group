@@ -2,7 +2,6 @@
 
 namespace App\Providers;
 
-use App\Support\VereinNip98;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -78,6 +77,11 @@ class AppServiceProvider extends ServiceProvider
      *     dieser IP an die api-Gruppe des Vereins geht (z.B. ein Abgleich gegen
      *     `GET /api/members/{year}`) — er läge im selben Eimer.
      *
+     *     Update (D11): this bucket moved out of the limiter into
+     *     VereinUpstreamBudget. It is now ONE budget for the web proxy, the app
+     *     proxy and the signed app reads together, and it counts only calls
+     *     that are actually forwarded, not requests refused by a local check.
+     *
      * Nicht gedeckelt wird hier das Invoice-Kontingent (3/Tag pro Pubkey). Das
      * hält der Verein selbst, und sein 429 muss unverfälscht durchkommen: ein
      * zweiter Zähler auf demselben Ereignis erzeugt nur eine zweite Wahrheit,
@@ -95,9 +99,11 @@ class AppServiceProvider extends ServiceProvider
             // gemeinsamen Eimer, was wie ein funktionierendes Limit AUSSIEHT.
             $key = is_string($pubkey) && $pubkey !== '' ? $pubkey : (string) $request->ip();
 
+            // (2) is no longer a bucket here: it is VereinUpstreamBudget, shared
+            // with the app branches and counted only for calls that are
+            // actually forwarded.
             return [
                 Limit::perMinute(10)->by('verein-proxy:pubkey:'.$key),
-                Limit::perMinute(30)->by('verein-proxy:instance'),
             ];
         });
 
@@ -127,24 +133,17 @@ class AppServiceProvider extends ServiceProvider
 
         /*
          * D11 — `throttle:verein-app-read` for the signed app reads (`/me`,
-         * `/payments`). Three buckets:
+         * `/payments`): only the cheap per-IP bucket in front, 30/min, which
+         * also absorbs garbage before any signature check.
          *
-         * (1) per signing pubkey, 6/min — every call costs the user a fresh
-         *     signature (with Amber/NIP-46 a confirmation), the app caches the
-         *     result for 10 min; 6/min is abuse protection, not the budget.
-         *     The key is the pubkey the event CLAIMS; why the signature is not
-         *     checked at this point is in VereinNip98::claimedSigner(). No
-         *     parseable event ⇒ keyed on the IP, never a shared literal.
-         * (2) per IP, 30/min.
-         * (3) instance-wide, 120/min.
+         * The two other limits sit in the controller, because they may only
+         * count what passed the pre-check: 6/min per VERIFIED signer (a key
+         * taken from an unverified header would let anyone lock out a chosen
+         * member), and the shared VereinUpstreamBudget toward the Verein.
          */
         RateLimiter::for('verein-app-read', function (Request $request): array {
-            $signer = VereinNip98::claimedSigner($request);
-
             return [
-                Limit::perMinute(6)->by('verein-app-read:pubkey:'.($signer ?? 'ip:'.$request->ip())),
                 Limit::perMinute(30)->by('verein-app-read:ip:'.$request->ip()),
-                Limit::perMinute(120)->by('verein-app-read:instance'),
             ];
         });
     }

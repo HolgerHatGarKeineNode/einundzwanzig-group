@@ -211,7 +211,7 @@ it('answers 503 and calls nothing when unconfigured', function (string $route, s
     Http::assertNothingSent();
 })->with('signed read routes');
 
-it('throttles per signing pubkey: 6 per minute, and a second pubkey has its own bucket', function () {
+it('throttles per verified signer: 6 per minute, and a second pubkey has its own bucket', function () {
     Http::fake([APP_READ_BASE.'/*' => Http::response('{}', 200)]);
 
     $target = APP_READ_BASE.'/api/v1/membership/me';
@@ -228,44 +228,52 @@ it('throttles per signing pubkey: 6 per minute, and a second pubkey has its own 
         $send($alice, '198.51.100.1')->assertOk();
     }
 
-    $send($alice, '198.51.100.1')->assertStatus(429);
-    // Keyed on the pubkey, not on the IP: a different IP does not help Alice …
+    $blocked = $send($alice, '198.51.100.1')->assertStatus(429)->assertHeader('Cache-Control', 'no-store, private');
+    expect($blocked->headers->has('Retry-After'))->toBeTrue();
+    // Keyed on the signer, not on the IP: a different IP does not help Alice …
     $send($alice, '198.51.100.2')->assertStatus(429);
     // … and Alice's bucket does not touch Bob, on the same IP.
     $send($bob, '198.51.100.1')->assertOk();
+
+    // Refused signer requests never reached the Verein.
+    Http::assertSentCount(7);
 });
 
-it('throttles per IP at 30 per minute across pubkeys', function () {
+it('does not let forged claims lock out the real signer', function () {
     Http::fake([APP_READ_BASE.'/*' => Http::response('{}', 200)]);
 
-    $target = APP_READ_BASE.'/api/v1/membership/payments';
+    $target = APP_READ_BASE.'/api/v1/membership/me';
+    $alice = appReadPrivateKey();
+    $alicePubkey = signAppReadAuth($target, privateKey: $alice)['pubkey'];
 
-    for ($i = 0; $i < 30; $i++) {
-        $this->call('GET', '/api/app/verein/payments', [], [], [], [
+    // Well-formed events that CLAIM Alice, signed by someone else — well past
+    // her 6/min, spread over IPs so the per-IP bucket does not stop them first.
+    for ($i = 0; $i < 20; $i++) {
+        $this->call('GET', '/api/app/verein/me', [], [], [], [
             'HTTP_ACCEPT' => 'application/json',
-            'HTTP_AUTHORIZATION' => appReadHeader(signAppReadAuth($target)),
-            'REMOTE_ADDR' => '198.51.100.7',
-        ])->assertOk();
+            'HTTP_AUTHORIZATION' => appReadHeader(signAppReadAuth($target, override: ['pubkey' => $alicePubkey])),
+            'REMOTE_ADDR' => '198.51.100.'.(100 + $i),
+        ])->assertUnauthorized();
     }
 
-    $this->call('GET', '/api/app/verein/payments', [], [], [], [
+    $this->call('GET', '/api/app/verein/me', [], [], [], [
         'HTTP_ACCEPT' => 'application/json',
-        'HTTP_AUTHORIZATION' => appReadHeader(signAppReadAuth($target)),
-        'REMOTE_ADDR' => '198.51.100.7',
-    ])->assertStatus(429);
-
-    $this->call('GET', '/api/app/verein/payments', [], [], [], [
-        'HTTP_ACCEPT' => 'application/json',
-        'HTTP_AUTHORIZATION' => appReadHeader(signAppReadAuth($target)),
-        'REMOTE_ADDR' => '198.51.100.8',
+        'HTTP_AUTHORIZATION' => appReadHeader(signAppReadAuth($target, privateKey: $alice)),
+        'REMOTE_ADDR' => '198.51.100.1',
     ])->assertOk();
+
+    Http::assertSentCount(1);
 });
 
-it('keys header-less requests on the IP instead of one shared bucket', function () {
-    for ($i = 0; $i < 6; $i++) {
+it('puts a cheap per-IP bucket of 30 per minute in front of every check', function () {
+    Http::fake();
+
+    for ($i = 0; $i < 30; $i++) {
         $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.20'])->getJson('/api/app/verein/me')->assertUnauthorized();
     }
 
     $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.20'])->getJson('/api/app/verein/me')->assertStatus(429);
     $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.21'])->getJson('/api/app/verein/me')->assertUnauthorized();
+
+    Http::assertNothingSent();
 });

@@ -92,8 +92,10 @@ final class VereinNip98
      * checks, and forwarding it would be caller input on the signed branch.
      *
      * The signature is verified here as well, although the Verein repeats it:
-     * an event that is going to fail there anyway must not spend a request of
-     * the Verein's per-IP quota, which every proxy call shares.
+     * a forged or tampered event is refused without an upstream call, and the
+     * per-signer bucket only ever counts verified pubkeys. This does NOT
+     * protect the Verein's shared per-IP quota — anyone can sign valid events
+     * with throwaway keys; that quota is guarded by VereinUpstreamBudget.
      *
      * @param  string  $targetUrl  absolute Verein URL, built server-side
      * @return string the signing pubkey (hex, 64)
@@ -111,29 +113,6 @@ final class VereinNip98
         self::assertEventFits($request, $event, $targetUrl, '');
 
         return $event['pubkey'];
-    }
-
-    /**
-     * The pubkey an Authorization header CLAIMS as signer, for rate-limit keys.
-     *
-     * Structure and kind only; the signature is NOT checked here. A Schnorr
-     * verification costs about 40 ms of CPU (measured 2026-09-17 with
-     * swentel/nostr-php, 20 runs), and a limiter key is computed before the
-     * limiter decides — checking it here would hand every over-limit request
-     * that cost for free. A forged claim can at most fill the bucket of the
-     * claimed pubkey, which the instance-wide bucket of the same limiter
-     * already allows anyone to do; the signature is enforced before any
-     * upstream call by {@see verifyWithoutSession()}.
-     */
-    public static function claimedSigner(Request $request): ?string
-    {
-        try {
-            $event = self::decode($request);
-        } catch (HttpResponseException) {
-            return null;
-        }
-
-        return $event['kind'] === self::EVENT_KIND ? $event['pubkey'] : null;
     }
 
     /**

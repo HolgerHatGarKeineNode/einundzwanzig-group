@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Support\VereinNip98;
+use App\Support\VereinUpstreamBudget;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
@@ -218,6 +219,11 @@ class VereinProxyController
 
         if ($body !== '') {
             $pending = $pending->withBody($body, (string) $request->header('Content-Type'));
+        }
+
+        // Shared upstream budget, taken only now that every local check passed.
+        if (($exhausted = VereinUpstreamBudget::reserve()) !== null) {
+            return $exhausted;
         }
 
         try {
