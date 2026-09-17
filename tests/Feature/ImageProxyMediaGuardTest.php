@@ -195,6 +195,36 @@ it('refuses a redirect that lands on the workspace relay', function () {
 });
 
 /*
+ * ── Regression Guzzle 8 (Prod-Ausfall 2026-09: allerorts 502) ──
+ *
+ * `CURLOPT_MAXFILESIZE` steht nicht auf der Allow-List der cURL-Handler; Guzzle 8
+ * (Dep-Refresh 0fb50a1, 2026-09-11) wirft dafür eine InvalidArgumentException —
+ * bei JEDEM Fetch, von `fetchAndEncode` geschluckt, als abort(502) sichtbar.
+ * `Http::fake()` umgeht den cURL-Handler komplett, deshalb blieb die Suite grün,
+ * während Prod brach. Zwei Wachen: keine rohen cURL-Optionen mehr (Allow-list-sicher
+ * per Konstruktion) UND das Limit trägt on_headers weiter.
+ */
+it('sends no raw curl options and caps size via on_headers instead (Guzzle 8 allow-list)', function () {
+    $options = (function (): array {
+        $method = new ReflectionMethod(ImageProxyController::class, 'fetchOptions');
+
+        return $method->invoke(new ImageProxyController);
+    })();
+
+    expect($options)->not->toHaveKey('curl');
+
+    $onHeaders = $options['on_headers'];
+    expect($onHeaders)->toBeCallable();
+
+    // Angemeldete Größe exakt am Limit: darf durch.
+    $onHeaders(new PsrResponse(200, ['Content-Length' => (string) (8 * 1024 * 1024)]));
+
+    // Ein Byte darüber: Abbruch, bevor der Body überhaupt lädt.
+    expect(fn () => $onHeaders(new PsrResponse(200, ['Content-Length' => (string) (8 * 1024 * 1024 + 1)])))
+        ->toThrow(RuntimeException::class, 'image exceeds size limit');
+});
+
+/*
  * ── Audit 2026-08-19: die zwei Befunde, die den Riegel still hätten aussetzen können ──
  */
 

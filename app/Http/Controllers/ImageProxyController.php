@@ -232,7 +232,18 @@ class ImageProxyController extends Controller
     private function fetchOptions(): array
     {
         return [
-            'curl' => [CURLOPT_MAXFILESIZE => self::MAX_BYTES],
+            // Größenlimit: Guzzle 8 erlaub-listet rohe cURL-Optionen und wirft bei
+            // `CURLOPT_MAXFILESIZE` eine InvalidArgumentException — das warf ab dem
+            // Dep-Refresh (Guzzle 8.2.0, 0fb50a1) JEDEN Fetch auf 502, weil
+            // `fetchAndEncode` die Ausnahme schluckte. Ersatz: Abbruch, sobald der
+            // Server seine Größe im Header verrät; die strlen-Grenze in
+            // `fetchAndEncode` bleibt Rückfalloch fürs Chunked-Streaming.
+            'on_headers' => function (ResponseInterface $response): void {
+                $len = (int) $response->getHeaderLine('Content-Length');
+                if ($len > self::MAX_BYTES) {
+                    throw new \RuntimeException('image exceeds size limit');
+                }
+            },
             'allow_redirects' => [
                 'max' => 3,
                 'strict' => true,
