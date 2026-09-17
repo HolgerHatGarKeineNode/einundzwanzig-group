@@ -17,6 +17,10 @@ use Illuminate\Support\Facades\Route;
  * CSRF — der Aufrufer ist die native App, kein Browser unserer Instanz) und
  * NUR, wenn die App nicht im NativePHP-Lauf ist (der Mobile-Build trägt
  * weder Schlüssel noch Proxy).
+ *
+ * D11 — plus two signed READ routes in their own group: they forward to the
+ * NIP-98 branch `/api/v1/membership/me|payments` and are throttled per
+ * signing pubkey (`verein-app-read`), not per body pubkey — a GET has no body.
  */
 Route::middleware('throttle:verein-app-proxy')
     ->name('verein-app.')
@@ -26,4 +30,11 @@ Route::middleware('throttle:verein-app-proxy')
         Route::post('/payments/{year}/invoice', [VereinAppProxyController::class, 'invoice'])
             ->where('year', '[0-9]{4}')
             ->name('payments.invoice');
+    });
+
+Route::middleware('throttle:verein-app-read')
+    ->name('verein-app.')
+    ->group(function (): void {
+        Route::get('/me', [VereinAppProxyController::class, 'me'])->name('me');
+        Route::get('/payments', [VereinAppProxyController::class, 'payments'])->name('payments');
     });

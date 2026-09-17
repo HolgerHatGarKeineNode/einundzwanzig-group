@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\VereinNip98;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -109,11 +110,41 @@ class AppServiceProvider extends ServiceProvider
          * VEREIN selbst (3/Tag pro Pubkey, dort mit demselben Fallback).
          */
         RateLimiter::for('verein-app-proxy', function (Request $request): array {
-            $claimed = (string) $request->json('pubkey', '');
+            $claimed = $request->json('pubkey');
+
+            // Without a well-formed body pubkey the subject bucket falls back to
+            // the IP. It used to be one literal `none` key: every body-less GET
+            // (`/config`) of every caller shared a single 20/min bucket.
+            $subject = is_string($claimed) && preg_match('/^[0-9a-f]{64}\z/', $claimed) === 1
+                ? $claimed
+                : 'ip:'.$request->ip();
 
             return [
-                Limit::perMinute(20)->by('verein-app-proxy:pubkey:'.(preg_match('/^[0-9a-f]{64}$/', $claimed) === 1 ? $claimed : 'none')),
+                Limit::perMinute(20)->by('verein-app-proxy:pubkey:'.$subject),
                 Limit::perMinute(60)->by('verein-app-proxy:ip:'.$request->ip()),
+            ];
+        });
+
+        /*
+         * D11 — `throttle:verein-app-read` for the signed app reads (`/me`,
+         * `/payments`). Three buckets:
+         *
+         * (1) per signing pubkey, 6/min — every call costs the user a fresh
+         *     signature (with Amber/NIP-46 a confirmation), the app caches the
+         *     result for 10 min; 6/min is abuse protection, not the budget.
+         *     The key is the pubkey the event CLAIMS; why the signature is not
+         *     checked at this point is in VereinNip98::claimedSigner(). No
+         *     parseable event ⇒ keyed on the IP, never a shared literal.
+         * (2) per IP, 30/min.
+         * (3) instance-wide, 120/min.
+         */
+        RateLimiter::for('verein-app-read', function (Request $request): array {
+            $signer = VereinNip98::claimedSigner($request);
+
+            return [
+                Limit::perMinute(6)->by('verein-app-read:pubkey:'.($signer ?? 'ip:'.$request->ip())),
+                Limit::perMinute(30)->by('verein-app-read:ip:'.$request->ip()),
+                Limit::perMinute(120)->by('verein-app-read:instance'),
             ];
         });
     }
