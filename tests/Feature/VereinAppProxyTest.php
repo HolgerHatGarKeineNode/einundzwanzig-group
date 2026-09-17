@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use App\Support\VereinUpstreamBudget;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 
 /*
 |--------------------------------------------------------------------------
@@ -135,4 +137,65 @@ it('never puts the API key into a response body', function () {
     expect($response->getContent())->not->toContain(APP_PROXY_KEY);
 
     Http::assertSent(fn (ClientRequest $r): bool => $r->hasHeader('X-Api-Key', APP_PROXY_KEY));
+});
+
+/**
+ * These limiter tests send more calls than the upstream budgets allow; the
+ * budgets are emptied between calls so only the limiter under test decides
+ * (the budgets have their own tests in VereinUpstreamBudgetTest).
+ */
+function resetUpstreamBudgets(): void
+{
+    RateLimiter::clear(VereinUpstreamBudget::KEY);
+    RateLimiter::clear(VereinUpstreamBudget::ANONYMOUS_KEY);
+}
+
+/*
+ * Limiter key of `throttle:verein-app-proxy`. A body-less request used to land
+ * in ONE literal `pubkey:none` bucket shared by every caller, so 20 `/config`
+ * calls anywhere locked `/config` for everyone.
+ */
+it('does not share one subject bucket between body-less requests of different IPs', function () {
+    Http::fake([APP_PROXY_BASE.'/*' => Http::response(['ok' => true], 200)]);
+
+    for ($i = 0; $i < 20; $i++) {
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.1'])
+            ->getJson('/api/app/verein/config')
+            ->assertOk();
+
+        resetUpstreamBudgets();
+    }
+
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.1'])
+        ->getJson('/api/app/verein/config')
+        ->assertStatus(429);
+
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.2'])
+        ->getJson('/api/app/verein/config')
+        ->assertOk();
+});
+
+it('still keys a body pubkey across IPs', function () {
+    Http::fake([APP_PROXY_BASE.'/*' => Http::response(['ok' => true], 201)]);
+
+    $body = ['pubkey' => str_repeat('d', 64)];
+
+    for ($i = 0; $i < 20; $i++) {
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.'.(10 + $i)])
+            ->postJson('/api/app/verein/applications', $body)
+            ->assertCreated();
+
+        resetUpstreamBudgets();
+    }
+
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.99'])
+        ->postJson('/api/app/verein/applications', $body)
+        ->assertStatus(429);
+});
+
+it('does not fail on a body pubkey that is not a string', function () {
+    Http::fake([APP_PROXY_BASE.'/*' => Http::response(['message' => 'validation.failed'], 422)]);
+
+    $this->postJson('/api/app/verein/applications', ['pubkey' => ['a']])
+        ->assertStatus(422);
 });

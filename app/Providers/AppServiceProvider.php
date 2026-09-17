@@ -77,6 +77,11 @@ class AppServiceProvider extends ServiceProvider
      *     dieser IP an die api-Gruppe des Vereins geht (z.B. ein Abgleich gegen
      *     `GET /api/members/{year}`) — er läge im selben Eimer.
      *
+     *     Update (D11): this bucket moved out of the limiter into
+     *     VereinUpstreamBudget. It is now ONE budget for the web proxy, the app
+     *     proxy and the signed app reads together, and it counts only calls
+     *     that are actually forwarded, not requests refused by a local check.
+     *
      * Nicht gedeckelt wird hier das Invoice-Kontingent (3/Tag pro Pubkey). Das
      * hält der Verein selbst, und sein 429 muss unverfälscht durchkommen: ein
      * zweiter Zähler auf demselben Ereignis erzeugt nur eine zweite Wahrheit,
@@ -94,9 +99,11 @@ class AppServiceProvider extends ServiceProvider
             // gemeinsamen Eimer, was wie ein funktionierendes Limit AUSSIEHT.
             $key = is_string($pubkey) && $pubkey !== '' ? $pubkey : (string) $request->ip();
 
+            // (2) is no longer a bucket here: it is VereinUpstreamBudget, shared
+            // with the app branches and counted only for calls that are
+            // actually forwarded.
             return [
                 Limit::perMinute(10)->by('verein-proxy:pubkey:'.$key),
-                Limit::perMinute(30)->by('verein-proxy:instance'),
             ];
         });
 
@@ -109,11 +116,34 @@ class AppServiceProvider extends ServiceProvider
          * VEREIN selbst (3/Tag pro Pubkey, dort mit demselben Fallback).
          */
         RateLimiter::for('verein-app-proxy', function (Request $request): array {
-            $claimed = (string) $request->json('pubkey', '');
+            $claimed = $request->json('pubkey');
+
+            // Without a well-formed body pubkey the subject bucket falls back to
+            // the IP. It used to be one literal `none` key: every body-less GET
+            // (`/config`) of every caller shared a single 20/min bucket.
+            $subject = is_string($claimed) && preg_match('/^[0-9a-f]{64}\z/', $claimed) === 1
+                ? $claimed
+                : 'ip:'.$request->ip();
 
             return [
-                Limit::perMinute(20)->by('verein-app-proxy:pubkey:'.(preg_match('/^[0-9a-f]{64}$/', $claimed) === 1 ? $claimed : 'none')),
+                Limit::perMinute(20)->by('verein-app-proxy:pubkey:'.$subject),
                 Limit::perMinute(60)->by('verein-app-proxy:ip:'.$request->ip()),
+            ];
+        });
+
+        /*
+         * D11 — `throttle:verein-app-read` for the signed app reads (`/me`,
+         * `/payments`): only the cheap per-IP bucket in front, 30/min, which
+         * also absorbs garbage before any signature check.
+         *
+         * The two other limits sit in the controller, because they may only
+         * count what passed the pre-check: 6/min per VERIFIED signer (a key
+         * taken from an unverified header would let anyone lock out a chosen
+         * member), and the shared VereinUpstreamBudget toward the Verein.
+         */
+        RateLimiter::for('verein-app-read', function (Request $request): array {
+            return [
+                Limit::perMinute(30)->by('verein-app-read:ip:'.$request->ip()),
             ];
         });
     }

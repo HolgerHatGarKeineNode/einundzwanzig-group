@@ -34,6 +34,11 @@ use Throwable;
  * Diagnose in P5 mehr wert als die Ununterscheidbarkeit, die der Verein an
  * seiner offenen Kante zu Recht führt.
  *
+ * The session-less app pre-check ({@see verifyWithoutSession()}) returns the
+ * same messages to callers who are NOT signed in. That is accepted: every
+ * message names only the failed field, the expected value never leaves the
+ * server, and the caller can build any of these events himself.
+ *
  * @phpstan-type Nip98Event array{id: string, pubkey: string, created_at: int, kind: int, tags: array<int, array<int, string>>, content: string, sig: string}
  */
 final class VereinNip98
@@ -64,6 +69,61 @@ final class VereinNip98
     {
         $event = self::decode($request);
 
+        self::assertEventFits($request, $event, $targetUrl, $rawBody);
+
+        // 7. Die Bindung an den angemeldeten Nutzer. Ohne sie ist die Whitelist
+        // nur eine Auswahl der missbrauchbaren Endpunkte: jeder mit einer Session
+        // könnte ein fremdes (z.B. abgefangenes) Event einlösen und auf fremde
+        // Vereinsakten zugreifen.
+        if (! hash_equals($sessionPubkey, $event['pubkey'])) {
+            throw new HttpResponseException(response()->json([
+                'message' => __('Der Ausweis gehört zu einem anderen Konto.'),
+            ], 403));
+        }
+    }
+
+    /**
+     * Pre-check for the session-less app proxy (`GET /api/app/verein/me|payments`).
+     *
+     * Same steps 1-6 as {@see verify()}, without the session binding: the app
+     * has no session here, and the Verein binds the answer to the signing
+     * pubkey itself. The two read endpoints take no body, so any body is
+     * refused — it could not have been covered by the signature the Verein
+     * checks, and forwarding it would be caller input on the signed branch.
+     *
+     * The signature is verified here as well, although the Verein repeats it:
+     * a forged or tampered event is refused without an upstream call, and the
+     * per-signer bucket only ever counts verified pubkeys. This does NOT
+     * protect the Verein's shared per-IP quota — anyone can sign valid events
+     * with throwaway keys; that quota is guarded by VereinUpstreamBudget.
+     *
+     * @param  string  $targetUrl  absolute Verein URL, built server-side
+     * @return string the signing pubkey (hex, 64)
+     *
+     * @throws HttpResponseException 401
+     */
+    public static function verifyWithoutSession(Request $request, string $targetUrl): string
+    {
+        $event = self::decode($request);
+
+        if ($request->getContent() !== '') {
+            self::deny(__('Der Ausweis passt nicht zum Inhalt.'));
+        }
+
+        self::assertEventFits($request, $event, $targetUrl, '');
+
+        return $event['pubkey'];
+    }
+
+    /**
+     * Steps 1-6: kind, method, `u`, freshness, payload, signature.
+     *
+     * @param  Nip98Event  $event
+     *
+     * @throws HttpResponseException 401
+     */
+    private static function assertEventFits(Request $request, array $event, string $targetUrl, string $rawBody): void
+    {
         // 1. Kind.
         if ($event['kind'] !== self::EVENT_KIND) {
             self::deny(__('Falscher Event-Typ.'));
@@ -104,16 +164,6 @@ final class VereinNip98
         $json = json_encode($event, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if ($json === false || ! (new Event)->verify($json)) {
             self::deny(__('Ungültige Signatur.'));
-        }
-
-        // 7. Die Bindung an den angemeldeten Nutzer. Ohne sie ist die Whitelist
-        // nur eine Auswahl der missbrauchbaren Endpunkte: jeder mit einer Session
-        // könnte ein fremdes (z.B. abgefangenes) Event einlösen und auf fremde
-        // Vereinsakten zugreifen.
-        if (! hash_equals($sessionPubkey, $event['pubkey'])) {
-            throw new HttpResponseException(response()->json([
-                'message' => __('Der Ausweis gehört zu einem anderen Konto.'),
-            ], 403));
         }
     }
 
