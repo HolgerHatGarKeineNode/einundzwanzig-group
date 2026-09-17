@@ -35,22 +35,72 @@ final class VereinUpstreamBudget
 
     public const MAX_PER_MINUTE = 30;
 
+    /**
+     * Sub-budget for the UNSIGNED app routes (config, applications, invoice).
+     * Anyone can call them without a key or session, so without this cap a
+     * single caller could drain the whole shared budget and block web joins,
+     * payments and signed reads for everyone. Anonymous traffic gets at most
+     * this share of MAX_PER_MINUTE.
+     */
+    public const ANONYMOUS_KEY = 'verein-upstream:anon';
+
+    public const ANONYMOUS_MAX_PER_MINUTE = 10;
+
     private const DECAY_SECONDS = 60;
 
     /**
-     * Takes one request from the budget.
+     * Takes one request from the shared budget (session-verified web calls and
+     * signed app reads).
      *
      * @return JsonResponse|null null = reserved, go ahead; otherwise the 429 to return
      */
     public static function reserve(): ?JsonResponse
     {
-        if (RateLimiter::tooManyAttempts(self::KEY, self::MAX_PER_MINUTE)) {
-            return self::tooManyAttempts(self::KEY);
+        return self::reserveAll([self::KEY => self::MAX_PER_MINUTE]);
+    }
+
+    /**
+     * Takes one request from the anonymous sub-budget AND the shared budget.
+     *
+     * @return JsonResponse|null null = reserved, go ahead; otherwise the 429 to return
+     */
+    public static function reserveAnonymous(): ?JsonResponse
+    {
+        return self::reserveAll([
+            self::ANONYMOUS_KEY => self::ANONYMOUS_MAX_PER_MINUTE,
+            self::KEY => self::MAX_PER_MINUTE,
+        ]);
+    }
+
+    /**
+     * All buckets must have room. A cheap read first refuses without touching
+     * any counter while one is already full; then every counter is hit and the
+     * returned counts decide, so on a store with atomic increments two
+     * concurrent requests cannot both pass on the same last slot.
+     *
+     * No rollback: a request refused after the hit keeps its count in every
+     * bucket it hit, so under contention a bucket may close a few requests
+     * early — never late.
+     *
+     * @param  array<string, int>  $limits  key => max per minute
+     */
+    private static function reserveAll(array $limits): ?JsonResponse
+    {
+        foreach ($limits as $key => $max) {
+            if (RateLimiter::tooManyAttempts($key, $max)) {
+                return self::tooManyAttempts($key);
+            }
         }
 
-        RateLimiter::hit(self::KEY, self::DECAY_SECONDS);
+        $refusedBy = null;
 
-        return null;
+        foreach ($limits as $key => $max) {
+            if (RateLimiter::hit($key, self::DECAY_SECONDS) > $max) {
+                $refusedBy ??= $key;
+            }
+        }
+
+        return $refusedBy === null ? null : self::tooManyAttempts($refusedBy);
     }
 
     /**

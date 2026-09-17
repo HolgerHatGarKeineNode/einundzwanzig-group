@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Support\VereinUpstreamBudget;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Testing\TestResponse;
 use swentel\nostr\Event\Event;
 use swentel\nostr\Key\Key;
@@ -126,4 +127,74 @@ it('is not consumed by requests refused in a local pre-check', function () {
     budgetAppRead(200)->assertOk();
     budgetAppConfig(200)->assertOk();
     budgetWebConfig(200)->assertOk();
+});
+
+it('caps the unsigned app routes at 10 per minute while web and signed reads keep working', function () {
+    expect(VereinUpstreamBudget::ANONYMOUS_MAX_PER_MINUTE)->toBe(10);
+
+    // One IP, random body pubkeys, mixed unsigned routes — the drain attempt.
+    for ($i = 0; $i < 10; $i++) {
+        $route = ['/api/app/verein/applications', '/api/app/verein/payments/2026/invoice'][$i % 2];
+
+        $this->withServerVariables(['REMOTE_ADDR' => '192.0.2.50'])
+            ->postJson($route, ['pubkey' => bin2hex(random_bytes(32))])
+            ->assertOk();
+    }
+
+    Http::assertSentCount(10);
+
+    $refused = budgetAppConfig(99)->assertStatus(429);
+    expect((int) $refused->headers->get('Retry-After'))->toBeGreaterThan(0);
+
+    Http::assertSentCount(10);
+
+    // The remaining 20 of the shared budget stay available to the verified branches.
+    for ($i = 0; $i < 10; $i++) {
+        budgetWebConfig($i)->assertOk();
+        budgetAppRead($i)->assertOk();
+    }
+
+    Http::assertSentCount(30);
+
+    // … and the shared cap still holds for them.
+    budgetWebConfig(100)->assertStatus(429);
+    budgetAppRead(100)->assertStatus(429);
+
+    Http::assertSentCount(30);
+});
+
+it('refuses an unsigned call when the shared budget is full even if the sub-budget has room', function () {
+    for ($i = 0; $i < 30; $i++) {
+        ($i % 2 === 0 ? budgetWebConfig($i) : budgetAppRead($i))->assertOk();
+    }
+
+    budgetAppConfig(1)->assertStatus(429);
+
+    Http::assertSentCount(30);
+    // Refused by the cheap pre-read: the sub-budget was not touched.
+    expect(RateLimiter::attempts(VereinUpstreamBudget::ANONYMOUS_KEY))->toBe(0);
+});
+
+it('decides by the count the hit returned, not by the earlier read', function () {
+    for ($i = 0; $i < 30; $i++) {
+        budgetWebConfig($i)->assertOk();
+    }
+
+    // Simulate the race the pre-read cannot see: another worker took the last
+    // slot between read and hit. Here the read is simply always stale.
+    $stale = new class(app('cache')->driver(config('cache.limiter'))) extends Illuminate\Cache\RateLimiter
+    {
+        public function tooManyAttempts($key, $maxAttempts): bool
+        {
+            return false;
+        }
+    };
+    app()->instance(Illuminate\Cache\RateLimiter::class, $stale);
+    RateLimiter::clearResolvedInstance(Illuminate\Cache\RateLimiter::class);
+
+    // Called directly: the fresh limiter instance carries no named route limiters.
+    expect(VereinUpstreamBudget::reserve()?->getStatusCode())->toBe(429)
+        ->and(VereinUpstreamBudget::reserveAnonymous()?->getStatusCode())->toBe(429);
+
+    Http::assertSentCount(30);
 });

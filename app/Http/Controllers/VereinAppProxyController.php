@@ -162,7 +162,8 @@ class VereinAppProxyController
             $pending = $pending->withBody($body, 'application/json');
         }
 
-        if (($exhausted = VereinUpstreamBudget::reserve()) !== null) {
+        // Unsigned route: anonymous sub-budget on top of the shared one.
+        if (($exhausted = VereinUpstreamBudget::reserveAnonymous()) !== null) {
             return $exhausted;
         }
 

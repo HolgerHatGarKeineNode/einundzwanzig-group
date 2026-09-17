@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use App\Support\VereinUpstreamBudget;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 
 /*
 |--------------------------------------------------------------------------
@@ -137,6 +139,17 @@ it('never puts the API key into a response body', function () {
     Http::assertSent(fn (ClientRequest $r): bool => $r->hasHeader('X-Api-Key', APP_PROXY_KEY));
 });
 
+/**
+ * These limiter tests send more calls than the upstream budgets allow; the
+ * budgets are emptied between calls so only the limiter under test decides
+ * (the budgets have their own tests in VereinUpstreamBudgetTest).
+ */
+function resetUpstreamBudgets(): void
+{
+    RateLimiter::clear(VereinUpstreamBudget::KEY);
+    RateLimiter::clear(VereinUpstreamBudget::ANONYMOUS_KEY);
+}
+
 /*
  * Limiter key of `throttle:verein-app-proxy`. A body-less request used to land
  * in ONE literal `pubkey:none` bucket shared by every caller, so 20 `/config`
@@ -149,6 +162,8 @@ it('does not share one subject bucket between body-less requests of different IP
         $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.1'])
             ->getJson('/api/app/verein/config')
             ->assertOk();
+
+        resetUpstreamBudgets();
     }
 
     $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.1'])
@@ -169,6 +184,8 @@ it('still keys a body pubkey across IPs', function () {
         $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.'.(10 + $i)])
             ->postJson('/api/app/verein/applications', $body)
             ->assertCreated();
+
+        resetUpstreamBudgets();
     }
 
     $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.99'])
