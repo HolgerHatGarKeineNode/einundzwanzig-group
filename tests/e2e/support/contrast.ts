@@ -414,14 +414,21 @@ export const measure = (page: Page, extra: Extra[] = []): Promise<Measured[]> =>
                 const lb = lum(bg)
                 const ratio = (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
                 out.push({
-                    // Rolle aus der Geometrie-Klasse: die Glocke trägt die kleine
-                    // 9+-Variante (`h-4`), das Tab-Badge den Abstand zum Label
+                    // Rolle aus der Geometrie-Klasse: die P5-Nav-Pille der Bottom-Bar
+                    // trägt `h-[18px]!` (badge-Override mit important — nur sie;
+                    // die Bar-Pille der Befehlsleiste nutzt `h-[18px]` OHNE `!` und
+                    // rendert unterhalb xl gar nicht), die Glocke die kleine 9+-
+                    // Variante (`h-4`), das Tab-Badge den Abstand zum Label
                     // (`ms-1.5`), alles übrige ist die Zeilen-Pille.
-                    label: /(^|\s)h-4(\s|$)/.test(el.className)
-                        ? 'Zähler-Pille Glocke'
-                        : /(^|\s)ms-1\.5(\s|$)/.test(el.className)
-                          ? 'Zähler-Pille Tab'
-                          : 'Zähler-Pille Zeile',
+                    label: /(^|\s)h-\[18px\]!(\s|$)/.test(el.className)
+                        ? 'Zähler-Pille Nav'
+                        : /(^|\s)h-\[18px\](\s|$)/.test(el.className)
+                          ? 'Zähler-Pille Bar (Befehlsleiste)'
+                          : /(^|\s)h-4(\s|$)/.test(el.className)
+                            ? 'Zähler-Pille Glocke'
+                            : /(^|\s)ms-1\.5(\s|$)/.test(el.className)
+                              ? 'Zähler-Pille Tab'
+                              : 'Zähler-Pille Zeile',
                     kind: 'text',
                     fg: fgc,
                     bg,

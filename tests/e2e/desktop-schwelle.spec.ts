@@ -139,6 +139,13 @@ for (const schrift of [16, 20] as const) {
  * Ersetzt durch `xl:px-[clamp(2rem,2.5vw,3rem)]`: trifft beide bisherigen
  * Endpunkte exakt (1280 px → 32 px, 1920 px → 48 px) und verbindet sie stetig.
  *
+ * P5 (Entwurf C, 2026-09-18): das Polster der Bühne ist inzwischen
+ * `clamp(1.5rem, 2vw, 1.75rem)` — 25,6 px bei 1280, ab 1400 px die 28-px-Decke.
+ * Der Riegel hier sichert davon bewusst NICHT den Wert, sondern die EIGENSCHAFT
+ * (Monoton + keine Sprünge): ein stetiges Polster kann enger oder weiter
+ * gewählt werden, ohne dass der Deckel fällt — genau das bleibt verlangt. Der
+ * Lauf vom 2026-09-18 misst 909 px → 1536 px mit größtem Schritt 8 px.
+ *
  * ── Warum nicht jeder Pixel geprüft wird ──────────────────────────────────────
  * Die volle 1-px-Reihe steht im Protokoll; ein Riegel, der sie bei jedem Lauf
  * nachfährt, kostet 641 Layout-Runden. Geprüft wird stattdessen ein Raster von

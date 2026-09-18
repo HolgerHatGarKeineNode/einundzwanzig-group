@@ -98,6 +98,13 @@ import { awaitNextSecond } from './support/zeit'
 const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
+// pub von NOSTR_TEST_NSEC — für die ERWÄHNUNG, die seit P2 die Postfach-Pille der
+// Bottom-Nav speist (siehe der Marker-Absatz bei der Wartung weiter unten). Eine
+// Erwähnung ist für die Ableitung ein `nostr:<npub>`-Token IM KLARTEXT der Nachricht
+// (`updatesMentionsPubkey` — p-Tags zählen dort bewusst nicht), deshalb steht das
+// Token im Content des Events, nicht nur als Tag.
+const VIEWER = '2dbaf5f4f86a1eed0948852ad48fa40aae2e48d5e347a77fac2ac936d6c94e7b'
+const VIEWER_NPUB = 'npub19ka0ta8cdg0w6z2gs54dfrayp2hzujx4udr6wlav9tynd4kffeas5efuq6'
 
 /**
  * P9.2 — Fixture-Erweiterung: die zwei Räume, die die bislang ungerenderten
@@ -750,7 +757,19 @@ async function measureDirectoryFilter(page: Page): Promise<Measured[]> {
     ).filter((m) => m.label.startsWith('Kante '))
 }
 
-for (const theme of ['light', 'dark'] as const) {
+/*
+ * P5 (Entwurf C, 2026-09-18): DARK-ONLY. Die Theme-Schleife lief bis hier über
+ * ['light', 'dark'] — der Entwurf C ist ein dark-only-Design (`colorScheme: "dark
+ * only"`, Spec-Abschnitt 9), P1 hat dark zum Default gemacht, und die Light-Zweige
+ * der Views sind bewusst TOTER CODE geworden (Plan `2026-09-18T1745-design-
+ * angleichung-entwurf-c.md`, „Nicht zu beanstanden: Light-Theme-Zweige als toter
+ * Code"; der Light-Defektscan ist ein eigener Folgeplan NACH P6). Gegen toten Code
+ * messen hieße, Rot zu ernten, das niemand zu reparieren beauftragt hat — deshalb
+ * misst dieser Anker das Theme, das existiert. Das ist KEINE Absenkung: dunkel
+ * werden dieselben Schwellen verlangt wie vorher, und die light-Reihe kehrt mit
+ * dem Light-Defektscan zurück.
+ */
+for (const theme of ['dark'] as const) {
     test(`A11y: gerenderter Kontrast der Brand-Farben erfüllt WCAG (${theme})`, async ({ page }) => {
         await useZooid(page)
         // P9.2 — die beiden Präzisionsräume (Antragsraum + Join, Meetup ohne Join)
@@ -799,13 +818,28 @@ for (const theme of ['light', 'dark'] as const) {
         // des Deckkraft-Waits weiter unten blockiert. Siehe {@link awaitNextSecond}.
         await awaitNextSecond(page)
         execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=punkt', '-c', `A11y-${Date.now()}`, ZOOID_WS])
-        await expect(page.locator('span.size-2.rounded-full').first()).toBeVisible({ timeout: 20_000 })
+        // P2 (Entwurf C): der Nav-Marker ist die Postfach-PILLE, und die zählt NUR
+        // adressierte Updates (`$store.unread.postfach`) — die Raum-Nachricht oben
+        // allein ließe sie aus. Deshalb zusätzlich eine ERWÄHNUNG des Test-Users;
+        // selbe Warte-Struktur wie beim punktprobe-Beleg, aus denselben Gründen.
+        execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', 'h=punkt', '-t', `p=${VIEWER}`, '-c', `nostr:${VIEWER_NPUB} A11yM-${Date.now()}`, ZOOID_WS])
+        await expect(
+            page.getByRole('link', { name: /Postfach/ }).locator('span.chip-in.rounded-pill'),
+            'Nav-Pille erscheint nicht — keine Erwähnung angekommen oder postfach-Ableitung still',
+        ).toBeVisible({ timeout: 20_000 })
         // Zweiter, EIGENER Beleg: seit P6 trägt die Raum-Zeile eine Zähler-Pille statt
-        // des Punktes. Der Punkt oben lebt nur noch in der Bottom-Nav — er würde also
-        // auch dann erscheinen, wenn die Pille gar nicht rendert (falscher Store-Name,
-        // Zahl bleibt 0). Ohne diese Zeile schlüge das erst unten in den Guards zu, und
-        // zwar ohne Wartezeit: ein Rennen sähe aus wie ein Markup-Fehler.
-        await expect(page.locator('span.bg-brand-500.text-zinc-950').first()).toBeVisible({ timeout: 20_000 })
+        // des Punktes. Der Punkt lebt seit P2 NUR noch in der Desktop-Rail — bei diesem
+        // Viewport (1279, unterhalb xl) gibt es ihn nicht, die Pille ist der Nav-Marker.
+        // Gescoped auf die Punktprobe-ZEILE, nicht `.first()` über das ganze Dokument:
+        // seit P4/5 gibt es MEHRERE Pillen-Auftritte (u. a. eine 18-px-hints-Pille am
+        // Avatar-Chip, bei diesem Viewport hidden) — `.first()` nähme die erste im DOM,
+        // und das ist nicht mehr die geprüfte. Ohne diese Zeile schlüge das erst unten
+        // in den Guards zu, und zwar ohne Wartezeit: ein Rennen sähe aus wie ein
+        // Markup-Fehler.
+        await expect(
+            page.getByRole('button', { name: /Punktprobe/ }).locator('span.bg-brand-500.text-zinc-950'),
+            'Raum-Zeilen-Pille erscheint nicht — die Raum-Nachricht kam nicht an oder die rooms-Ableitung ist still',
+        ).toBeVisible({ timeout: 20_000 })
 
         // Reihenfolge: erst alles auf `/spaces`, dann der Raum — der Raumbesuch ist ein
         // echter Seitenwechsel und käme nicht ohne Reload zur Raumliste zurück. Das
@@ -829,18 +863,27 @@ for (const theme of ['light', 'dark'] as const) {
         expect(measured.some((m) => m.kind === 'text'), 'kein Text-Träger gemessen').toBe(true)
         expect(measured.some((m) => m.kind === 'icon'), 'kein Icon-Träger gemessen — Icon-Schwelle ungeprüft').toBe(true)
         expect(
-            measured.some((m) => m.kind === 'graphic' && m.label === 'Ungelesen-Punkt'),
-            'kein Ungelesen-Punkt gemessen — die 1.4.11-Schwelle des Punktes ist ungeprüft',
+            measured.some((m) => m.kind === 'text' && m.label === 'Zähler-Pille Nav'),
+            'keine Nav-Pille gemessen — die 1.4.3-Schwelle des Postfach-Markers der Bottom-Bar ist ungeprüft (rendert sie überhaupt?)',
         ).toBe(true)
-        // P6: jede der drei Zähler-Pillen EINZELN verlangen. Eine Sammelabfrage
-        // („irgendeine Pille gemessen") wäre wertlos — die drei Auftritte stehen an
-        // drei verschiedenen Untergründen (Kachel · Segmented-Control · Kopfzeile),
-        // und genau der ungemessene ist erfahrungsgemäß der rote.
+        // P5 (Entwurf C): bis P2 war das der UNGELESEN-PUNKT (1.4.11, graphic, ≥3:1) —
+        // `span.size-2.rounded-full bg-brand-700`. Die Bottom-Bar trägt seit P2 die
+        // 18-px-Zähler-Pille des Artboards; die ZIFFER ist Text (1.4.3, ≥4,5:1), und
+        // der Punkt selbst hat bei diesem Viewport (1279, unterhalb xl — Rail-only)
+        // keinen Träger mehr. Der Vertrag „der Nav-Marker wird mit EIGENER Schwelle
+        // gemessen" lebt auf der Pille weiter; die Pille hängt auf bg-elevated, dem
+        // NEUEN Untergrund der Tab-Bar — gerechnet 8,57:1 (on-accent auf accent).
+        // P6: jede der Zähler-Pillen EINZELN verlangen. Eine Sammelabfrage
+        // („irgendeine Pille gemessen") wäre wertlos — die Auftritte stehen an
+        // verschiedenen Untergründen (Kachel · Segmented-Control · Tab-Bar), und
+        // genau der ungemessene ist erfahrungsgemäß der rote.
         // P7: „Zähler-Pille Glocke" is gone from this list — the BELL is deleted (D2, the
         // inbox has its own nav slot since P2), so there is no third surface to measure.
         // The two that remain are still demanded one by one, which is what the sentence
         // above is about.
-        for (const role of ['Zähler-Pille Zeile', 'Zähler-Pille Tab']) {
+        // P5 (Entwurf C): die NAV-PILLE der Bottom-Bar kam dazu — dritter Auftritt,
+        // dritter Untergrund (bg-elevated), eigene Forderung.
+        for (const role of ['Zähler-Pille Zeile', 'Zähler-Pille Tab', 'Zähler-Pille Nav']) {
             expect(
                 measured.some((m) => m.label === role),
                 `${role} nicht gemessen — diese Pille ist ungeprüft (rendert sie überhaupt?)`,
@@ -1017,7 +1060,9 @@ for (const theme of ['light', 'dark'] as const) {
  * Raumzustand unter den laufenden Phasen — die Admin-Fläche ist eine eigene
  * Messung mit eigenem Guard, nicht ein Anhängsel.
  */
-for (const theme of ['light', 'dark'] as const) {
+// P5 — derselbe Dark-only-Entscheid wie beim Haupttest darüber (Plan-Verweis steht
+// dort): die Admin-Fläche wird am existierenden Theme gemessen.
+for (const theme of ['dark'] as const) {
     test(`A11y: Admin-gate Zeilen erfüllen WCAG (${theme})`, async ({ page }) => {
         await useZooid(page)
         await page.addInitScript((t) => {

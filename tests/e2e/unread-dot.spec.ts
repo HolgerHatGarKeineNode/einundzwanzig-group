@@ -33,6 +33,11 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 const NAK = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
 const ADMIN = 'b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414'
 const VIEWER = '2dbaf5f4f86a1eed0948852ad48fa40aae2e48d5e347a77fac2ac936d6c94e7b' // pub von NOSTR_TEST_NSEC
+// npub desselben Schlüssels (bech32, mit `nak key npub` erzeugt) — eine Erwähnung
+// ist für die Ableitung ein `nostr:<npub>`-Token IM KLARTEXT, nicht ein p-Tag
+// (`updatesMentionsPubkey`: über die Tags wäre jede Antwort auf mich eine
+// „Erwähnung" — deshalb zählt dort bewusst nur der Text).
+const VIEWER_NPUB = 'npub19ka0ta8cdg0w6z2gs54dfrayp2hzujx4udr6wlav9tynd4kffeas5efuq6'
 const CACHE_DB = `einundzwanzig-cache-${VIEWER}`
 const READSTATE_DB = `einundzwanzig-readstate-${VIEWER}`
 const ROOM_H = 'punkt'
@@ -41,6 +46,26 @@ const ROOM_NAME = 'Punktprobe'
 /** Publiziert eine kind-9-Nachricht als ADMIN (FREMDER Autor — eigene zählen nie). */
 function publish(content: string): void {
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${ROOM_H}`, '-c', content, ZOOID_WS])
+}
+
+/**
+ * Wie {@link publish}, aber als ERWÄHNUNG des Test-Users — der EINZIGE Weg, die
+ * Postfach-Ebene (und damit die Nav-Pille) aus demselben Raum heraus zu speisen:
+ * `countAddressedUpdates` zählt ausschließlich ungelesene Zeilen vom Typ
+ * `mention`/`thread`, und eine mention-Zeile entsteht nur, wenn der KLARTEXT das
+ * `nostr:<npub>`-Token des Lesers trägt (`updatesMentionsPubkey` — p-Tags zählen
+ * bewusst nicht, sonst wäre jede Antwort auf mich eine Erwähnung). Raum-Verkehr ohne
+ * Adressierung taucht dort nicht auf („a busy space would park a permanent
+ * double-digit number on the icon").
+ *
+ * Der Marker steht NACH dem Token im Text; der volle Content (Token + Leerzeichen +
+ * Marker) ist, was im Cache landet — {@link messageCached} vergleicht exakt, die
+ * Aufrufer reichen deshalb {@link mentionContent} statt des nackten Markers.
+ */
+const mentionContent = (markerText: string): string => `nostr:${VIEWER_NPUB} ${markerText}`
+
+function publishMention(markerText: string): void {
+    execFileSync(NAK, ['event', '--auth', '--sec', ADMIN, '-k', '9', '-t', `h=${ROOM_H}`, '-t', `p=${VIEWER}`, '-c', mentionContent(markerText), ZOOID_WS])
 }
 
 const marker = (prefix: string): string => `${prefix}-${Math.floor(Math.random() * 1e9)}`
@@ -76,14 +101,25 @@ const roomDot = (page: Page) =>
     page.getByRole('button', { name: new RegExp(ROOM_NAME) }).locator('span.bg-brand-500.text-zinc-950')
 
 /**
- * The dot at the corner of the nav icon (fed from `any`).
+ * The unread marker at the „Postfach" slot of the bottom bar.
  *
- * **Since P2 it hangs on the „Postfach" slot, no longer on „Chat".** The bottom bar has
- * three slots (Start · search · inbox, D2) and the dot sits on the one that gets
- * `unreadDot` (`bottom-nav.blade.php`, `:unread-dot="true"`). What the anchors measure is
- * unchanged — they ask whether the marker appears and disappears again.
+ * **Since P2 (Entwurf C) this is the 18-px COUNTER PILL of artboard `screen-mobileweb`,
+ * no longer a dot** — `span.size-2.rounded-full` is gone from the bottom bar; the dot
+ * survives only in the desktop rail, which this viewport (1279 px, below `xl`) never
+ * shows. Addressed over the badge's own signature (`chip-in` + `rounded-pill`, both
+ * from `unread-badge.blade.php`) scoped to the one link — colour classes deliberately
+ * NOT part of the selector: the colour is the contrast anchor's subject, not this one's.
+ *
+ * **What feeds it changed with the form: the pill counts `$store.unread.postfach` —
+ * updates that ADDRESS the reader (`mention`/`thread` rows, `countAddressedUpdates`),
+ * not `any`.** A bare room message lights the row pill but never this one; the anchors
+ * that want this marker visible publish a MENTION (kind 9 with a `p` tag on the
+ * viewer, see {@link publishMention}). The coupling that keeps anchor 2 honest
+ * survived the change: a mention's `item.unread` hangs on the SAME `roomWatermark` as
+ * the row count (`updates.ts`), so reading the room at the bottom clears BOTH markers —
+ * scrolling away clears neither.
  */
-const navDot = (page: Page) => page.getByRole('link', { name: /Postfach/ }).locator('span.size-2.rounded-full')
+const navDot = (page: Page) => page.getByRole('link', { name: /Postfach/ }).locator('span.chip-in.rounded-pill')
 
 /** Liegt GENAU diese kind-9 (+ ihr Tracker-Eintrag) im Kaltstart-Cache? */
 function messageCached(page: Page, content: string): Promise<boolean> {
@@ -232,17 +268,27 @@ test('Anker 1: Punkt steht beim Kaltstart aus dem Cache — Relay blockiert', as
     await expect(roomDot(page)).toHaveCount(0) // Ausgangslage: nichts ungelesen
 
     const cold = marker('Kalt')
+    // P2: die Nav-Pille zählt NUR adressierte Updates — eine Raum-Nachricht allein
+    // ließe sie aus, ohne dass am Ungelesen-Pfad etwas kaputt wäre. Deshalb speist
+    // eine ERWÄHNUNG (p-Tag auf den Viewer) dieselbe Kaltstart-Probe zusätzlich.
+    const coldMention = marker('KaltErwaehnt')
     // **Nicht in der Boot-Sekunde senden.** Ein frischer Account bekommt beim Login
     // `all = nowSec()`; `created_at > watermark` ist dann knapp falsch und der Punkt
     // bleibt völlig korrekt aus. Gemessen am 2026-08-29 (Delta 0 → kein Punkt,
     // Delta 1 → Punkt, ein Lauf, beide Ergebnisse). Siehe {@link awaitNextSecond}.
     await awaitNextSecond(page)
     publish(cold)
+    publishMention(coldMention)
     await expect(roomDot(page)).toBeVisible({ timeout: 20_000 })
+    // VOR dem Reload belegen, dass die Ableitung die Postfach-Ebene überhaupt meldet —
+    // sonst wäre ein fehlender navDot nach dem Reload dreideutig (Ableitung vs. Cache
+    // vs. Blade), und der Kaltstart-Beweis träte auf der Stelle.
+    await expect(navDot(page)).toBeVisible({ timeout: 20_000 })
 
-    // Drei Gates, jedes für sich: fehlt eins, wäre ein fehlender Punkt nach dem Reload
+    // Vier Gates, jedes für sich: fehlt eins, wäre ein fehlender Marker nach dem Reload
     // eine Aussage über den Cache-Füllstand, nicht über den Ungelesen-Pfad.
     await expect.poll(() => messageCached(page, cold), { timeout: 20_000 }).toBe(true)
+    await expect.poll(() => messageCached(page, mentionContent(coldMention)), { timeout: 20_000 }).toBe(true)
     await expect.poll(() => membershipCached(page), { timeout: 20_000 }).toBe(true)
     const rows = await readStateRows(page)
     console.log(`[anker1] Lesestand vor dem Reload: ${JSON.stringify(rows)}`)
@@ -252,15 +298,21 @@ test('Anker 1: Punkt steht beim Kaltstart aus dem Cache — Relay blockiert', as
     await page.routeWebSocket(new RegExp(`localhost:${ZOOID_PORT}`), () => {})
     await page.reload()
 
-    // Erst den Store, dann den Punkt — so trennt ein Fehlschlag die zwei möglichen
+    // Erst den Store, dann die Marker — so trennt ein Fehlschlag die zwei möglichen
     // Ursachen (Ableitung kam nicht zustande vs. Ableitung stimmt, Blade rendert nicht).
     // Seit P6 trägt der Store eine ZAHL, nicht mehr `true` (`rooms: Record<h, number>`).
     // Geprüft wird deshalb „> 0" statt Gleichheit mit einem Literal: der Anker fragt
     // „meldet die Ableitung Ungelesenes", nicht „genau wie viele" — die exakte Zahl
     // hängt daran, wie viele Nachrichten der Lauf publiziert hat, und wäre gegen einen
-    // wiederverwendeten Seed eine Zeitbombe (P5-Lehre).
+    // wiederverwendeten Seed eine Zeitbombe (P5-Lehre). Dieselbe Frage für die
+    // Postfach-Ebene: sie hängt an `postfach` (adressierte Updates), nicht an `rooms`.
     await expect
         .poll(async () => ((await unreadStore(page)) as { rooms?: Record<string, number> } | null)?.rooms?.[ROOM_H] ?? 0, {
+            timeout: 45_000,
+        })
+        .toBeGreaterThan(0)
+    await expect
+        .poll(async () => ((await unreadStore(page)) as { postfach?: number } | null)?.postfach ?? 0, {
             timeout: 45_000,
         })
         .toBeGreaterThan(0)
@@ -296,19 +348,29 @@ test('Anker 2: Lesen löscht den Punkt — hochgescrollt verlassen lässt ihn st
     await openSpaces(page)
 
     // ── Teil 1: gelesen ⇒ weg ────────────────────────────────────────────────
+    // Seit P2 als ERWÄHNUNG gepublisht: nur sie speist BEIDE Marker (Raum-Zeile über
+    // `rooms`, Nav-Pille über `postfach`). Eine unadressierte Nachricht ließe die
+    // navDot-Assertion unten trivial grün werden — sie prüfte dann einen Marker, der
+    // aus principio nie stehen konnte. Eine Mention hängt am SELBEN raum-spezifischen
+    // Wasserzeichen wie die Raum-Zählung (`updates.ts` roomWatermark): am Boden lesen
+    // löscht beide, hochgescrollt verlassen keine.
     const seen = marker('Gelesen')
     // **Nicht in der Boot-Sekunde senden.** Ein frischer Account bekommt beim Login
     // `all = nowSec()`; `created_at > watermark` ist dann knapp falsch und der Punkt
     // bleibt völlig korrekt aus. Gemessen am 2026-08-29 (Delta 0 → kein Punkt,
     // Delta 1 → Punkt, ein Lauf, beide Ergebnisse). Siehe {@link awaitNextSecond}.
     await awaitNextSecond(page)
-    publish(seen)
+    publishMention(seen)
     await expect(roomDot(page)).toBeVisible({ timeout: 20_000 })
+    await expect(navDot(page)).toBeVisible({ timeout: 20_000 })
 
     await page.getByRole('button', { name: new RegExp(ROOM_NAME) }).click()
     await expect(page).toHaveURL(new RegExp(`/rooms/${ROOM_H}$`), { timeout: 20_000 })
     // Am Boden (Default, kein Scroll) — column-reverse pinnt die jüngste Nachricht.
-    await expect(page.getByText(seen, { exact: true })).toBeVisible({ timeout: 20_000 })
+    // KEIN exact: seit der Trigger eine ERWÄHNUNG ist, rendert der Verlauf die
+    // `nostr:`-Mention als eigenen Link-Knoten — der Marker ist danach ein eigener
+    // Textknoten mit führendem Leerzeichen, exact würde ihn nie finden.
+    await expect(page.getByText(seen, { exact: false })).toBeVisible({ timeout: 20_000 })
 
     await page.getByRole('button', { name: 'Zurück' }).click()
     await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 20_000 })
@@ -462,9 +524,10 @@ test('Anker 4: fehlender unread-Store rendert nichts und wirft nichts', async ({
     await expect(page.getByRole('button', { name: 'Andere Optionen' })).toBeVisible({ timeout: 20_000 })
     await page.waitForTimeout(2000) // Alpine-Boot + erste Store-Emits abwarten
     // Kein Marker IRGENDWO im Dokument (nicht nur in der Nav — die gibt es hier nicht).
-    // Seit P6 sind das zwei Formen: der Punkt (Nav) und die Zähler-Pille (Zeile/Tab/
-    // Glocke). Beide einzeln abfragen — eine Oder-Abfrage über einen kombinierten
-    // Selektor bestünde auch dann, wenn eine der beiden Formen gar nicht mehr existiert.
+    // Seit P2 sind es zwei SIGNATUREN über drei Formen: der Punkt (nur noch Desktop-
+    // Rail) und die Zähler-Pille (Raum-Zeile, Tab, Nav — dieselbe Klassensignatur).
+    // Beide Signaturen einzeln abfragen — eine Oder-Abfrage über einen kombinierten
+    // Selektor bestünde auch dann, wenn eine der Formen gar nicht mehr existiert.
     await expect(page.locator('span.size-2.rounded-full')).toHaveCount(0)
     await expect(page.locator('span.bg-brand-500.text-zinc-950')).toHaveCount(0)
     console.log(`[anker4/Gast] Fehler bisher: ${errors.length ? errors.join(' | ') : 'keine'}`)

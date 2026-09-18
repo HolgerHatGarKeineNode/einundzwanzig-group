@@ -22,12 +22,23 @@ test('hub surfaces carry the brand-mark header, no back arrow', function () {
     //
     // `/bereich/*` is deliberately NOT in this list: an area sits below Start and does have
     // an UP target (see `WalletBackTest`).
-    foreach (['group.start', 'group.postfach', 'group.ich'] as $name) {
+    //
+    // P5 (Entwurf C): START itself no longer carries the mark — the screen title IS the
+    // anchor there (`⚡start` passes `:mark="false"`, artboard `screen-mobileweb`: H1 plus
+    // avatar, no mark in front of the same place). A mark linking Start→Start would be
+    // circular. The hubs BELOW Start keep the mark, so the "way home" claim stays asserted
+    // on every surface that needs one — and Start's mark-freedom is asserted the other way:
+    // its absence is part of the design now, not an accident to be caught later.
+    foreach (['group.postfach', 'group.ich'] as $name) {
         $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route($name))->assertOk();
 
         $res->assertSee('aria-label="Startseite"', false);
         $res->assertDontSee('aria-label="Zurück"', false);
     }
+
+    $start = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.start'))->assertOk();
+    $start->assertDontSee('aria-label="Startseite"', false);
+    $start->assertDontSee('aria-label="Zurück"', false);
 });
 
 test('the avatar is the way to Ich — and a guest is not turned away there', function () {
