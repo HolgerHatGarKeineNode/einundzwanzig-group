@@ -300,3 +300,39 @@ test('P3/D5: the five segments at 390x844 — measured, and Direkt is the only o
     await page.goto('/postfach?ansicht=direkt')
     await expect(page.locator('[data-pm-liste]')).toBeVisible({ timeout: 25_000 })
 })
+
+test('P3/D8: the wallet row on „Ich" carries its state and the way into the wallet', async ({ page }) => {
+    test.setTimeout(120_000)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await login(page)
+
+    await page.goto('/ich')
+    const zeile = page.locator('[data-ich-ziel]').filter({ hasText: 'Wallet' }).first()
+    await expect(zeile, 'the wallet row is missing from „Ich"').toBeVisible({ timeout: 25_000 })
+    await expect(zeile).toHaveAttribute('href', /\/bereich\/wallet$/)
+
+    // ── The state, and why the assertion is „nicht verbunden" ────────────────────────
+    // No wallet is connected in an E2E run (that would need a real NWC secret), so the
+    // honest assertion is the DISCONNECTED state — plus the fact that the island got that
+    // far at all: `loading` has to have finished, otherwise the skeleton would still stand
+    // and the row would say nothing. The amount itself is proven where a number exists
+    // (`nostrWalletGuthaben` reads `getWalletBalance()`); what is measured here is that the
+    // row resolves into one of its three states instead of a permanent skeleton.
+    const zustand = page.locator('[data-wallet-guthaben]')
+    await expect(zustand, 'the balance slot never appeared').toBeVisible({ timeout: 25_000 })
+    await expect(zustand, 'the wallet row never left its loading state').toContainText('nicht verbunden', {
+        timeout: 25_000,
+    })
+    await expect(page.locator('[data-wallet-betrag]'), 'an amount is shown although no wallet is connected')
+        .toBeHidden()
+
+    const box = await zeile.boundingBox()
+    // eslint-disable-next-line no-console
+    console.log(`[ich] wallet row @390x844: ${JSON.stringify(box)}`)
+    expect(box?.height ?? 0, 'the row fell below the 44 px thumb target').toBeGreaterThanOrEqual(44)
+    expect(box?.width ?? 0, 'the row is wider than the phone').toBeLessThanOrEqual(390)
+
+    // And the link really leads there — the row is the entry point D8 asks for.
+    await zeile.click()
+    await expect(page).toHaveURL(/\/bereich\/wallet$/, { timeout: 25_000 })
+})
