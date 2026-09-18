@@ -271,6 +271,9 @@ test('Chat-Video bleibt über die Boot-Phase dasselbe Element', async ({ page })
     expect(churn.identitySwitches, 'Video-Element-Identitäten: Raum-Zeile + Thread-Kopf, sonst keine').toBeLessThanOrEqual(2)
     expect(anfragen - anfragenVorReaction, 'die Reaction-Welle darf keinen neuen Video-Load auslösen').toBe(0)
     expect(anfragen, 'stabile Player laden je einmal Metadata (preload=metadata)').toBeLessThanOrEqual(4)
+
+    // Bild-Beleg: Raum-Zeile + geöffneter Thread-Kopf mit ungestörtem Player.
+    await page.screenshot({ path: 'test-results/flakern-nachher.png', fullPage: false })
 })
 
 async function leseChurn(page: Page): Promise<{ added: number; removed: number; identitySwitches: number; sets: number; videoErsetzt: number; listeNeuZugewiesen: number; videoMsgNeuGemappt: number; log: string[] }> {
