@@ -126,3 +126,4 @@
 
 @vite(['resources/css/app.css', 'resources/js/app.ts'])
 @fluxAppearance
+@include('group::partials.appearance-default')
