@@ -758,18 +758,29 @@ async function measureDirectoryFilter(page: Page): Promise<Measured[]> {
 }
 
 /*
- * P5 (Entwurf C, 2026-09-18): DARK-ONLY. Die Theme-Schleife lief bis hier über
- * ['light', 'dark'] — der Entwurf C ist ein dark-only-Design (`colorScheme: "dark
- * only"`, Spec-Abschnitt 9), P1 hat dark zum Default gemacht, und die Light-Zweige
- * der Views sind bewusst TOTER CODE geworden (Plan `2026-09-18T1745-design-
- * angleichung-entwurf-c.md`, „Nicht zu beanstanden: Light-Theme-Zweige als toter
- * Code"; der Light-Defektscan ist ein eigener Folgeplan NACH P6). Gegen toten Code
- * messen hieße, Rot zu ernten, das niemand zu reparieren beauftragt hat — deshalb
- * misst dieser Anker das Theme, das existiert. Das ist KEINE Absenkung: dunkel
- * werden dieselben Schwellen verlangt wie vorher, und die light-Reihe kehrt mit
- * dem Light-Defektscan zurück.
+ * LP3 (Light-Folgeplan, 2026-09-18): LIGHT IST ZURÜCK. P5 hatte diese Schleife
+ * auf dark-only geankert, weil die Light-Zweige nach der Entwurf-C-Angleichung
+ * bewusst unbestellter Zustand waren. LP1+LP2 (Package 8c53e16/d4394d0) haben
+ * die Ursachen repariert (accent-wash/link/hover/muted dunkel gescoped + Light-
+ * Gegenwerte, Rail-Aktiv hell, Tab-Sekundärtext, Badge-Glyphen) — damit ist die
+ * Voraussetzung wieder erfüllt, unter der dieser Anker beide Themes misst: dass
+ * Rot hier jemand zu reparieren beauftragt hat. Dieselben Schwellen wie dunkel,
+ * keine Absenkung in beide Richtungen.
+ *
+ * Light-Kalibrierung der LP2-Stellen — NACHGERECHNET mit der WCAG-Formel aus
+ * support/contrast.ts, nicht behauptet:
+ *   Rail-Aktiv      brand-800 #98480f auf accent-wash/brand-50 #fff8ed = 6,09:1
+ *   Tab-inaktiv     muted #525252 auf zinc-50 #fafafa = 7,49:1
+ *   Palette         Karte #ffffff, aktives Sigil brand-800 darauf = 6,42:1
+ *   Badge/FAB/Pille on-accent #0b0b0c auf accent #f7931a = 8,57:1 (beide Themes,
+ *                   deckende Fläche — die Zähler-Pillen unten messen genau das)
+ * Rail, Tab-inaktiv und Palette liegen AUSSERHALB dieser Spec (Rail rendert erst
+ * ab xl, der Viewport hier ist 1279; der inaktive Tab trägt text-muted, keine
+ * Brand-Klasse; die Palette öffnet in keiner Phase): ihre Light-Werte stehen als
+ * Rechnung hier und als LP2-Messung im Plan, der Klassen-Vertrag des Tab-Texts
+ * (text-muted statt remapptem zinc-600) hängt in ThemeAndA11yTest.
  */
-for (const theme of ['dark'] as const) {
+for (const theme of ['light', 'dark'] as const) {
     test(`A11y: gerenderter Kontrast der Brand-Farben erfüllt WCAG (${theme})`, async ({ page }) => {
         await useZooid(page)
         // P9.2 — die beiden Präzisionsräume (Antragsraum + Join, Meetup ohne Join)
@@ -1060,9 +1071,9 @@ for (const theme of ['dark'] as const) {
  * Raumzustand unter den laufenden Phasen — die Admin-Fläche ist eine eigene
  * Messung mit eigenem Guard, nicht ein Anhängsel.
  */
-// P5 — derselbe Dark-only-Entscheid wie beim Haupttest darüber (Plan-Verweis steht
-// dort): die Admin-Fläche wird am existierenden Theme gemessen.
-for (const theme of ['dark'] as const) {
+// LP3 — dieselbe Reaktivierung wie beim Haupttest darüber (Begründung und
+// Light-Kalibrierung stehen dort): auch die Admin-Fläche misst wieder beide Themes.
+for (const theme of ['light', 'dark'] as const) {
     test(`A11y: Admin-gate Zeilen erfüllen WCAG (${theme})`, async ({ page }) => {
         await useZooid(page)
         await page.addInitScript((t) => {
