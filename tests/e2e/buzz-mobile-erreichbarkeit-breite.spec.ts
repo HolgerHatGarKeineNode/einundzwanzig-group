@@ -198,8 +198,31 @@ test.describe('Space-Seite: Breite, Mitglieder-Zeile, Profil-Popover und das DM-
 // B — der INHALT (Buzz-spezifisch: `canDm` ist nur auf einem Buzz-Space wahr)
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-test.describe('Space-Seite: der DM-Abschnitt mit echtem Inhalt — Kopf, Knopf, Touch-Ziel (E2E, nur E2E_RELAY=buzz)', () => {
-    test.skip(process.env.E2E_RELAY !== 'buzz', 'nur im Buzz-Modus (E2E_RELAY=buzz) relevant — canDm ist sonst false')
+test.describe('space page: the row into the encrypted conversations — geometry (E2E, E2E_RELAY=buzz only)', () => {
+    /**
+     * ── What this block asserted until P3, and what holds now ───────────────────────
+     *
+     * Until P3 there was a DM SECTION here with a heading, a stock count, an unread pill and
+     * a „Neue Unterhaltung" button (`data-dm-neu`), and that button hung on `canDm` — only
+     * true on a Buzz space. That was exactly this block's Buzz specificity.
+     *
+     * D5 of the navigation revamp removes the list: NIP-17 wraps are only decrypted while the
+     * Postfach's „Direkt" segment is open, and a list of conversations IS the decrypted
+     * state. What is left is ONE neutral row leading there (`data-dm-oeffnen`) — an ordinary
+     * link that depends on no relay property any more.
+     *
+     * **The block stays here and stays Buzz-bound** (rewritten, not deleted — D15): what is
+     * measured is the row on the SPACE page of a Buzz space, and the 320/369 px widths are the
+     * reason this file exists. The same row against zooid at 390 px is measured by
+     * `dm-nav-widths.spec.ts`.
+     *
+     * The touch-target case below now measures the ROW instead of the vanished button. It
+     * carries `min-h-11` (44 px) on every pointer — the fine/coarse branch the old button had
+     * through `icon-btn-touch` does not exist on a row, and that IS the statement: the only
+     * way into the conversations is thumb-sized on a phone, whatever the browser reports
+     * about the pointer.
+     */
+    test.skip(process.env.E2E_RELAY !== 'buzz', 'nur im Buzz-Modus (E2E_RELAY=buzz) relevant — gemessen wird die Space-Seite eines Buzz-Space')
 
     async function loginBuzz(page: Page): Promise<void> {
         await useBuzz(page)
@@ -215,7 +238,7 @@ test.describe('Space-Seite: der DM-Abschnitt mit echtem Inhalt — Kopf, Knopf, 
         )
     }
 
-    test('320/369: der DM-Kopf trägt den Eröffnen-Knopf, mit echter Geometrie', async ({ page }) => {
+    test('320/369: the row into the conversations stands and fits, with real geometry', async ({ page }) => {
         await loginBuzz(page)
         const bericht: string[] = []
         for (const width of [320, 369]) {
@@ -223,32 +246,41 @@ test.describe('Space-Seite: der DM-Abschnitt mit echtem Inhalt — Kopf, Knopf, 
             const panel = page.locator('[data-dm-panel]')
             await expect(panel, `${width}px: DM-Abschnitt fehlt`).toBeVisible()
 
-            const knopf = page.locator('[data-dm-neu]')
-            await expect(knopf, `${width}px: "Neue Unterhaltung" fehlt — canDm ist false gegen diesen Space?`).toBeVisible()
+            const zeile = page.locator('[data-dm-oeffnen]')
+            await expect(zeile, `${width}px: die Zeile „Verschlüsselte Nachrichten öffnen" fehlt`).toBeVisible()
+            // No button any more, and therefore no number: D5 forbids any statement about the
+            // conversations outside the segment. A digit here would be exactly the return the
+            // decision rules out.
+            await expect(page.locator('[data-dm-neu]'), `${width}px: der alte Eröffnen-Knopf steht wieder da`).toHaveCount(0)
+            expect(
+                ((await zeile.textContent()) ?? '').match(/\d+/g),
+                `${width}px: die Zeile trägt eine Zahl`,
+            ).toBeNull()
 
             const box = (await panel.boundingBox()) as { width: number; height: number }
             bericht.push(`${width}px: Abschnitt ${box.width.toFixed(2)}×${box.height.toFixed(2)}`)
 
-            // Der Kopf allein hält bereits die 44-px-Zeile (`min-h-11` steht an der
-            // Zeile, nicht am Knopf — siehe Kommentar in `dm-list.blade.php`).
-            expect(box.height, `${width}px: DM-Abschnitt ist ${box.height}px hoch, erwartet ≥ 44px (Kopfzeile allein)`).toBeGreaterThanOrEqual(44)
+            // `min-h-11` sits on the ROW (see `dm-list.blade.php`), so the section is at least
+            // as tall as the thumb target.
+            expect(box.height, `${width}px: DM-Abschnitt ist ${box.height}px hoch, erwartet ≥ 44px`).toBeGreaterThanOrEqual(44)
             expect(box.width, `${width}px: DM-Abschnitt ragt aus dem Viewport (${box.width}px)`).toBeLessThanOrEqual(width)
         }
         console.log(`\n[mobile-erreichbarkeit/buzz] DM-Abschnitt\n${bericht.join('\n')}`)
     })
 
-    test('Touch-Ziel "Neue Unterhaltung": 32×32 auf feinem Zeiger, 44×44 auf grobem (pointer:coarse, gerendert gemessen)', async ({
+    test('touch target of the row: 44 px tall on a fine AND on a coarse pointer (measured as rendered)', async ({
         page,
         browser,
     }) => {
         await page.setViewportSize({ width: 390, height: 800 })
         await loginBuzz(page)
-        const knopfMaus = page.locator('[data-dm-neu]')
-        await expect(knopfMaus).toBeVisible()
-        const feinBox = (await knopfMaus.boundingBox()) as { width: number; height: number }
-        console.log(`[mobile-erreichbarkeit/buzz] Knopf, feiner Zeiger: ${feinBox.width}×${feinBox.height}`)
-        expect(feinBox.width, `feiner Zeiger: Breite ${feinBox.width}px, erwartet ≈32px`).toBeCloseTo(32, 0)
-        expect(feinBox.height, `feiner Zeiger: Höhe ${feinBox.height}px, erwartet ≈32px`).toBeCloseTo(32, 0)
+        const zeileMaus = page.locator('[data-dm-oeffnen]')
+        await expect(zeileMaus).toBeVisible()
+        const feinBox = (await zeileMaus.boundingBox()) as { width: number; height: number }
+        console.log(`[mobile-erreichbarkeit/buzz] Zeile, feiner Zeiger: ${feinBox.width}×${feinBox.height}`)
+        // 44 px on BOTH pointers, and that is the difference to the old button: `min-h-11` is
+        // a row height, not a `(pointer: coarse)` branch.
+        expect(feinBox.height, `feiner Zeiger: Höhe ${feinBox.height}px, erwartet ≥ 44px`).toBeGreaterThanOrEqual(44)
 
         // Eigener Context: `hasTouch` ist eine CONTEXT-Option und in einem laufenden
         // Test nicht umschaltbar (gleiche Bauform wie `forge-code-zeile-touch.spec.ts`).
@@ -263,12 +295,11 @@ test.describe('Space-Seite: der DM-Abschnitt mit echtem Inhalt — Kopf, Knopf, 
             'hasTouch hat (pointer: coarse) nicht gekippt — die Sonde wäre blind',
         ).toBe(true)
 
-        const knopfGrob = grob.locator('[data-dm-neu]')
-        await expect(knopfGrob).toBeVisible()
-        const grobBox = (await knopfGrob.boundingBox()) as { width: number; height: number }
-        console.log(`[mobile-erreichbarkeit/buzz] Knopf, grober Zeiger: ${grobBox.width}×${grobBox.height}`)
-        expect(grobBox.width, `grober Zeiger: Breite ${grobBox.width}px, erwartet ≈44px`).toBeCloseTo(44, 0)
-        expect(grobBox.height, `grober Zeiger: Höhe ${grobBox.height}px, erwartet ≈44px`).toBeCloseTo(44, 0)
+        const zeileGrob = grob.locator('[data-dm-oeffnen]')
+        await expect(zeileGrob).toBeVisible()
+        const grobBox = (await zeileGrob.boundingBox()) as { width: number; height: number }
+        console.log(`[mobile-erreichbarkeit/buzz] Zeile, grober Zeiger: ${grobBox.width}×${grobBox.height}`)
+        expect(grobBox.height, `grober Zeiger: Höhe ${grobBox.height}px, erwartet ≥ 44px`).toBeGreaterThanOrEqual(44)
 
         await ctx.close()
     })
