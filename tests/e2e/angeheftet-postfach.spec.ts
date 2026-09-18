@@ -188,14 +188,21 @@ test('P3/D7: a pin round trip against the relay — published, requeried, and re
     // the only thing in the payload — that case is measured in `js/pinSet.test.ts`.
     expect(Object.keys(nachPin).length).toBeGreaterThanOrEqual(Object.keys(vorher).length + 1)
 
-    // ══ 2. Unpin — and the removal has to be an ENTRY, not a missing key ══════════════
-    await page.goto('/bereich/chat')
-    const knopf2 = page.locator(`[data-pin-key="${key}"]`)
-    await expect(knopf2, 'the pin state did not survive the reload').toHaveAttribute('aria-pressed', 'true', {
+    // ══ 2. Unpin — from the CHIP on Start (the touch surface), and the removal has to be
+    //     an ENTRY, not a missing key ═══════════════════════════════════════════════════
+    // Until 2026-09-18 this half went back to /bereich/chat and unpinned through the
+    // room tile's button, because the chip had NO affordance of its own — the
+    // production report of that day asked how to get a pin out of the bar at all.
+    // The chip carries the same `<x-group::pin-toggle>` now (always visible: `:hover`
+    // never fires on a touch device — the `room-tile` rule), so the unpin is measured
+    // where a thumb actually is: on Start, on the chip row, at 390 px.
+    const chipLoeser = page.locator(`[data-pin-toggle][data-pin-key="${key}"]`)
+    await expect(chipLoeser, 'the chip carries no unpin affordance on Start').toBeVisible()
+    expect(await chipLoeser.getAttribute('aria-pressed'), 'the chip toggle does not carry the pinned state').toBe('true')
+    await chipLoeser.click()
+    await expect(page.locator(`[data-pin-chip="${key}"]`), 'the chip survived its own unpin press').toHaveCount(0, {
         timeout: 25_000,
     })
-    await knopf2.click()
-    await expect(knopf2).toHaveAttribute('aria-pressed', 'false')
 
     // Again the relay first, for the same reason as above.
     await expect
