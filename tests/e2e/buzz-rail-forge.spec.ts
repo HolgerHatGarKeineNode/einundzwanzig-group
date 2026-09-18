@@ -374,38 +374,35 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
      *      Artikel und Forge gleichrangig nebeneinander stehen. Die Rail-Fußzeile ist die
      *      Desktop-Entsprechung dieser Ebene, und dort fehlte von den dreien genau einer.
      *
-     * **Warum das keine Umgehung ist.** Die Regel wäre umgangen, wenn der Eintrag unter
-     * anderem Namen zurückkäme oder wenn dieser Test gelockert würde, ohne die Sache zu
-     * ändern. Beides ist nicht der Fall: der Eintrag heißt „Forge", er steht in der
-     * Fußzeile statt im Scroller, und die Zusage wird nicht schwächer, sondern PRÄZISER —
-     * geprüft wird jetzt, dass es genau ZWEI Wege gibt und wohin jeder führt.
+     * **Why this is not a bypass.** The rule would be bypassed if the entry came back
+     * under a different name, or if this test were loosened without the matter
+     * changing. Neither is the case: the foot entry was honestly removed with P6
+     * (together with the whole foot bar), and the promise does not get weaker but
+     * MORE PRECISE — what is checked now is that there is exactly ONE labeled way
+     * and where it leads.
      *
      * Was unverändert gilt und hier weiter geprüft wird: im SCROLLER steht kein flacher
      * Forge-Eintrag neben den Gruppen. Das war der Kern der Regel.
      */
-    test('Die Übersichtsseite bleibt erreichbar — Sektionsname, Icon und die Fußzeile führen dorthin', async ({ page }) => {
+    test('The overview page stays reachable — via the section name', async ({ page }) => {
         await openRail(page)
 
-        // Genau ZWEI Links heißen „Forge": der Sektionskopf und die Fußzeilen-Zeile.
-        // Ein dritter wäre die Doppelung, gegen die Regel 1 geschrieben wurde.
-        await expect(rail(page).getByRole('link', { name: 'Forge', exact: true })).toHaveCount(2)
+        // Exactly ONE link is named "Forge": the section head. (Until P6 a foot-bar
+        // row with `data-rail-fuss` stood next to it — gone with the foot bar; until
+        // 2026-09-18 additionally a `</>` icon link to the same address, removed
+        // after the user report about an unnameable entry in this bar — a bare icon
+        // in a text column reads as an intruder. Both removals make the promise not
+        // weaker but more precise: there is exactly ONE labeled way in this column,
+        // and it carries its name.)
+        await expect(rail(page).getByRole('link', { name: 'Forge', exact: true })).toHaveCount(1)
 
-        // Weg 1: das `</>`-Icon, mit Namen (sonst wäre es ein Rätsel).
-        await expect(rail(page).getByRole('link', { name: 'Forge-Übersicht öffnen' })).toBeVisible()
-
-        // Weg 2: die Fußzeilen-Zeile. Sie ist der P5-Neuzugang und trägt einen eigenen
-        // Anker, weil „Forge" in dieser Spalte mehrfach als Text vorkommt.
-        const fuss = rail(page).locator('[data-rail-fuss="forge"]')
-        await expect(fuss).toBeVisible()
-        // Und sie steht NICHT im Scroller, sondern in der Fußzeile — der eigentliche
-        // Inhalt von Regel 1. Der Scroller ist die Raumliste; ein Artikel oder eine
-        // Forge sind keine Räume.
-        await expect(rail(page).locator('[data-rail-scroller] [data-rail-fuss="forge"]')).toHaveCount(0)
-
-        // Weg 3: der Sektionsname selbst. Er heißt seit P5 „Forge" statt „Workspace" —
-        // `.first()` ist in DOM-Reihenfolge der Kopf, die Fußzeile kommt danach.
+        // And it actually leads there.
         await rail(page).getByRole('link', { name: 'Forge', exact: true }).first().click()
         await page.waitForURL('**/forge', { timeout: 20_000 })
+
+        // What still holds and is still checked here: the SCROLLER carries no flat
+        // Forge entry next to the groups. That was the core of the rule.
+        await expect(rail(page).locator('[data-rail-scroller] [data-rail-fuss="forge"]')).toHaveCount(0)
     })
 
     test('Alt+↑/↓ erreicht die Baum-Zeilen — Repo, Kanal, Issues und Pull Requests', async ({ page }) => {
