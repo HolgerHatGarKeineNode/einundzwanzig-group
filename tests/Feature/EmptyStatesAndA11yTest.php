@@ -70,7 +70,10 @@ test('Leerer Raum: genau EIN CTA, Fokus-Kaskade nach Zustand (Mitglied → Compo
     // verweigerten Anfrage, keine Aussage über den Raum (p11-messung.md A3:
     // Messraum trug genau eine echte Nachricht, die Karte behauptete trotzdem
     // „Noch keine"). E2E-gedeckt in tests/e2e/onboarding.spec.ts (P11-Block).
-    $block = extractBetween($html, '<template x-if="!loading && messages.length === 0 && $store.authGate?.authed && !gatedOut">', '</template>');
+    // Rail-Fix 2026-09-18: `&& !raumUnbekannt` — ist der Raum in dieser Session
+    // nicht bekannt (z. B. verschlüsselte Unterhaltung ohne lokalen Datenstand),
+    // lügt die Leerkarte ("Schreib die erste"); die Unbekannt-Karte übernimmt.
+    $block = extractBetween($html, '<template x-if="!loading && messages.length === 0 && $store.authGate?.authed && !gatedOut && !raumUnbekannt">', '</template>');
     expect($block)->not->toBeNull();
 
     // Genau EIN Bedienelement in diesem Leerzustand-Block.
