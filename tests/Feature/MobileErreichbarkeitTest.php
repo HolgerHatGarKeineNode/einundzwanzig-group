@@ -96,10 +96,15 @@ test('CORE PROOF: every surface carries the avatar, and everything of one own ha
     expect($chat)->toContain('data-space-mitglieder');
     expect($chat)->toContain(route('group.bereich.leute'));
 
-    // And the section for the conversations, together with its open button.
+    // And the section for the conversations. Since P3 it is ONE neutral row that leads to the
+    // Direkt segment — no list, no count, no compose button (D5: a conversation list IS the
+    // decrypted state, and the compose button lived on the store that no longer stands here).
+    // `data-dm-neu` therefore moved with the person picker into the segment itself.
     expect($chat)
         ->toContain('data-dm-panel')
-        ->toContain('data-dm-neu');
+        ->toContain('data-dm-oeffnen')
+        ->toContain(route('group.postfach', ['ansicht' => 'direkt']));
+    expect($chat)->not->toContain('data-dm-neu');
 });
 
 test('der DM-Abschnitt hängt an der Breite UND am Tab — nicht nur an einem von beiden', function () {
@@ -131,37 +136,55 @@ test('the Buzz DM dialog is nowhere in the document any more', function () {
     expect(file_exists($views.'dm-modal.blade.php'))->toBeFalse();
 });
 
-test('the wrap store is mounted on EVERY page behind the gate — exactly once', function () {
-    // This is the promise that justifies the location: `app-frame` is the root of exactly
-    // those pages, and the wrap subscription is the one request whose answers cost the
-    // signer. A second mount would be a second reason to keep it alive; none would leave
-    // the rail and the overview with an empty list.
-    foreach (['group.bereich.chat', 'group.bereich.leute', 'group.ich.lesezeichen', 'group.postfach', 'group.start', 'group.ich'] as $route) {
+test('the wrap store is mounted NOWHERE but the Direkt segment — and there behind an x-if', function () {
+    // ── What this case asserted until P3, and why the opposite holds now ───────────────
+    // Until P3 it was called "the wrap store is mounted on EVERY page behind the gate —
+    // exactly once" and pinned the mount to `app-frame.blade.php`. D5 inverts that: NIP-17
+    // wraps are decrypted only while „Direkt" is open. `mount()` arms the wrap subscription,
+    // and every envelope it answers with costs the user's signer two `nip44.decrypt` — on
+    // NIP-46 two bunker round trips. A page that shows or counts conversations has already
+    // paid for that.
+    //
+    // The case is rewritten and not deleted (D15): the promise turned around, the surface is
+    // still there.
+    foreach (['group.bereich.chat', 'group.bereich.leute', 'group.ich.lesezeichen', 'group.start', 'group.ich'] as $route) {
         $html = (string) mitSitzung($this, $route)->assertOk()->getContent();
 
-        expect(substr_count($html, 'x-data="nostrPrivateMessages"'))->toBe(1, $route);
+        expect(substr_count($html, 'nostrPrivateMessages'))->toBe(0, $route);
     }
 
-    // CONTROL: the rail does NOT mount the store itself. "Exactly once" above would also
-    // be green if the mount had moved from `app-frame` into the rail — and then it would
-    // stand nowhere on a phone. Checked at the source with comments stripped, because
-    // `desktop-rail.blade.php` EXPLAINS the location in prose.
-    $views = __DIR__.'/../../packages/einundzwanzig-group/resources/views/components/';
+    // On the Postfach the mount stands exactly once — in the server markup INSIDE the
+    // `<template>` from which Alpine builds it only once the segment is chosen.
+    $postfach = (string) mitSitzung($this, 'group.postfach')->assertOk()->getContent();
+    expect(substr_count($postfach, 'x-data="nostrPrivateMessages"'))->toBe(1);
+
+    // THIS is the load-bearing half: `x-if` and not `x-show`. Alpine initialises `x-data`
+    // inside CSS-hidden elements as well — under `x-show` the decryption would run in all
+    // five segments and the assertion above would still be green.
+    $vorIsland = substr($postfach, 0, (int) strpos($postfach, 'x-data="nostrPrivateMessages"'));
+    expect($vorIsland)->toContain("feed === 'direkt'");
+    // The LAST `<template` before the island has to carry its condition — with an `x-show`
+    // there would be no `<template` between the condition and the island at all.
+    expect(substr($vorIsland, (int) strrpos($vorIsland, '<template')))
+        ->toContain("feed === 'direkt'");
+
+    // CONTROL: the mount is GONE from `app-frame.blade.php`, not merely moved. The "0
+    // occurrences" above would also be green if `app-frame` were no longer rendered at all.
+    // Checked at the source with comments stripped — both files EXPLAIN the move in prose and
+    // name the island while doing so.
+    $views = __DIR__.'/../../packages/einundzwanzig-group/resources/views/';
     $ohneKommentare = fn (string $datei): string => (string) preg_replace(
         '/\{\{--[\s\S]*?--\}\}/', '', (string) file_get_contents($views.$datei)
     );
 
-    expect($ohneKommentare('desktop-rail.blade.php'))->not->toContain('nostrPrivateMessages');
-    expect($ohneKommentare('app-frame.blade.php'))->toContain('x-data="nostrPrivateMessages"');
+    expect($ohneKommentare('components/app-frame.blade.php'))->not->toContain('nostrPrivateMessages');
+    expect($ohneKommentare('components/desktop-rail.blade.php'))->not->toContain('nostrPrivateMessages');
+    expect($ohneKommentare('partials/postfach/direkt.blade.php'))->toContain('x-data="nostrPrivateMessages"');
 
-    // CONTROL: the comment stripper really strips. Anchored on a string the rail carries
-    // ONLY in prose — "wrap subscription" stands in the paragraph explaining why the mount
-    // lives elsewhere. Without this control the assertion above would also be green if
-    // `preg_replace` swallowed the whole file (`null` → `''` through the string cast), and
-    // then the case would check nothing at all.
-    $railRoh = (string) file_get_contents($views.'desktop-rail.blade.php');
-    expect($railRoh)->toContain('wrap subscription');
-    expect($ohneKommentare('desktop-rail.blade.php'))->not->toContain('wrap subscription');
+    // CONTROL: the comment stripper really strips. Anchored on a string `app-frame` carries
+    // ONLY in prose. Without this control the assertion above would also be green if
+    // `preg_replace` had swallowed the whole file (`null` → `''` through the cast).
+    expect((string) file_get_contents($views.'components/app-frame.blade.php'))->toContain('nostrPrivateMessages');
 });
 
 // ── Der eigene Präsenzpunkt ─────────────────────────────────────────────────────────
