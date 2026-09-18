@@ -216,5 +216,33 @@ test('Desktop (xl): die xl-Anordnung fuegt KEINEN Fokus-Stopp hinzu', async ({ p
     await page.waitForTimeout(300)
     const darunter = await stopps()
 
-    expect(beiXl).toEqual(darunter)
+    // ── The ONE difference, and why it is none in the sense of this promise (P6) ────
+    //
+    // Since the command bar (D10) IT carries the avatar from `xl` up, and the page header
+    // steps aside there (`me-avatar.blade.php`, `xl:hidden` in the web host). From `xl` up the
+    // stage therefore LOSES exactly one stop — it gains none, which is what this case
+    // promises.
+    //
+    // Measured rather than assumed: the difference was exactly `a:Angemeldet als …`.
+    //
+    // The avatar has moved, not vanished. The second assertion below pins that down —
+    // otherwise this exception would also cover an accidental deletion.
+    const avatarZeile = (liste: string[]): string[] => liste.filter((eintrag) => /^a:Angemeldet als/.test(eintrag))
+    expect(avatarZeile(beiXl), 'ab xl trägt die Kommandoleiste den Avatar, nicht die Bühne').toEqual([])
+    expect(avatarZeile(darunter), 'darunter steht er im Seitenkopf').toHaveLength(1)
+
+    expect(beiXl).toEqual(darunter.filter((eintrag) => !/^a:Angemeldet als/.test(eintrag)))
+
+    // And it moved rather than got lost: at BOTH widths the document carries exactly one
+    // visible way to „Ich" — the bar's from `xl` up, the header's below.
+    const wegeZuIch = async (): Promise<number> =>
+        page.evaluate(
+            () =>
+                [...document.querySelectorAll<HTMLElement>('[data-app-header-avatar], [data-command-bar-avatar]')]
+                    .filter((el) => el.offsetParent !== null).length,
+        )
+    expect(await wegeZuIch(), 'unterhalb xl: der Avatar des Kopfes').toBe(1)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.waitForTimeout(300)
+    expect(await wegeZuIch(), 'ab xl: der Avatar der Kommandoleiste').toBe(1)
 })

@@ -196,54 +196,18 @@ test('auf dem Gerät (NativePHP) gibt es keinen Platzhalter', function () {
     expect($html)->not->toContain('data-rail-skelett');
 });
 
-test('the footer carries exactly one row on BOTH sides — coupled, not claimed twice', function () {
-    // ── What stood here until P2, and why it is measured differently ───────────────
+test('both sides carry the SAME three layout blocks — coupled, not claimed twice', function () {
+    // ── What this case has measured, phase by phase ────────────────────────────────
     //
-    // Two cases used to check that the placeholder reserves as many NAV rows
-    // (`config('group.nav')`) and as many AREA rows (Artikel · Forge · Lesezeichen ·
-    // Verschlüsselt, one of them hanging on `workspace_url`) as the rail renders. Both
-    // blocks are gone with Concept C: the nav registry no longer exists, and neither do the
-    // four area rows (Start carries "Alle Bereiche", the command palette finds the rest).
+    // Until P2 it compared the NAV rows and the four AREA rows of the footer; P2 removed
+    // both and left it comparing the one row the footer still had, the identity. P6 removes
+    // the footer itself — the avatar sits in the command bar now
+    // (`command-bar.blade.php`) — so what is left to compare is the block structure.
     //
-    // The PROMISE of this file stays the same and is still measured against the rail rather
-    // than against a second literal: what the rail's footer renders, the placeholder
-    // reserves. Today that is exactly one row — the identity.
-    config(['nativephp-internal.running' => false]);
-
-    $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
-    $platzhalter = railSkelettHtmlAus($ganz);
-    $rail = str_replace($platzhalter, '', $ganz);
-
-    // The profile row carries the same anchor on both sides. It FINDS something — so the
-    // coupling promise below is calibrated and not merely "0 === 0". Measuring on the
-    // geometry class was no good: `flex items-center gap-1` occurs four times in this rail,
-    // measured 4 instead of 1.
-    $fusszeile = fn (string $html): int => substr_count($html, 'data-rail-fuss-profil');
-
-    expect($fusszeile($rail))->toBe(1, 'the rail does not render exactly one footer row');
-    expect($fusszeile($platzhalter))->toBe(
-        $fusszeile($rail),
-        'the placeholder reserves '.$fusszeile($platzhalter).' footer rows while the rail renders '.$fusszeile($rail),
-    );
-
-    // And the footer hangs on NO configuration any more. It used to do so twice
-    // (`workspace_url` for the forge row, `nav` for the tabs); both are the reason this test
-    // ran against several configurations. The right statement now is that the number does
-    // NOT move any more — checked through the very switch that used to move it.
-    foreach (['wss://buzz.test/', null] as $workspace) {
-        config(['group.workspace_url' => $workspace]);
-
-        $erneut = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
-        $platzhalterErneut = railSkelettHtmlAus($erneut);
-
-        expect($fusszeile($platzhalterErneut))->toBe(1);
-        expect($fusszeile(str_replace($platzhalterErneut, '', $erneut)))->toBe(1);
-    }
-});
-
-test('the removed footer blocks stand on NEITHER of the two sides any more', function () {
-    // D2 is a hard cut, and a hard cut needs a latch: without one, one of the three blocks
-    // would come back at the next opportunity, because "the rail has room after all".
+    // The PROMISE is unchanged and is still measured against the rail rather than against a
+    // second literal: what the rail renders in column 1, the placeholder reserves. Whoever
+    // adds a fourth block adds it on both sides in the same edit, otherwise the difference
+    // is a jump at boot (the most expensive one here was 38 px).
     config(['nativephp-internal.running' => false]);
     config(['group.workspace_url' => 'wss://buzz.test/']);
 
@@ -251,31 +215,90 @@ test('the removed footer blocks stand on NEITHER of the two sides any more', fun
     $platzhalter = railSkelettHtmlAus($ganz);
     $rail = str_replace($platzhalter, '', $ganz);
 
-    // 1. The four area rows. Their anchor is unambiguous — that is exactly why it was
-    //    introduced (the labels occur several times on the same page).
-    expect(substr_count($rail, 'data-rail-fuss="'))->toBe(0);
+    // The three blocks, counted by the class signature each of them carries in BOTH files —
+    // header (`pt-4 pb-3`), search field (`mx-3 mb-2`), scroller (`min-h-0 flex-1`). Not by
+    // counting direct children: that needs a parser in the server test, and the geometry
+    // half is measured in the browser anyway (`desktop-boot-geometrie.spec.ts` compares the
+    // rendered children block for block and throws on any count other than three).
+    $bloecke = fn (string $html): array => [
+        'kopf' => substr_count($html, 'shrink-0 items-center gap-2.5 px-4 pt-4 pb-3'),
+        'feld' => substr_count($html, 'mx-3 mb-2 flex shrink-0 items-center gap-1.5 rounded-tile'),
+        'liste' => substr_count($html, 'min-h-0 flex-1 overflow-'),
+    ];
 
-    // 2. The vertical set of nav tabs. Measured on the class signature of the rail form of
-    //    `nav-tab.blade.php` — and ADDITIONALLY at the source, because a missing call is the
-    //    only cause that counts here: the component itself may keep its rail form as long as
-    //    nobody calls it any more.
-    expect(substr_count($rail, 'gap-2.5 rounded-tile px-2'))->toBe(0);
-    expect(substr_count($platzhalter, 'gap-2.5 rounded-tile px-2'))->toBe(0);
+    // Calibrated: every one of the three FINDS something on the rail side, so the equality
+    // below is not "0 === 0" three times over.
+    expect($bloecke($rail))->toBe(['kopf' => 1, 'feld' => 1, 'liste' => 1]);
+    expect($bloecke($platzhalter))->toBe($bloecke($rail));
 
+    // And the structure hangs on NO configuration. It used to do so twice (`workspace_url`
+    // for the forge row, `nav` for the tabs) — which is why this case runs through the very
+    // switch that used to move it.
+    foreach (['wss://buzz.test/', null] as $workspace) {
+        config(['group.workspace_url' => $workspace]);
+
+        $erneut = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+        $platzhalterErneut = railSkelettHtmlAus($erneut);
+
+        expect($bloecke($platzhalterErneut))->toBe(['kopf' => 1, 'feld' => 1, 'liste' => 1]);
+        expect($bloecke(str_replace($platzhalterErneut, '', $erneut)))->toBe(['kopf' => 1, 'feld' => 1, 'liste' => 1]);
+    }
+});
+
+test('the removed blocks stand on NEITHER of the two sides any more', function () {
+    // D2 is a hard cut, and a hard cut needs a latch: without one, one of these blocks would
+    // come back at the next opportunity, because "the rail has room after all".
+    config(['nativephp-internal.running' => false]);
+    config(['group.workspace_url' => 'wss://buzz.test/']);
+
+    $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+    $platzhalter = railSkelettHtmlAus($ganz);
+    $rail = str_replace($platzhalter, '', $ganz);
     $railQuelle = (string) file_get_contents(
         dirname(__DIR__, 2).'/packages/einundzwanzig-group/resources/views/components/desktop-rail.blade.php'
     );
+    $skelettQuelle = (string) file_get_contents(
+        dirname(__DIR__, 2).'/packages/einundzwanzig-group/resources/views/components/rail-skelett.blade.php'
+    );
+
+    // 1. The four area rows of the old footer. Their anchor is unambiguous — that is exactly
+    //    why it was introduced (the labels occur several times on the same page).
+    expect(substr_count($rail, 'data-rail-fuss="'))->toBe(0);
+
+    // 2. The vertical set of nav tabs. Measured on the class signature of the rail form of
+    //    `nav-tab.blade.php` — and ADDITIONALLY at the source, because a missing CALL is the
+    //    only cause that counts here: the component may keep its rail form as long as nobody
+    //    calls it any more.
+    expect(substr_count($rail, 'gap-2.5 rounded-tile px-2'))->toBe(0);
+    expect(substr_count($platzhalter, 'gap-2.5 rounded-tile px-2'))->toBe(0);
     expect($railQuelle)->not->toContain('<x-group::bottom-nav');
 
-    // 3. The bell. It led to `/updates` and is the second way in that the Postfach replaces
-    //    as a nav slot.
+    // 3. The bell. It led to `/updates`; the Postfach is a slot of the bottom bar and an icon
+    //    of the command bar now.
     expect($rail)->not->toContain('flux:icon.bell');
     expect($railQuelle)->not->toContain('icon.bell');
 
-    // POSITIVE CONTROL for 1.: the anchor search term is not simply misspelled. The row
-    // "Alle Räume & Entdecken" at the foot of the SCROLLER carries the same geometry class as
-    // the removed area rows and still stands there — so the measurement does see something,
-    // it only does not find the footer rows.
+    // 4. P6 — the footer itself, with the identity row that was its last content. Both
+    //    anchors are checked, because the row and its block died together and either one
+    //    coming back alone would be the same mistake.
+    expect(substr_count($rail, 'data-rail-fuss-profil'))->toBe(0);
+    expect(substr_count($platzhalter, 'data-rail-fuss-profil'))->toBe(0);
+    expect(substr_count($rail, 'border-t border-zinc-200 px-3 py-2'))->toBe(0);
+    expect(substr_count($platzhalter, 'border-t border-zinc-200 px-3 py-2'))->toBe(0);
+    // At the SOURCE as well, and in both files: a footer that renders only under a condition
+    // would be invisible to the rendered check above.
+    expect($railQuelle)->not->toContain('data-rail-fuss-profil');
+    expect($skelettQuelle)->not->toContain('data-rail-fuss-profil');
+    // The identity island is what made the footer expensive — it is gone from this column
+    // with it. Measured at the SOURCE and not in `$rail`: that string is the whole frame
+    // minus the placeholder, and the command bar in it carries the avatar legitimately
+    // (`me-avatar.blade.php` mounts `nostrAuth` there, as it does in every app header).
+    expect($railQuelle)->not->toContain('nostrAuth');
+
+    // POSITIVE CONTROL for the searches above: the class-signature style of measurement does
+    // see things in this rail. The row "Alle Räume & Entdecken" at the foot of the SCROLLER
+    // carries the same geometry class as the removed area rows and still stands there — so
+    // the measurement finds something, it only does not find the footer.
     expect(substr_count($rail, 'min-h-9 items-center gap-2 rounded-tile px-2'))->toBeGreaterThan(0);
 });
 

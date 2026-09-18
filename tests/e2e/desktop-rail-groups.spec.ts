@@ -1,6 +1,12 @@
 /**
  * Der Desktop-Navigator, gruppiert (Projekt `desktop`, 1440 px).
  *
+ * **Reshaped by P6/D10 („Deine Leiste"), and this file follows that reshape.** What it
+ * measures is unchanged: the ROOM GROUPS — collapsing, the search field, the scope chip, and
+ * that the stage does not double the column. What P6 put above them (Start, the pins) and the
+ * keyboard are measured in `desktop-left-bar.spec.ts`; the bar above the stage in
+ * `desktop-command-bar.spec.ts`. Three files, three subjects, no third copy of the login.
+ *
  * Der Name trägt das `desktop-`-Präfix mit Absicht: laut `playwright.config.ts`
  * fährt nur das 1440px-Projekt solche Dateien, und die Bestandssuite (1279 px)
  * ignoriert sie. Was hier steht, wird also garantiert OBERHALB des Breakpoints
@@ -43,9 +49,12 @@ test('Ab 1280 px steht der Navigator — und die Bottom-Nav nicht mehr', async (
     expect(page.viewportSize()?.width, 'Projekt-Viewport muss über 1280 liegen').toBeGreaterThanOrEqual(1280)
     await expect(rail(page)).toHaveCount(1)
 
-    // Die drei Nav-Ziele liegen jetzt IN der Rail; die fixe Bar ist ab xl versteckt.
-    await expect(rail(page).getByText('Chat', { exact: true })).toBeVisible()
+    // The fixed bottom bar is hidden from `xl` up. What replaced it there is the command bar
+    // above the stage (P6) — the three global affordances live in it, so this case asserts the
+    // handover rather than „three nav targets in the rail", which is what stood here until P6
+    // and had been wrong since P2 (that footer row set went away with Concept C).
     await expect(page.locator('nav.fixed')).toBeHidden()
+    await expect(page.locator('[data-command-bar]')).toBeVisible()
 })
 
 test('Gruppen: Räume offen, die anderen zu — und der Zustand überlebt wire:navigate', async ({ page }) => {
@@ -128,6 +137,12 @@ test('Token-Lift: getipptes `m:` wandert in den Chip und filtert auf Meetups', a
  */
 test('Ab 1280 px zeigt die Bühne die Raumliste nicht mehr — die Rail trägt sie', async ({ page }) => {
     await openApp(page)
+    // The discovery rows this case is about live on the CHAT AREA, and since P2 the login
+    // lands on Start — so the surface has to be opened explicitly. Without this line the
+    // assertions below ran against Start, where none of those labels exists; the case was red
+    // for that reason and not for the one it is about.
+    await page.goto('/bereich/chat')
+    await expect(rail(page)).toBeVisible({ timeout: 20_000 })
 
     // Der Navigator führt die Räume.
     await expect(rail(page).getByRole('button', { name: /Willkommen/ }).first())
@@ -140,22 +155,27 @@ test('Ab 1280 px zeigt die Bühne die Raumliste nicht mehr — die Rail trägt s
     const buehne = page.locator('main')
     await expect(buehne.locator('span').filter({ hasText: /^Meine Räume$/ })).toBeHidden()
 
-    // Was bleiben MUSS: die Wege, die es in der Rail nicht gibt.
-    // Nur die Meetup-Zeile: „Projektunterstützung entdecken" erscheint erst, wenn
-    // Antragsräume existieren, und der zooid-Seed hat keine. Eine Zusicherung über
-    // eine Zeile, die im Seed gar nicht vorkommt, prüfte den Seed, nicht den Umbau.
-    await expect(buehne.getByText('Meetup-Räume entdecken')).toBeVisible({ timeout: 20_000 })
+    // ── What stood here until P6, and why it is gone ──────────────────────────────
+    // Two assertions about the discovery ways at the foot of the card: that the row
+    // "Meetup-Räume entdecken" stays, and that the rule above it disappears from `xl` up.
+    // **Both lost their subject with P2.** The four discovery rows were deleted with D2
+    // (Start carries "Alle Bereiche", the palette finds the rest), and the only content left
+    // in that block — "Neuen Raum anlegen" — hangs on `isAdmin`, which the test user does not
+    // have. Measured: `[data-discover]` is not in the DOM in this run at all, so the probe
+    // would have judged the empty set.
+    //
+    // What REMAINS of the promise stands above and below: the stage no longer shows the room
+    // list, and it does not double the pins either.
 
-    // Und die Trennlinie über den Entdecken-Wegen ist weg: sie trennt von den
-    // Raumlisten, die es hier nicht mehr gibt. Ein Strich am oberen Rand der Karte
-    // trennt nichts von nichts.
-    // Gemessen an der GERENDERTEN Kante, nicht an einer Klassenliste: die Klasse
-    // hängt an einer Alpine-Bindung, und ein Klassen-Locator prüfte den Ausdruck
-    // statt seiner Wirkung.
-    const borderTop = await buehne.locator('[data-discover]').evaluate(
-        (el) => getComputedStyle(el).borderTopWidth,
-    )
-    expect(borderTop, 'kein Strich am oberen Rand der Karte').toBe('0px')
+    // P6 extends the same rule to the PINS: Start shows them as chips, the column shows them
+    // as rows, and from `xl` up only the column does. Measured on Start, because that is the
+    // only surface carrying the chips — and on „hidden" rather than „absent", because the
+    // mechanism is CSS (`xl:hidden`) and a `toHaveCount(0)` would pass if someone deleted the
+    // block altogether, quietly covering the mobile case.
+    await page.goto('/start')
+    await expect(rail(page)).toBeVisible({ timeout: 20_000 })
+    await expect(rail(page).locator('[data-rail-pins]'), 'the column carries the pins').toBeVisible({ timeout: 20_000 })
+    await expect(page.locator('[data-start-angeheftet]'), 'the stage must not double them').toBeHidden()
 })
 
 /**
