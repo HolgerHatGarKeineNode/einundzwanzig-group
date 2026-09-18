@@ -21,6 +21,8 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 test('Unter 1280 px existiert kein Rail-Knoten — und keine Rail-Insel', async ({ page }) => {
     await useZooid(page)
     await loginNsec(page, NSEC)
+    // Since P2 a login lands on `/start` (D3); this case measures the room list.
+    await page.goto('/bereich/chat')
     await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
 
     // Vorbedingung scharf halten: der Test misst nur etwas, wenn er wirklich

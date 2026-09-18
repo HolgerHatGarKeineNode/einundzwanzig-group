@@ -111,19 +111,15 @@ test('a room pinned in this column appears as a pin in it — and leaves again',
             }),
         )}`,
     )
-    // The row carries a NAME and not an empty box — that much is the promise of this
-    // surface.
+    // The row carries the room's NAME — „Willkommen", not the raw `h` „welcome".
     //
-    // **What it does NOT assert, and why: today that name is the raw `h` („welcome"), not the
-    // room's title („Willkommen"), and that is a defect of the pin row itself rather than of
-    // this column.** Measured in the log line above:
-    // `room:welcome@ws://localhost:3340/ → welcome`. `pinRows` (`js/pinSetSync.ts`) resolves
-    // the label with `roomsById.get(parts.h)`, while that map is keyed by
-    // `makeRoomId(url, h)` = `${url}'${h}` (`js/groups.ts`) — the lookup can never hit, so
-    // every pinned room falls back to `pinChipFallback`. It shows up on Start's chips exactly
-    // the same way and predates P6; it is reported, not fixed here. This assertion is
-    // therefore worded so it stays true either way: what must not happen is an empty row.
-    await expect(pinZeile).toHaveText(/\S/, { timeout: 25_000 })
+    // P6 measured the opposite here and reported it: `pinRows` (`js/pinSetSync.ts`) looked
+    // the label up with `roomsById.get(parts.h)`, while that index is keyed by
+    // `makeRoomId(url, h)` (`js/groups.ts`), so the lookup could never hit and every pinned
+    // room fell back to its `h` — on Start's chips just the same. P7 fixed it
+    // (`roomPinLookup`, unit cases in `js/roomPinLabel.test.ts`), and this is the behaviour
+    // half: the name arrives with the room's kind 39000, which no unit test can wait for.
+    await expect(pinZeile).toHaveText(/Willkommen/, { timeout: 25_000 })
 
     // The pins sit ABOVE the groups and BELOW Start — the order D10 asks for, measured on the
     // rendered boxes.
@@ -133,31 +129,21 @@ test('a room pinned in this column appears as a pin in it — and leaves again',
     expect(yStart).toBeLessThan(yPins)
     expect(yPins).toBeLessThan(yGruppe)
 
-    // And back: removing it takes the row out again. The set keeps a TOMBSTONE rather than
-    // dropping the key (`js/pinSet.ts`), which is invisible here on purpose — what the surface
-    // has to show is nothing.
+    // And back: removing it takes the row out again — **through the same menu it was made
+    // with.** The set keeps a TOMBSTONE rather than dropping the key (`js/pinSet.ts`), which
+    // is invisible here on purpose: what the surface has to show is nothing.
     //
-    // ── Why the removal goes through the STORE and not through the same menu ─────────────
-    // **Measured defect, reported and not fixed here (it predates P6):** the row's menu never
-    // offers „Anheftung des Raums aufheben" in an installation WITHOUT a configured workspace.
-    // `js/rail.ts` subscribes to the pin set inside `if (hasWorkspace())`, so `this.pinned`
-    // stays empty and `isPinned(room)` is always false — the entry keeps saying „anheften"
-    // however often it is pressed. Measured in this very run: the store held
-    // `["room:welcome@ws://localhost:3335/","area:wallet"]` while the island's `pinned` was
-    // `[]`. Every spec using `useZooid()` runs in exactly that configuration (it blanks
-    // `__nostrWorkspace` on purpose), and so does any space without a Buzz workspace.
-    //
-    // `$store.pinSet.toggle(key)` is the documented entry of that store („reachable from the
-    // markup") and the very call every pin affordance makes, so this removes the pin the same
-    // way the UI does — one layer below the defect, which belongs to the row's menu and not to
-    // this column.
-    const schluessel = (await pinZeile.getAttribute('data-pin-chip')) as string
-    await page.evaluate((key) => {
-        const store = (window as unknown as { Alpine: { store(n: string): { toggle(k: string): void } } }).Alpine.store(
-            'pinSet',
-        )
-        store.toggle(key)
-    }, schluessel)
+    // ── This half is the regression test of the third P6 finding ────────────────────────
+    // Until P7 the menu never offered „Anheftung des Raums aufheben" in an installation
+    // WITHOUT a configured workspace: `js/rail.ts` armed the pin set inside
+    // `if (hasWorkspace())`, so `this.pinned` stayed `[]` and `isPinned(room)` was always
+    // false — the entry kept saying „anheften" however often it was pressed. Every spec using
+    // `useZooid()` runs in exactly that configuration (it blanks `__nostrWorkspace` on
+    // purpose), and so does any space without a Buzz workspace. P6 therefore had to remove
+    // the pin through `$store.pinSet.toggle()`; that detour is gone with the defect.
+    await zeile.hover()
+    await leiste(page).getByRole('button', { name: /Einstellungen für Willkommen/ }).click()
+    await page.getByRole('menuitem', { name: 'Anheftung des Raums aufheben' }).click()
     await expect(pinZeile).toHaveCount(0, { timeout: 25_000 })
     await expect
         .poll(async () => pins(page).getByRole('link').count(), { timeout: 25_000 })

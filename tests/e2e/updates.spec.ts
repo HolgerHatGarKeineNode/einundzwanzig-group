@@ -331,6 +331,9 @@ function readStateAll(page: Page): Promise<number> {
 async function login(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
+    // Since P2 a login lands on `/start`, not on the room list (D3) — every case below
+    // measures the room list, so the helper opens it.
+    await page.goto('/bereich/chat')
 }
 
 /**
@@ -439,14 +442,6 @@ const threadRow = (page: Page, name: string) =>
 
 /** Die 2-px-Herkunfts-Rail einer Zeile (`x-show`, bleibt im DOM). */
 const rail = (row: ReturnType<typeof roomRow>) => row.locator('span.w-0\\.5').first()
-
-/**
- * Kopf-Pfeil von `/updates` zurück auf die Übersicht. Bewusst als LINK adressiert:
- * ohne `backExpr` rendert `app-header` einen `<a wire:navigate>` (der Raum dagegen
- * einen echten `<button>` mit Alpine-Aktion) — `getByRole('button')` läuft hier in
- * einen Timeout, und der sähe aus wie ein hängender Screen.
- */
-const updatesBack = (page: Page) => page.getByRole('link', { name: 'Zurück' })
 
 /** Sammelt `pageerror` + `console.error` — beides muss leer bleiben. */
 function collectErrors(page: Page): string[] {
@@ -694,7 +689,7 @@ test('Anker 4: Kaltstart im Thread ohne from → 2× Zurück auf /spaces, ohne h
  * (bestätigte Auslegung) — er fällt korrekt auf den Default und wird in der Thread-URL
  * durchgereicht. Deshalb steht er nur in der Ziel-, nicht in der Durchreich-Prüfung.
  */
-test('Anker 5: kaputtes ?from= landet auf /spaces und taucht in keiner Thread-URL auf', async ({ page }) => {
+test('Anker 5: kaputtes ?from= landet auf dem Default-Ziel und taucht in keiner Thread-URL auf', async ({ page }) => {
     test.setTimeout(150_000)
 
     await spyHistoryBack(page)
@@ -741,7 +736,7 @@ test('Anker 5: kaputtes ?from= landet auf /spaces und taucht in keiner Thread-UR
         await page.getByRole('button', { name: 'Zurück' }).click()
         await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 25_000 })
         const url = new URL(page.url())
-        expect(url.pathname, `?from=${junk} führte nicht auf das Default-Ziel`).toBe('/spaces')
+        expect(url.pathname, `?from=${junk} führte nicht auf das Default-Ziel`).toBe('/bereich/chat')
         expect((await backCalls(page)) - before, `?from=${junk}: UP-Ziel muss explizit angesteuert werden`).toBe(0)
     }
 })
@@ -1013,9 +1008,12 @@ test('Anchor 9: row height >= 76 px, Postfach slot >= 44x44, no sideways scroll 
     // Erst /updates messen (wir stehen dort), dann per Kopf-Pfeil auf /spaces —
     // beides warm, damit die Liste auch bei 320 px gefüllt bleibt.
     await page.setViewportSize({ width: 320, height: 720 })
-    for (const path of ['/updates', '/spaces']) {
-        if (path === '/spaces') {
-            await updatesBack(page).click()
+    // P7: the inbox is a HUB since P2 and its header carries no back arrow any more — it is
+    // one of the three nav slots, not a page one arrives at from somewhere. The second
+    // surface is therefore reached the way a person reaches it: through the navigation.
+    for (const path of ['/postfach', '/bereich/chat']) {
+        if (path === '/bereich/chat') {
+            await page.goto(path)
             await expect(page).toHaveURL(/\/bereich\/chat/, { timeout: 25_000 })
         }
         await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 25_000 })

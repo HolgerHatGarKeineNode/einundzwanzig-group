@@ -200,7 +200,7 @@ async function oeffneForge(page: Page, breite: number): Promise<void> {
     await zeigeWorkspaceAufZooid(page)
     await page.setViewportSize({ width: breite, height: 1000 })
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
     // Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `loading` steht,
     // sind beide Regionen per `x-show` aus, und jede Messung liefe gegen 0 —
     // grün, ohne irgendetwas geprüft zu haben.
@@ -235,7 +235,19 @@ async function oeffneForge(page: Page, breite: number): Promise<void> {
         }
     })
     console.log(`[desktop-forge] Inselstand @${breite}px: ${JSON.stringify(stand)}`)
-    await expect(page.locator('[data-forge-repo]').first()).toBeVisible({ timeout: 30_000 })
+    const ersteKachel = page.locator('[data-forge-repo]').first()
+    await expect(ersteKachel).toBeVisible({ timeout: 30_000 })
+
+    // P7: the tile leads to `/forge/<naddr>` and NOT to `/bereich/forge/<naddr>`.
+    //
+    // Until P7 the overview island appended the naddr to the route it was handed — the
+    // OVERVIEW — and every tile of this page therefore led to a 404. It cost 16 cases in
+    // this project, all of them failing one step after the click, where the cause is not
+    // visible. Asserted on the href and not only through the click that follows: a 404
+    // page still has a URL, and the reason the click fails belongs next to the click.
+    const ziel = await ersteKachel.getAttribute('href')
+    console.log(`[desktop-forge] Kachel-Ziel: ${ziel}`)
+    expect(ziel, 'a repository tile leads to the repo route').toMatch(/^\/forge\/naddr1[a-z0-9]+$/)
 }
 
 test.describe('Forge: die Desktop-Bühne', () => {
@@ -342,9 +354,11 @@ test.describe('Forge: die Desktop-Bühne', () => {
      * eingehängtes `aria-current="page"` MUSS mitgezählt werden. Sonst bewiese
      * eine gemeldete `1` nur, dass die Sonde nichts findet.
      */
-    test('KONTROLLE: die aria-current-Sonde zaehlt ein zweites Vorkommen mit', async ({ page }) => {
+    test('KONTROLLE: die aria-current-Sonde zaehlt ein eingehaengtes Vorkommen mit', async ({ page }) => {
         await oeffneForge(page, 1920)
-        expect(await sichtbaresAriaCurrent(page)).toHaveLength(1)
+        // P7: NULL at rest, not one — see the case below for why the number changed.
+        const vorher = await sichtbaresAriaCurrent(page)
+        expect(vorher, `Vorbedingung: ${JSON.stringify(vorher)}`).toHaveLength(0)
 
         await page.evaluate(() => {
             const a = document.createElement('a')
@@ -357,23 +371,35 @@ test.describe('Forge: die Desktop-Bühne', () => {
 
         expect(
             await sichtbaresAriaCurrent(page),
-            'Ein zweites sichtbares aria-current wurde nicht gezählt — die Sonde misst nichts.',
-        ).toHaveLength(2)
+            'Ein eingehängtes sichtbares aria-current wurde nicht gezählt — die Sonde misst nichts.',
+        ).toHaveLength(1)
     })
 
     for (const breite of [1920, 2560]) {
-        test(`bei ${breite} px traegt genau EIN sichtbares Element aria-current="page"`, async ({ page }) => {
+        test(`bei ${breite} px traegt KEIN Element doppelt aria-current="page"`, async ({ page }) => {
             await oeffneForge(page, breite)
 
             const treffer = await sichtbaresAriaCurrent(page)
             console.log(`[desktop-forge] aria-current @${breite}px: ${JSON.stringify(treffer)}`)
+            /*
+             * **Since P6/P7 the number is ZERO, and that is the promise — not ONE.**
+             *
+             * The case was written against an AMBIGUITY: the rail footer AND the Ortskarte
+             * both carried `aria-current="page"` on `/forge`, two „you are here" on one
+             * target. P2 deleted the Ortskarten (D2), P6 the footer and the rail's nav tabs
+             * (D10) — the left bar now carries Start, the pins and the room groups, i.e. no
+             * area entry a „here" could point at.
+             *
+             * What survives of the original promise is the part that carried it: **never
+             * more than one** marker. That there is none here follows from the design
+             * decision and is not a defect of this surface — the control above proves in
+             * the same run that the probe would find one.
+             */
             expect(
-                treffer,
-                `Auf /forge @${breite}px tragen ${treffer.length} sichtbare Elemente aria-current="page": ${JSON.stringify(treffer)}`,
-            ).toHaveLength(1)
-            // Und zwar die Rail-Zeile — nicht die Ortskarte: ab `xl` beantwortet
-            // der Navigator „wo bin ich", die Ortsleiste ist dort ausgeblendet.
-            expect(treffer[0].inRail, 'Das eine aria-current steht nicht im Navigator').toBe(true)
+                treffer.length,
+                `Auf /bereich/forge @${breite}px tragen ${treffer.length} sichtbare Elemente aria-current="page": ${JSON.stringify(treffer)}`,
+            ).toBeLessThanOrEqual(1)
+            expect(treffer.filter((e) => !e.inRail), 'Eine Markierung ausserhalb des Navigators').toEqual([])
         })
 
         test(`bei ${breite} px bleibt die laengste Zeile im Lesekanon 45-75 Zeichen`, async ({ page }) => {
@@ -546,7 +572,7 @@ test.describe('Forge: die Desktop-Bühne', () => {
         await zeigeWorkspaceAufZooid(page)
         await page.setViewportSize({ width: 1920, height: 700 })
         await loginNsec(page, NSEC)
-        await page.goto('/forge?tab=repos')
+        await page.goto('/bereich/forge?tab=repos')
 
         await expect
             .poll(

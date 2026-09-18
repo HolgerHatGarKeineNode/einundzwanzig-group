@@ -170,9 +170,17 @@ test('P3/D7: a pin round trip against the relay — published, requeried, and re
     // decrypted, not carried in the tab's memory.
     await page.goto('/start')
     await expect(page.locator('[data-start-angeheftet]'), 'the pins section never appeared').toBeVisible({ timeout: 25_000 })
-    await expect(page.locator(`[data-pin-chip="${key}"]`), 'the pinned room has no chip on Start').toBeVisible({
+    const chip = page.locator(`[data-pin-chip="${key}"]`)
+    await expect(chip, 'the pinned room has no chip on Start').toBeVisible({
         timeout: 25_000,
     })
+    // …carrying the room's NAME. Until P7 the label lookup used the bare `h` against an index
+    // keyed by `makeRoomId(url, h)`, so every chip showed its `h` instead — „general" for the
+    // room the seed names „Allgemein" (`zooid-testserver.sh`, kind 9007 `-t name=Allgemein`).
+    // The unit cases are in `js/roomPinLabel.test.ts`; the name itself arrives with the room's
+    // kind 39000, which only a run can wait for.
+    console.log(`[P7] Start chip label: ${JSON.stringify(await chip.innerText())}`)
+    await expect(chip, 'the chip shows the room name, not its `h`').toHaveText(/Allgemein/, { timeout: 25_000 })
 
     const nachPin = pinsAtRelay()
     expect(nachPin[key].at, 'a pinned entry carries a real timestamp, not the seeded 0').toBeGreaterThan(0)

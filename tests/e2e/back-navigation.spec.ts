@@ -9,7 +9,8 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
  * `history.back()`, wenn dieser Tab per `livewire:navigate` schon einen App-internen
  * Vorgänger GENAU DAS UP-ZIEL ist (`sessionStorage['appNavPrev']`, Pfad-Vergleich),
  * sonst `Livewire.navigate(upTarget)`
- * (`/spaces`) — der Fallback für den Deep-Link-Kaltstart, der KEINEN Vorgänger hat.
+ * (`/bereich/chat`) — the fallback for the deep-link cold start, which has NO predecessor.
+ * (That is what the room list is called since P2; it was `/spaces` until then.)
  *
  * Eigene Datei statt Ergänzung von `spaces.spec.ts`/`room.spec.ts`: der Rückweg ist ein
  * einziges, in sich geschlossenes Verhalten, das beide Screens querschneidet (Start in
@@ -29,6 +30,9 @@ const MEETUP_H = 'meetberlin'
 async function login(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
+    // Since P2 a login lands on `/start`, not on the room list (D3) — every case below
+    // measures the room list, so the helper opens it.
+    await page.goto('/bereich/chat')
 }
 
 /** Setzt einen `window`-Sentinel — überlebt nur eine warme SPA-Navigation, kein Reload. */
@@ -60,7 +64,7 @@ test('Rückweg (1): Übersicht → Raum → Zurück landet wieder in der Übersi
     await setWarmSentinel(page)
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/spaces$/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 15_000 })
     await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
     expect(await readWarmSentinel(page)).toBe(1)
 })
@@ -68,12 +72,15 @@ test('Rückweg (1): Übersicht → Raum → Zurück landet wieder in der Übersi
 /**
  * Fall 2 (Kernfall) — gefilterte Meetup-Liste → Raum → Zurück landet wieder GENAU im
  * Meetup-Fokus mit demselben Land-Filter (statt auf der Standard-Übersicht). Das war
- * vor dem Umbau kaputt: `Livewire.navigate('/spaces')` verwarf jeden Filterzustand.
+ * vor dem Umbau kaputt: `Livewire.navigate('/bereich/chat')` verwarf jeden Filterzustand.
  */
 test('Rückweg (2): gefilterte Meetup-Liste → Raum → Zurück landet im selben Meetup-Fokus + Land-Filter', async ({ page }) => {
     await login(page)
 
-    await page.getByRole('button', { name: /Meetup-Räume entdecken/ }).click()
+    // P7: the row „Meetup-Räume entdecken" led here and is gone with D2 — the FOCUS MODE
+    // it navigated to is not (`?rt=meetups`, and the legacy redirect carries `rt` along on
+    // purpose). What this case is about starts inside that mode.
+    await page.goto('/bereich/chat?rt=meetups')
     await expect(page.getByPlaceholder('Meetup oder Stadt suchen…')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('button', { name: /^Meetup Berlin/ })).toBeVisible({ timeout: 15_000 })
 
@@ -95,10 +102,10 @@ test('Rückweg (2): gefilterte Meetup-Liste → Raum → Zurück landet im selbe
     await setWarmSentinel(page)
     await page.getByRole('button', { name: 'Zurück' }).click()
 
-    // KERN: zurück auf /spaces, aber weiterhin im Meetup-Fokus mit `cc=DE` in der URL —
-    // nicht die parameterlose Standard-Übersicht.
+    // CORE: back on the room list, but still in the meetup focus with `cc=DE` in the URL —
+    // not the parameterless default overview.
     const url = new URL(page.url())
-    expect(url.pathname).toBe('/spaces')
+    expect(url.pathname).toBe('/bereich/chat')
     expect(url.searchParams.get('rt')).toBe('meetups')
     expect(url.searchParams.get('cc')).toBe('DE')
     expect(await readWarmSentinel(page)).toBe(1)
@@ -116,7 +123,7 @@ test('Rückweg (2): gefilterte Meetup-Liste → Raum → Zurück landet im selbe
  * NICHT per `history.back()` irgendwohin (aus der App raus, auf eine Zwischenseite wie
  * `/nostr-login` o.ä.) — genau das ist der Grund für den `backLeadsTo()`-Guard.
  */
-test('Rückweg (3): Deep-Link-Kaltstart in einen Raum → Zurück landet auf dem UP-Ziel /spaces', async ({ page }) => {
+test('Rückweg (3): Deep-Link-Kaltstart in einen Raum → Zurück landet auf dem UP-Ziel', async ({ page }) => {
     await login(page)
 
     // Frischer, direkter Aufruf der Raum-Route — kein Klick, keine Livewire.navigate()-
@@ -126,7 +133,7 @@ test('Rückweg (3): Deep-Link-Kaltstart in einen Raum → Zurück landet auf dem
     await expect(page.getByText('Tritt dem Raum bei, um mitzuschreiben.')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/spaces$/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 15_000 })
     await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
 })
 
@@ -138,9 +145,14 @@ test('Rückweg (5): Meetup-Fokus + Land-Auswahl schreiben rt/cc in die URL, Zur�
     await login(page)
     await expect(page).not.toHaveURL(/[?&](rt|cc)=/)
 
-    await page.getByRole('button', { name: /Meetup-Räume entdecken/ }).click()
+    // P7: entered through the ADDRESS since the row is gone (D2). The part of the promise
+    // that a row click used to carry — „the mode writes `rt`" — is now the entry itself;
+    // what is still measurable in the app, and what this case is really about, is that the
+    // FILTER writes `cc` and that the way back clears BOTH.
+    await page.goto('/bereich/chat?rt=meetups')
     await expect(page).toHaveURL(/[?&]rt=meetups\b/, { timeout: 15_000 })
     await expect(page).not.toHaveURL(/[?&]cc=/)
+    await expect(page.getByPlaceholder('Meetup oder Stadt suchen…')).toBeVisible({ timeout: 15_000 })
 
     await page.getByRole('button', { name: 'Land' }).click()
     await page.getByRole('button').filter({ hasText: 'Deutschland' }).click()
@@ -161,10 +173,13 @@ test('Rückweg (5): Meetup-Fokus + Land-Auswahl schreiben rt/cc in die URL, Zur�
 test('Rückweg (6): mehrfaches Filtern erhöht history.length NICHT', async ({ page }) => {
     await login(page)
     await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
-    const before = await page.evaluate(() => window.history.length)
 
-    await page.getByRole('button', { name: /Meetup-Räume entdecken/ }).click()
+    // P7: into the focus mode through the address (the row is gone with D2), and the
+    // history is counted AFTER that — this case is about the FILTERING, not about the way
+    // in. A `goto` is a full load and would otherwise be counted as a filter step.
+    await page.goto('/bereich/chat?rt=meetups')
     await expect(page.getByPlaceholder('Meetup oder Stadt suchen…')).toBeVisible({ timeout: 15_000 })
+    const before = await page.evaluate(() => window.history.length)
 
     // Mehrfaches Tippen: jeder Tastendruck triggert den `$watch('roomQuery', …)`.
     await page.getByPlaceholder('Meetup oder Stadt suchen…').pressSequentially('Berlin')
@@ -201,7 +216,7 @@ test('Rückweg (4): Raum → Raum → Zurück führt in die Übersicht, nicht in
     await login(page)
     await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
 
-    // Raum 1 über die Liste betreten (Vorgänger = /spaces).
+    // Raum 1 über die Liste betreten (Vorgänger = /bereich/chat).
     await page.getByRole('button', { name: '# Willkommen', exact: true }).click()
     await expect(page.getByRole('heading', { name: '# Willkommen' })).toBeVisible({ timeout: 15_000 })
 
@@ -212,7 +227,7 @@ test('Rückweg (4): Raum → Raum → Zurück führt in die Übersicht, nicht in
     }, MEETUP_H)
     await expect(page.getByRole('heading', { name: `# ${MEETUP_NAME}` })).toBeVisible({ timeout: 15_000 })
 
-    // Vorbedingung scharf halten: der zuletzt verlassene Ort war Raum 1, NICHT /spaces.
+    // Vorbedingung scharf halten: der zuletzt verlassene Ort war Raum 1, NICHT die Liste.
     expect(
         await page.evaluate(() => sessionStorage.getItem('appNavPrev')),
         'Vorbedingung: der Vorgänger muss ein Raum sein, sonst prüft der Test den alten Fall',
@@ -221,7 +236,7 @@ test('Rückweg (4): Raum → Raum → Zurück führt in die Übersicht, nicht in
     await page.getByRole('button', { name: 'Zurück' }).click()
 
     // Die Übersicht — nicht Raum 1.
-    await expect(page).toHaveURL(/\/spaces/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat/, { timeout: 15_000 })
     await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('heading', { name: '# Willkommen' })).toHaveCount(0)
 })

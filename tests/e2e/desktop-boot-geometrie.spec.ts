@@ -318,7 +318,7 @@ async function vorDemBoot(page: Page, { verzugMs = 2500, ohneSpaceMetadaten = fa
         await new Promise((r) => setTimeout(r, verzugMs))
         await route.continue()
     })
-    await page.goto('/articles', { waitUntil: 'commit' })
+    await page.goto('/bereich/artikel', { waitUntil: 'commit' })
 }
 
 // ── Der Kernbeweis ──────────────────────────────────────────────────────────────────
@@ -642,7 +642,7 @@ test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht',
     await page.setViewportSize({ width: BREITE, height: 900 })
     await useZooid(page)
     await loginNsec(page, NSEC)
-    await page.goto('/articles')
+    await page.goto('/bereich/artikel')
     await page.waitForSelector('[data-rail]')
 
     const lade = await page.evaluate(() => {

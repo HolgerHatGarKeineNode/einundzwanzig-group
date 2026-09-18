@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\Route;
  * nennt (`behalte`/`umbenenne`). Ein Controller statt einer Closure, weil der
  * Mobile-Build seine Routen cacht.
  *
- * 302 bis zum Sweep in P7, dann 301.
+ * Seit dem Sweep in P7: 301 (vorher 302).
  */
 Route::get('/', LegacyRedirect::class)
     ->defaults('ziel', '/start')

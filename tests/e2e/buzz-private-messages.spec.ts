@@ -160,7 +160,7 @@ const seedMessage = async (text: string): Promise<{ id: string; ok: boolean; det
 const openMessages = async (page: Page): Promise<void> => {
     await useBuzz(page)
     await loginNsec(page, BUZZ_USER_NSEC)
-    await page.goto('/messages')
+    await page.goto('/postfach?ansicht=direkt')
 }
 
 /**
@@ -171,7 +171,7 @@ const openMessages = async (page: Page): Promise<void> => {
  * viewports in one context and hit exactly that on the first run of this file.
  */
 const reopenMessages = async (page: Page): Promise<void> => {
-    await page.goto('/messages')
+    await page.goto('/postfach?ansicht=direkt')
 }
 
 test.describe('Buzz: NIP-17 private messages (E2E, E2E_RELAY=buzz only)', () => {

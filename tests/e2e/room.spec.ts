@@ -2419,7 +2419,7 @@ test('C6b: Threads-Übersicht auf der Startseite + Deep-Link in den Raum', async
     await page.getByRole('button', { name: 'Zurück' }).click()
 
     // Startseite → „Threads"-Tab öffnen → Karte zeigt den Thread (Root-Snippet).
-    await page.goto('/spaces')
+    await page.goto('/bereich/chat')
     await page.getByRole('tab', { name: /Threads/ }).click()
     // Tab-Auswahl wird in ?tab= gespiegelt (verlinkbar).
     await expect(page).toHaveURL(/[?&]tab=threads/, { timeout: 10_000 })
@@ -3253,7 +3253,7 @@ test('Layout: /rooms/{h} und /spaces laufen bei 320 px und 768 px nicht quer (WC
         expect(history.scrollWidth, `Chat-Verlauf scrollt bei ${width} px horizontal`).toBeLessThanOrEqual(history.clientWidth)
 
         // ── Übersicht ─────────────────────────────────────────────────────────
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
         await expect(page.getByText('Willkommen').first()).toBeVisible({ timeout: 30_000 })
 
         const spaces = await documentOverflow(page)

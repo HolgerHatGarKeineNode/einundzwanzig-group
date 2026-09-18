@@ -35,16 +35,20 @@ function createRoomNak(h: string, name: string, extraTags: string[] = []): void 
 const openFocus = (page: Page, mode: 'meetups' | 'proposals') =>
     page.goto(`/bereich/chat?rt=${mode}`)
 
-/** Loggt via nsec ein und landet im Gate (`/spaces`). */
+/** Loggt via nsec ein und oeffnet die Raumliste (`/bereich/chat`). */
 async function login(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
+    // Since P2 a login lands on `/start`, not on the room list (D3) — every case below
+    // measures the room list, so the helper opens it.
+    await page.goto('/bereich/chat')
 }
 
-/** Loggt als Relay-Admin ein und landet auf der Räume-Seite (`/spaces`). */
+/** Signs in as the relay admin and opens the room list (`/bereich/chat` since P2). */
 async function loginAdmin(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, ADMIN_HEX)
+    await page.goto('/bereich/chat')
 }
 
 /**
@@ -91,8 +95,11 @@ test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async 
     await expect(page.getByText('local verify relay')).toBeVisible()
 
     // Beigetretene Räume (39002-Mitglied) + der entdeckbare `dev` unter „Andere Räume"
-    await expect(page.getByText('Willkommen')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Allgemein')).toBeVisible()
+    // Addressed through the ROW and not through bare text: since P5 the same page carries
+    // a notice about the missing relay list that contains the word „Allgemein" as well —
+    // `getByText` then matched two nodes and fell over the strict mode.
+    await expect(page.getByRole('button', { name: '# Willkommen' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: '# Allgemein' })).toBeVisible()
     await expect(page.getByText('Andere Räume')).toBeVisible()
     await expect(page.getByText('Dev')).toBeVisible()
 
@@ -111,10 +118,12 @@ test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async 
 test('M2: Space-Wechsel liegt in den Einstellungen', async ({ page }) => {
     await login(page)
 
-    // Über die Bottom-Nav in die Einstellungen — der Space-Wechsel liegt seit der
-    // vereinheitlichten Settings-Seite als „Space & Räume"-Section unter /settings (§6.5).
+    // Into the settings through „Ich" — the space switch is the „Space & Räume" section of
+    // the unified settings page (§6.5), and that page hangs under „Ich" since P2 (D3). The
+    // bottom nav has no slot for it any more: three slots, D2.
+    await page.goto('/ich')
     await page.getByRole('link', { name: 'Einstellungen' }).click()
-    await page.waitForURL('**/settings')
+    await page.waitForURL('**/ich/einstellungen')
 
     await expect(page.getByText('Space & Räume')).toBeVisible()
     // Space-Auswahl zeigt den NIP-11-Namen (B1), nicht die nackte URL.
@@ -462,7 +471,11 @@ test('P6: ungelesene Nachricht in beigetretenem Antragsraum zeigt die Summenpill
     await expect(zeile).toBeVisible({ timeout: 15_000 })
     // Dieselbe Pillen-Signatur wie in `unread-dot.spec.ts` (`roomDot`): eine
     // deckende Fläche ohne Theme-Variante, `x-if` rendert bei 0 gar keinen Knoten.
-    const pill = page.locator('span.bg-brand-500.text-zinc-950')
+    // THIS row's pill, not „any": since P6 the tab bar carries a total pill of its own
+    // with the same signature, and a bare selector matched both (strict mode). The room
+    // button narrows it down.
+    const zeilenKnopf = page.getByRole('button', { name: new RegExp(propName) })
+    const pill = zeilenKnopf.locator('span.bg-brand-500.text-zinc-950')
     await expect(pill).toHaveCount(0) // Ausgangslage: nichts ungelesen, keine Pille.
 
     // Fremde Nachricht NACH dem Login → ungelesen.

@@ -56,7 +56,7 @@ test.describe('Buzz-Chat: der @-Vorschlag zieht nach', () => {
         // statt des Eingabefelds den „Beitreten"-Knopf (`buzz-room.spec.ts:396`).
         // Ohne Eingabefeld gaebe es keinen Vorschlag zu pruefen.
         await loginNsec(page, BUZZ_OWNER_NSEC)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
         await page.goto(`/rooms/${BUZZ_ROOM_GENERAL}`)
 
         const composer = page.getByPlaceholder('Nachricht schreiben…')

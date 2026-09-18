@@ -39,6 +39,17 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 
 const HUELLE = 'ui-tab-group[data-flux-tabs-panellos]'
 
+/**
+ * How many tabs each of the two surfaces carries.
+ *
+ * Two numbers, different since P7: `/bereich/forge` has its three (activity, repos,
+ * workspaces), the inbox has FIVE segments since P3 (all, mentions, threads, direct,
+ * reminders — D5). Until P7 the 3 stood in both places, which made the inbox cases wrong
+ * twice over: wrong place (`/updates` redirects) and wrong number.
+ */
+const REITER_FORGE = 3
+const REITER_POSTFACH = 5
+
 type HuellenBefund = {
     huelleGefunden: boolean
     /** Trägt die Hülle das Merkmal dieser Reparatur (statt einer echten Flux-Gruppe)? */
@@ -123,12 +134,12 @@ test('/forge: die Panel-lose Reiterbank steht in einer leeren, layoutneutralen T
     await useZooid(page)
     await page.setViewportSize({ width: 320, height: 720 })
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await page.goto('/bereich/forge')
+    await expect(page.getByRole('tab')).toHaveCount(REITER_FORGE)
     await expect(page.locator(HUELLE)).toBeAttached({ timeout: 10_000 })
 
     const befund = await huellenBefund(page)
-    console.log(`[panellos] /forge: ${JSON.stringify(befund)}`)
+    console.log(`[panellos] /bereich/forge: ${JSON.stringify(befund)}`)
     expect(befund.huelleGefunden, 'Ohne `ui-tab-group`-Vorfahr wirft Flux bei jeder childList-Mutation an <ui-tabs>').toBe(true)
     expect(befund.istUnsereHuelle).toBe(true)
     expect(befund.display, 'Eine Hülle ohne `display: contents` schöbe einen Kasten in die Scroll-Area').toBe('contents')
@@ -141,8 +152,8 @@ test('/forge: showPanel() auf der Hülle bleibt folgenlos, auch nach einer Mutat
     await useZooid(page)
     await page.setViewportSize({ width: 320, height: 720 })
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await page.goto('/bereich/forge')
+    await expect(page.getByRole('tab')).toHaveCount(REITER_FORGE)
     await expect(page.locator(HUELLE)).toBeAttached({ timeout: 10_000 })
 
     const gelandet = await sondeInDieLeiste(page)
@@ -152,66 +163,66 @@ test('/forge: showPanel() auf der Hülle bleibt folgenlos, auch nach einer Mutat
     // der Laufzeit-Wächter beurteilt.
     await expect(page.locator('ui-tabs-scroll-area')).toBeVisible()
     const folgen = await folgenVonShowPanel(page)
-    console.log(`[panellos] /forge nach Sonde + showPanel: ${JSON.stringify(folgen)}`)
+    console.log(`[panellos] /bereich/forge nach Sonde + showPanel: ${JSON.stringify(folgen)}`)
     expect(folgen.versteckt).toEqual([])
     expect(folgen.tabpanels).toEqual([])
     expect(folgen.leisteSichtbar).toBe(true)
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await expect(page.getByRole('tab')).toHaveCount(REITER_FORGE)
 })
 
-test('/updates: die Hülle wird auch nach einer wire:navigate-Navigation gezogen', async ({ page }) => {
+test('/postfach: the hull is drawn after a wire:navigate navigation too', async ({ page }) => {
     await useZooid(page)
     await page.setViewportSize({ width: 320, height: 720 })
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await page.goto('/bereich/forge')
+    await expect(page.getByRole('tab')).toHaveCount(REITER_FORGE)
 
-    await page.evaluate(() => (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/updates'))
-    await expect(page).toHaveURL(/\/updates$/, { timeout: 25_000 })
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await page.evaluate(() => (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/postfach'))
+    await expect(page).toHaveURL(/\/postfach$/, { timeout: 25_000 })
+    await expect(page.getByRole('tab')).toHaveCount(REITER_POSTFACH)
     // Die Hülle wird nach dem Body-Swap erst in einem Makrotask gezogen — auf sie
     // warten, nicht auf eine Wartezeit.
     await expect(page.locator(HUELLE)).toBeAttached({ timeout: 10_000 })
 
     const befund = await huellenBefund(page)
-    console.log(`[panellos] /updates: ${JSON.stringify(befund)}`)
+    console.log(`[panellos] /postfach: ${JSON.stringify(befund)}`)
     expect(befund.istUnsereHuelle, 'Nach dem Body-Swap ist die Hülle des alten Baums weg — sie muss neu gezogen werden').toBe(true)
     expect(befund.kinder).toEqual(['ui-tabs'])
     expect(befund.rollenInDerKette).toEqual(['ui-tabs[role=tablist]'])
 
     const gelandet = await sondeInDieLeiste(page)
     expect(gelandet).toBe(true)
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await expect(page.getByRole('tab')).toHaveCount(REITER_POSTFACH)
 })
 
 test('zurueck-Navigation: die Huelle steht in keinem Livewire-Schnappschuss', async ({ page }) => {
     await useZooid(page)
     await page.setViewportSize({ width: 320, height: 720 })
     await loginNsec(page, NSEC)
-    await page.goto('/updates')
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await page.goto('/postfach')
+    await expect(page.getByRole('tab')).toHaveCount(REITER_POSTFACH)
     await expect(page.locator(HUELLE)).toBeAttached({ timeout: 10_000 })
 
     // Weg von hier — genau hier zieht Livewire den Schnappschuss dieser Seite.
-    await page.evaluate(() => (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/forge'))
-    await expect(page).toHaveURL(/\/forge$/, { timeout: 25_000 })
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await page.evaluate(() => (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/bereich/forge'))
+    await expect(page).toHaveURL(/\/bereich\/forge$/, { timeout: 25_000 })
+    await expect(page.getByRole('tab')).toHaveCount(REITER_FORGE)
 
     // ... und zurück: der gespeicherte HTML-Stand wird wieder eingesetzt. Steckte die
     // Hülle darin, fände Flux beim Initialisieren eine Gruppe ohne Panels vor und
     // würfe 3× `Could not find panel...` — der Laufzeit-Wächter urteilt darüber.
     await page.goBack()
-    await expect(page).toHaveURL(/\/updates$/, { timeout: 25_000 })
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await expect(page).toHaveURL(/\/postfach$/, { timeout: 25_000 })
+    await expect(page.getByRole('tab')).toHaveCount(REITER_POSTFACH)
 
     // Und die Hülle ist danach wieder da, sonst wäre die Seite ab hier ungeschützt.
     await expect(page.locator(HUELLE)).toBeAttached({ timeout: 10_000 })
     const befund = await huellenBefund(page)
-    console.log(`[panellos] /updates nach goBack: ${JSON.stringify(befund)}`)
+    console.log(`[panellos] /postfach nach goBack: ${JSON.stringify(befund)}`)
     expect(befund.kinder).toEqual(['ui-tabs'])
     expect(befund.rollenInDerKette).toEqual(['ui-tabs[role=tablist]'])
 
     const gelandet = await sondeInDieLeiste(page)
     expect(gelandet).toBe(true)
-    await expect(page.getByRole('tab')).toHaveCount(3)
+    await expect(page.getByRole('tab')).toHaveCount(REITER_POSTFACH)
 })

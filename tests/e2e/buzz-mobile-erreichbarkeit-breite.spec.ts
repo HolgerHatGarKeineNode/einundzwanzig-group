@@ -43,17 +43,11 @@ async function settled(page: Page, sel: string): Promise<void> {
     )
 }
 
-/** Öffnet das Profil-Popover und wartet, bis es sichtbar UND fertig eingeblendet ist. */
-async function openProfilPopover(page: Page): Promise<void> {
-    await page.locator('[data-profil-chip]').click()
-    await expect(page.locator('[data-profil-popover]')).toBeVisible()
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════════
 // A — das GATTER (relay-unabhängig, zooid, jeder Lauf)
 // ═══════════════════════════════════════════════════════════════════════════════════
 
-test.describe('Space-Seite: Breite, Mitglieder-Zeile, Profil-Popover und das DM-Gatter (E2E, zooid)', () => {
+test.describe('Space-Seite: Breite, Mitglieder-Zeile, „Ich“-Zeilen und das DM-Gatter (E2E, zooid)', () => {
     test.skip(process.env.E2E_RELAY === 'buzz', 'diese Hälfte braucht zooid, nicht den Buzz-Teststack')
 
     const NSEC = process.env.NOSTR_TEST_NSEC as string
@@ -73,6 +67,8 @@ test.describe('Space-Seite: Breite, Mitglieder-Zeile, Profil-Popover und das DM-
     async function login(page: Page): Promise<void> {
         await useZooid(page)
         await loginNsec(page, NSEC)
+        // Since P2 a login lands on `/start`, not on the room list (D3).
+        await page.goto('/bereich/chat')
         // Boot-Signal: die Mitglieder-Zeile steht unbedingt (kein `x-if`), sobald
         // `nostrSpaces` initialisiert hat — ab hier sind alle abgeleiteten Werte
         // (`focusMode()`, `tab`, `$store.viewport`) verlässlich gesetzt.
@@ -121,7 +117,14 @@ test.describe('Space-Seite: Breite, Mitglieder-Zeile, Profil-Popover und das DM-
             bericht.push(`${width}px: ${box.width.toFixed(2)}×${box.height.toFixed(2)} @ x=${box.x.toFixed(2)}`)
 
             // WCAG 2.5.8: das Ziel selbst ist ≥ 44 px hoch (min-h-11).
-            expect(box.height, `${width}px: Mitglieder-Ziel ist ${box.height}px hoch, erwartet ≥ 44px`).toBeGreaterThanOrEqual(44)
+            //
+            // Rounded to HUNDREDTHS, and that is not a tolerance: measured in the P7 sweep,
+            // Chromium reported `43.99998474121094` at 369 px for the same `min-h-11` that
+            // comes out as a flat 44 at 320 px. The difference is the floating-point
+            // resolution of the layout engine, not a smaller row — a real shortfall is
+            // pixels below, never 1.5 hundred-thousandths.
+            const hoehe = Math.round(box.height * 100) / 100
+            expect(hoehe, `${width}px: Mitglieder-Ziel ist ${box.height}px hoch, erwartet ≥ 44px`).toBeGreaterThanOrEqual(44)
             // Und es ragt nicht aus dem Dokument — dieselbe Prüfung wie oben, lokal
             // am Element statt global, damit ein Regressions-Diff sofort zeigt, WER
             // schuld ist.
@@ -133,42 +136,48 @@ test.describe('Space-Seite: Breite, Mitglieder-Zeile, Profil-Popover und das DM-
         console.log(`\n[mobile-erreichbarkeit] Mitglieder-Zeile\n${bericht.join('\n')}`)
     })
 
-    test('Profil-Popover-Zeilen (data-profil-ziel): 44 px NACH Abschluss der Öffnen-Animation — die 43,64-px-Frage', async ({ page }) => {
-        // ── Warum diese Datei den Wert misst und nicht einfach hinnimmt ──────────
-        // Der Prüfer maß 43,64 px statt der zugesagten 44 (min-h-11) und vermutete ein
-        // Flex-Rundungsartefakt. Das Popover öffnet über `x-transition` OHNE eigene
-        // Klassen — das ist Alpines EINGEBAUTER Default (`scale-95 → scale-100`,
-        // 150 ms). Eine Messung, die genau in dieses Fenster fällt, skaliert JEDES
-        // Kind mit — 44 × 0,95 = 41,8, und irgendwo zwischen 0,95 und 1 liegt 43,64.
-        // Das ist KEIN Layout-Fehler, sondern eine Messung mitten in einer laufenden
-        // Transition. Der Beweis steht in den zwei Werten unten: roh (sofort nach
-        // dem Klick) gegen abgeklungen (`getAnimations().length === 0`).
+    test('„Ich"-Zeilen (data-ich-ziel): 44 px NACH Abschluss der Einblende-Animation — die 43,64-px-Frage', async ({ page }) => {
+        // ── Why this file MEASURES the number instead of taking it on trust ──────
+        // On the predecessor surface a reviewer measured 43.64 px instead of the promised
+        // 44 and suspected a flex rounding artefact. That surface opened through
+        // `x-transition` WITHOUT classes of its own — Alpine's BUILT-IN default
+        // (`scale-95 → scale-100`, 150 ms). A measurement falling into that window scales
+        // EVERY child with it: 44 × 0.95 = 41.8, and 43.64 lies somewhere in between. Not
+        // a layout defect but a measurement in the middle of a running transition. The
+        // proof is the two values below: raw against settled
+        // (`getAnimations().length === 0`).
+        //
+        // ── P7: the same question, another surface ──────────────────────────────
+        // It was measured on the profile popover of the old room-list header
+        // (`data-profil-chip`/`data-profil-ziel`). Popover and chip are deleted with P2
+        // (D2/D3): the header carries an avatar that LEADS to „Ich", and the rows that
+        // stood in the popover are the rows of this page (`ich-row.blade.php`,
+        // `min-h-14`). The promise is the same and so is the transition — `.page-enter`
+        // fades the page in.
         await login(page)
         await resize(page, 320)
-        await openProfilPopover(page)
+        await page.goto('/ich')
 
-        const zeile = page.locator('[data-profil-ziel]').first()
-        await expect(zeile).toBeAttached()
+        const zeile = page.locator('[data-ich-ziel]').first()
+        await expect(zeile).toBeVisible({ timeout: 15_000 })
 
         const roh = (await zeile.boundingBox()) as { height: number }
-        await settled(page, '[data-profil-popover]')
+        await settled(page, '[data-ich-ziel]')
         const abgeklungen = (await zeile.boundingBox()) as { height: number }
 
         console.log(
-            `\n[mobile-erreichbarkeit] Profil-Zeile: roh=${roh.height.toFixed(2)}px, ` +
+            `\n[mobile-erreichbarkeit] „Ich"-Zeile: roh=${roh.height.toFixed(2)}px, ` +
                 `abgeklungen=${abgeklungen.height.toFixed(2)}px`,
         )
 
-        // Die zugesagte Zahl gilt für den ABGEKLUNGENEN Zustand — den, in dem ein
-        // Nutzer die Zeile tatsächlich antippt. Keine Toleranz: `min-h-11` ist ein
-        // striktes CSS-Minimum, und ein Wert darunter wäre ein echter Rückfall.
-        expect(abgeklungen.height, `Profil-Zeile ist nach Abschluss der Animation ${abgeklungen.height}px hoch, erwartet ≥ 44px`).toBeGreaterThanOrEqual(44)
+        // The promised number applies to the SETTLED state — the one in which a person
+        // actually taps the row. No tolerance: the CSS minimum is strict, and a value
+        // below it would be a real regression.
+        expect(abgeklungen.height, `„Ich"-Zeile ist nach Abschluss der Animation ${abgeklungen.height}px hoch, erwartet ≥ 44px`).toBeGreaterThanOrEqual(44)
 
-        // Und der Beleg für die 43,64-px-Beobachtung des Prüfers: eine Messung mitten
-        // in der Transition liegt UNTER dem abgeklungenen Wert (das ist erwartbar, wenn
-        // die roh-Messung überhaupt eine laufende Transition getroffen hat — trifft sie
-        // eine bereits abgeschlossene, sind beide Werte gleich, und das ist ebenfalls
-        // ein gültiges, kein rotes Ergebnis).
+        // And the evidence for the 43.64 px observation: a measurement in the middle of
+        // the transition is BELOW the settled one (if it hits an already finished
+        // transition both values are equal — also valid, not red).
         expect(roh.height, 'die rohe Messung ist größer als die abgeklungene — das widerspräche der Transitions-These').toBeLessThanOrEqual(abgeklungen.height + 0.01)
     })
 

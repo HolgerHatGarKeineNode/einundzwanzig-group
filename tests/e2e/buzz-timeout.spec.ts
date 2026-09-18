@@ -71,7 +71,7 @@ test.describe('Buzz-Timeout (E2E, nur E2E_RELAY=buzz)', () => {
         const reason = `E2E-Timeout-${Math.floor(Math.random() * 1e9)}`
 
         await loginNsec(page, BUZZ_OWNER_NSEC)
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
         const island = page.locator('[x-data="nostrDirectory"]')
         await expect(island).toBeVisible({ timeout: 20_000 })
 
@@ -166,7 +166,7 @@ test.describe('Buzz-Timeout (E2E, nur E2E_RELAY=buzz)', () => {
             { name: 'desktop', width: 1440, height: 900 },
         ]) {
             await page.setViewportSize({ width: viewport.width, height: viewport.height })
-            await page.goto('/directory')
+            await page.goto('/bereich/leute')
             const island = page.locator('[x-data="nostrDirectory"]')
             await expect(island).toBeVisible({ timeout: 20_000 })
 

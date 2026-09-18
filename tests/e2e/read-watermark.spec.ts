@@ -125,7 +125,7 @@ test('Wasserzeichen: am Boden bleiben + wegnavigieren quittiert bis zur jüngste
     const createdAt = findCreatedAt(marker)
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/spaces$/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 15_000 })
 
     // Der Schreibpfad bündelt (höchstens ein IDB-Write alle 2 s) → pollen statt raten.
     await expect
@@ -180,7 +180,7 @@ test('Wasserzeichen: hochgescrollt + wegnavigieren lässt es unverändert', asyn
     expect(beforeNav).toBeGreaterThan(60)
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/spaces$/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 15_000 })
 
     // „Es passiert nichts" lässt sich nicht erpollen — hier muss gewartet werden, und
     // zwar länger als das Schreib-Fenster des Lesestands. Sonst prüfte der Test bloß,

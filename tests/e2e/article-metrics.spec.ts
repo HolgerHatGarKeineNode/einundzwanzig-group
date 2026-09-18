@@ -217,7 +217,7 @@ test('KERNBEWEIS: Reaktion, Zap und Kommentar erscheinen als Zaehler an der KART
 
         const lnurlTreffer = await stubLnurl(page)
         await loginToBoard(page)
-        await page.goto('/articles')
+        await page.goto('/bereich/artikel')
 
         const karte = page.locator('article', { has: page.getByRole('heading', { name: titel, exact: true }) }).first()
         await expect(karte).toBeVisible({ timeout: 20_000 })
@@ -339,7 +339,7 @@ test('SICHERHEIT: drei gefaelschte Zap-Quittungen aendern die Summe nicht', asyn
 
         const lnurlTreffer = await stubLnurl(page)
         await loginToBoard(page)
-        await page.goto('/articles')
+        await page.goto('/bereich/artikel')
 
         const karte = page.locator('article', { has: page.getByRole('heading', { name: titel, exact: true }) }).first()
         await expect(karte).toBeVisible({ timeout: 20_000 })
@@ -407,7 +407,7 @@ test('ein Artikel OHNE jedes Signal zeigt KEINE Nullen — die Gruppe steht gar 
     })
 
     await loginToBoard(page)
-    await page.goto('/articles')
+    await page.goto('/bereich/artikel')
 
     const karte = page.locator('article', { has: page.getByRole('heading', { name: titel, exact: true }) }).first()
     await expect(karte).toBeVisible({ timeout: 20_000 })
@@ -437,7 +437,7 @@ test('ein NACH dem ersten Render eingespieltes Signal aendert die Anzeige', asyn
     })
 
     await loginToBoard(page)
-    await page.goto('/articles')
+    await page.goto('/bereich/artikel')
 
     const karte = page.locator('article', { has: page.getByRole('heading', { name: titel, exact: true }) }).first()
     await expect(karte).toBeVisible({ timeout: 20_000 })

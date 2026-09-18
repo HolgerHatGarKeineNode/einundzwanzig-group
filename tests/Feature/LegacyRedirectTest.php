@@ -13,9 +13,10 @@ use Symfony\Component\Routing\Exception\RouteNotFoundException;
  * shared, and two of them have to be RENAMED on the way. Laravel's `RedirectController`
  * discards them without a word — exactly the failure R7 carries as "medium".
  *
- * And because the redirects get switched from 302 to 301 in P7, every row checks the
+ * And because the redirects were switched from 302 to 301 in P7, every row checks the
  * STATUS as well: a 301 is cached by the browser indefinitely, so a wrong row cannot be
- * taken back.
+ * taken back. That is also why the switch is the LAST thing the phase did — after every
+ * row here had been green.
  *
  * ── What is NOT checked here ───────────────────────────────────────────────────────
  * Whether the TARGET answers. That stands in `HubRoutenTest`, with a guest and a member.
@@ -77,13 +78,16 @@ dataset('weiterleitungen', [
     '/messages?c[]= (array) does not travel' => ['/messages?c[]=abc', '/postfach?ansicht=direkt'],
 ]);
 
-test('every row of the map forwards to its target — with 302, until P7 switches to 301', function (string $alt, string $ziel) {
+test('every row of the map forwards to its target — permanently (301) since P7', function (string $alt, string $ziel) {
     // WITHOUT a session: a redirect is not a surface. It stands outside `nostr.auth`, and
     // the TARGET decides about access — a login redirect in front of it would swallow
     // exactly the query this controller exists for.
     $res = $this->get($alt);
 
-    $res->assertStatus(302);
+    // 301 and not „a redirect": `assertRedirect` accepts any 3xx, and the difference
+    // between the two is the whole point of this line — a 302 would mean the switch never
+    // happened, and nothing else in the suite would say so.
+    $res->assertStatus(301);
     $res->assertRedirect($ziel);
 })->with('weiterleitungen');
 

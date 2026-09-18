@@ -101,7 +101,7 @@ async function repo(page: Page, dtag: string): Promise<void> {
         ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
     }, `${ZOOID_WS}/`)
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
     await page.locator('[data-forge-repo]').filter({ hasText: dtag }).first().click()
     await page.waitForURL(/\/forge\/naddr1/, { timeout: 30_000 })
     await expect(page.getByRole('heading', { level: 1, name: dtag, exact: true })).toBeVisible({

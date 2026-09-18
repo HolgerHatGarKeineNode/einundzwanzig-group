@@ -20,7 +20,7 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 async function openSettings(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
-    await page.goto('/settings')
+    await page.goto('/ich/einstellungen')
     await expect(page.getByRole('heading', { name: 'Sprache' })).toBeVisible()
 }
 
@@ -34,7 +34,8 @@ test('P2: Sprachwechsel löst einen vollen Reload aus und "<html lang>" folgt', 
 
     // Der Submit ist ein normaler Formular-POST (kein wire:navigate) — die
     // Seite lädt komplett neu und landet wieder auf /settings (back()-Fallback).
-    await page.waitForURL('**/settings')
+    // (P7: that page is `/ich/einstellungen` since P2 — the old path redirects there.)
+    await page.waitForURL('**/ich/einstellungen')
     await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 })
 
@@ -43,24 +44,30 @@ test('P2: die Sprachwahl überlebt wire:navigate (Cookie bleibt, <html lang> ble
 
     await page.locator('select[name="locale"]').selectOption('es')
     await page.getByRole('button', { name: 'Sprache wechseln' }).click()
-    await page.waitForURL('**/settings')
+    await page.waitForURL('**/ich/einstellungen')
     await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 
     // SPA-Navigation über die Shell-Nav (wire:navigate, tauscht nur den Body) —
     // kein page.goto(), sonst wäre es wieder ein voller Reload und der eigentliche
     // Beweis (Head/<html> überlebt die Navigation) entfiele.
-    // `route()` rendert eine ABSOLUTE href (http://127.0.0.1:PORT/spaces) — auf das
+    // `route()` rendert eine ABSOLUTE href (http://127.0.0.1:PORT/start) — auf das
     // Pfadende matchen, nicht auf einen relativen String. `.last()`, nicht
     // `.first()`: das DOM trägt ZWEI Nav-Kopien (Desktop-Rail zuerst, dann die
     // Mobil-Bottom-Bar — beide teilen `aria-label="Hauptnavigation"`), bei
     // 1279px ist nur die zweite (Bottom-Bar) sichtbar, die erste ist `hidden`
     // und darauf klicken würde mit einem Actionability-Timeout scheitern.
-    await page.locator('a[href$="/spaces"]').last().click()
+    //
+    // Since P2 the first nav slot leads to `/start`; the room list has no nav slot of its
+    // own any more (three slots, D2).
+    await page.locator('a[href$="/start"]').last().click()
     await page.waitForURL('**/start')
     await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 
-    await page.locator('a[href$="/settings"]').last().click()
-    await page.waitForURL('**/settings')
+    // Second hop, again through the nav: since P2 it has three slots (Start, search, inbox)
+    // and none for the settings any more — those live under „Ich". What is measured is the
+    // navigation, not one particular target.
+    await page.locator('a[href$="/postfach"]').last().click()
+    await page.waitForURL('**/postfach')
     await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 })
 
@@ -73,7 +80,7 @@ test('P2: die Sprachwahl ist persistent (Cookie), nicht an die Session gebunden 
 
     await page.locator('select[name="locale"]').selectOption('es')
     await page.getByRole('button', { name: 'Sprache wechseln' }).click()
-    await page.waitForURL('**/settings')
+    await page.waitForURL('**/ich/einstellungen')
 
     // "Browser-Neustart" simuliert: NUR das langlebige `locale`-Cookie in einen
     // frischen, ansonsten leeren Context kopieren — explizit OHNE das
@@ -136,7 +143,7 @@ test('P3: Zahlformate der Insel folgen der gewählten Sprache (de „1.234.567" 
 
     await page.locator('select[name="locale"]').selectOption('en')
     await page.getByRole('button', { name: 'Sprache wechseln' }).click()
-    await page.waitForURL('**/settings')
+    await page.waitForURL('**/ich/einstellungen')
 
     await expect(page.locator('html')).toHaveAttribute('lang', 'en')
     expect(await islandNumber(page), 'nach dem Wechsel formatiert die Insel englisch — nicht mehr deutsch').toBe(

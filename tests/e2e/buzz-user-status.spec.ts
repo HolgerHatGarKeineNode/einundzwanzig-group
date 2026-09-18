@@ -220,7 +220,7 @@ test.describe('Buzz-Workspace: NIP-38-Status (E2E, nur E2E_RELAY=buzz)', () => {
         expect(publishStatus(BUZZ_USER_NSEC, 'E2E-Status: auf dem Berg', '⛰️')).toContain('success')
 
         await loginNsec(page, BUZZ_OWNER_NSEC)
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
 
         // Zeile über die npub-Kurzform finden — sie steht unabhängig vom Status in der
         // Zeile, taugt also als Anker, ohne die Frage vorwegzunehmen.

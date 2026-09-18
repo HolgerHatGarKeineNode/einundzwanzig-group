@@ -118,9 +118,25 @@ test('typing issues NO further request — the query stays on the device (D6)', 
 
     // The index was NOT asked again …
     expect(zaehler.index()).toBe(1)
-    // … and nothing else went out either. `filter` names what did, so a failure is readable.
-    const danach = zaehler.alle().slice(vorher)
+    /*
+     * … and nothing else went out either.
+     *
+     * **A lazily imported bundle chunk of the page's own boot does not count, and that is
+     * not a softening.** `js/readState.ts` imports `readStateSync.ts` dynamically as the
+     * read state comes up — on a slow worker that chunk arrives WHILE this loop types, and
+     * the case then failed with `…/build/assets/readStateSync-*.js` in its list (measured
+     * in the P7 sweep). Its arrival has nothing to do with the keystrokes: it is scheduled
+     * before the palette is even open.
+     *
+     * What the promise is about is the QUERY, so the assertion says exactly that: no
+     * request to anything but the app's own static assets, and no request carrying any of
+     * the typed text. The second half is the one that would fall if a keystroke ever
+     * reached the network — and a chunk url cannot satisfy it by accident.
+     */
+    const danach = zaehler.alle().slice(vorher).filter((url) => !/\/build\/assets\//.test(url))
     expect(danach, `requests after the first keystroke: ${danach.join(', ')}`).toEqual([])
+    const mitText = zaehler.alle().slice(vorher).filter((url) => /graz|test/i.test(url))
+    expect(mitText, `a request carried the typed text: ${mitText.join(', ')}`).toEqual([])
 })
 
 test('a scope prefix addresses one section — and it is NOT `m:`', async ({ page }) => {

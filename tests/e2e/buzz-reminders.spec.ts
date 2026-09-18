@@ -201,7 +201,7 @@ test.describe('Buzz: private Erinnerungen (E2E, nur E2E_RELAY=buzz)', () => {
         // Ohne Uhrverstellung ist die Erinnerung eine Stunde in der Zukunft und darf
         // NICHT erscheinen. Das ist die halbe Zusage — ohne sie wäre der Fall auch dann
         // grün, wenn die Fläche jede Erinnerung sofort zeigte.
-        await page.goto('/updates')
+        await page.goto('/postfach')
         await expect(page.getByRole('heading', { name: 'Erinnerungen' })).toBeHidden()
 
         // Eine Stunde und etwas Luft. `runFor` feuert je Aufruf nur den zunächst fälligen
@@ -214,7 +214,7 @@ test.describe('Buzz: private Erinnerungen (E2E, nur E2E_RELAY=buzz)', () => {
         // Neu betreten: der Store rechnet die Fälligkeit beim Mount mit der jetzt
         // vorgestellten Uhr. Absichtlich KEIN Client-Timer — die Zustellung ist Sache des
         // Relay-Schedulers (`buzz-relay/src/main.rs:728-848`).
-        await page.goto('/updates')
+        await page.goto('/postfach')
         await expect(page.getByRole('heading', { name: 'Erinnerungen' })).toBeVisible({ timeout: 30_000 })
         await expect(page.getByText(text)).toBeVisible({ timeout: 30_000 })
 
@@ -320,7 +320,7 @@ test.describe('Buzz: private Erinnerungen (E2E, nur E2E_RELAY=buzz)', () => {
 
         for (const width of [390, 1440]) {
             await page.setViewportSize({ width, height: 900 })
-            await page.goto('/updates')
+            await page.goto('/postfach')
             const section = page.locator('section[aria-labelledby="reminders-heading"]')
             await expect(section).toBeVisible({ timeout: 30_000 })
 

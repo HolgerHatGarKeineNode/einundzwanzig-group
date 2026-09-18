@@ -483,7 +483,7 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
         await setExpanded(groupToggle(page, 'workspace'), false)
         await expect(workspacePanel(page)).toBeHidden()
 
-        await page.goto('/forge?tab=workspaces')
+        await page.goto('/bereich/forge?tab=workspaces')
         await expect(rail(page)).toBeVisible({ timeout: 20_000 })
 
         // 1. Die Gruppe steht offen — `toggleGroup` lief, und zwar bedingt.
@@ -520,7 +520,7 @@ test.describe('Buzz-Workspace: die Forge in der Rail (E2E, nur E2E_RELAY=buzz)',
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, BUZZ_USER_NSEC)
-        await page.goto('/forge?tab=workspaces')
+        await page.goto('/bereich/forge?tab=workspaces')
 
         const sektion = page.locator('[data-forge-workspaces]')
         await expect(sektion).toBeVisible({ timeout: 20_000 })

@@ -409,7 +409,7 @@ test.describe('Buzz-Space-Verwaltung (E2E, nur E2E_RELAY=buzz)', () => {
         const newcomerPub = getPublicKey(generateSecretKey())
 
         await loginNsec(page, BUZZ_OWNER_NSEC)
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
 
         // Directory geladen: der geseedete Nutzer steht in der relay-signierten 13534.
         // Ueber ihn haengt auch `ready` (relay.self aus NIP-11) — Buzz liefert `self`.
@@ -496,7 +496,7 @@ test.describe('Buzz-Space-Verwaltung (E2E, nur E2E_RELAY=buzz)', () => {
 
         // Admin-Löschung über die Directory-Insel, mit `h` — genau der Pfad der
         // Melde-Queue („Inhalt entfernen").
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
         await expect(page.locator('[x-data="nostrDirectory"]')).toBeVisible({ timeout: 20_000 })
         await page.evaluate(
             async ({ id, h }) => {
@@ -583,7 +583,7 @@ test.describe('Buzz-Space-Verwaltung (E2E, nur E2E_RELAY=buzz)', () => {
             BUZZ_ROOM_WELCOME,
         )
         await page.waitForURL('**/rooms/**')
-        await page.evaluate(() => (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/spaces'))
+        await page.evaluate(() => (window as unknown as { Livewire: { navigate: (u: string) => void } }).Livewire.navigate('/bereich/chat'))
         await page.waitForURL('**/start')
         // Erst wenn die Liste wieder steht, ist eine Zählung darauf etwas wert — sonst
         // wäre „Kachel weg" schon während des Seitenwechsels erfüllt.

@@ -13,12 +13,12 @@ const MEMBER_NSEC = process.env.NOSTR_TEST_NSEC as string
 const strangerNsec = (): string => nsecEncode(generateSecretKey())
 
 /** Loggt per nsec ein und öffnet die Zielseite des fixierten Space. */
-async function loginAndOpen(page: Page, nsec: string, path = '/spaces'): Promise<void> {
+async function loginAndOpen(page: Page, nsec: string, path = '/bereich/chat'): Promise<void> {
     await useZooid(page)
     await loginNsec(page, nsec)
-    if (path !== '/spaces') {
-        await page.goto(path)
-    }
+    // Always navigate: since P2 a login lands on `/start`, not on the room list — an
+    // `if (path !== <landing place>)` would silently let the caller measure Start instead.
+    await page.goto(path)
 }
 
 /**
@@ -27,7 +27,7 @@ async function loginAndOpen(page: Page, nsec: string, path = '/spaces'): Promise
  * den Beitritts-Hinweis mit Link zu verein.einundzwanzig.space.
  */
 test('Nicht-Mitglied sieht das Vereins-Gate auf Räume', async ({ page }) => {
-    await loginAndOpen(page, strangerNsec(), '/spaces')
+    await loginAndOpen(page, strangerNsec(), '/bereich/chat')
 
     await expect(page.getByText('Noch kein Vereinsmitglied')).toBeVisible({ timeout: 15_000 })
     const cta = page.getByRole('link', { name: 'Vereinsmitglied werden' })
@@ -52,19 +52,21 @@ test('Vereins-Relay in den Einstellungen zeigt einen Toast', async ({ page }) =>
     // Der fixierte Default-Space (lokaler zooid) ist der einzige Eintrag.
     await page.getByText(`localhost:${ZOOID_PORT}`).click()
 
-    await page.waitForURL('**/start')
+    // Choosing a space sends the client to the ROOM LIST — that is where the rooms of the
+    // chosen space are (measured; until P2 the same step landed on `/spaces`).
+    await page.waitForURL('**/bereich/chat')
     await expect(page.getByText(/Vereins-Relay/)).toBeVisible({ timeout: 10_000 })
 })
 
 /** Ein Mitglied (in der 13534) sieht das Gate NIE — auch nicht kurz (kein Flash). */
 test('Mitglied sieht das Vereins-Gate nicht', async ({ page }) => {
-    await loginAndOpen(page, MEMBER_NSEC, '/spaces')
+    await loginAndOpen(page, MEMBER_NSEC, '/bereich/chat')
 
     // Space ist geladen (Räume da), aber das Gate bleibt aus.
     await expect(page.getByText('Dev')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Noch kein Vereinsmitglied')).toBeHidden()
 
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
     await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Noch kein Vereinsmitglied')).toBeHidden()
 })
@@ -101,6 +103,8 @@ test('Mitglied: Räume erscheinen auch bei langsamer AUTH (verzögerter Signer)'
     await page.goto('/nostr-login')
     await page.getByRole('button', { name: /Browser-Erweiterung/ }).click()
     await page.waitForURL('**/start')
+    // The rooms this case is about live on the room list; a login lands on Start since P2.
+    await page.goto('/bereich/chat')
 
     // Trotz 3 s AUTH-Verzögerung: Räume da, Gate bleibt aus.
     await expect(page.getByText('Dev')).toBeVisible({ timeout: 25_000 })

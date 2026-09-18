@@ -52,7 +52,7 @@ const logWire = (label: string, list: WireFollowList | null): void => {
 async function openDirectory(page: Page, reader: WireReader): Promise<void> {
     await useZooid(page)
     await loginNsec(page, reader.nsec)
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
     await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 20_000 })
 }
 

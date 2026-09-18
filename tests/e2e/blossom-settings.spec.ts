@@ -16,7 +16,7 @@ test('Settings: Blossom ist auf den Vereins-Server fixiert (kind 10063 wird igno
 
     await useZooid(page)
     await loginNsec(page, NSEC)
-    await page.goto('/settings')
+    await page.goto('/ich/einstellungen')
 
     const section = page.locator('section[aria-labelledby="settings-blossom"]')
     await expect(section).toBeVisible()

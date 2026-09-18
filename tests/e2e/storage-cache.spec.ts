@@ -177,12 +177,10 @@ test('P3: Logout löscht die pubkey-Cache-DB', async ({ page }) => {
     await expect.poll(() => cacheReadiness(page), { timeout: 15_000 }).toBeGreaterThan(0)
     expect(await cacheDbGone(page)).toBe(false) // DB existiert vor dem Logout
 
-    // Abmelden über die Startseite (nostrAuth.doLogout → logout() → clearCache()).
-    // `/` ist `pages::home` (⚡home.blade.php) — ein EIGENES, nicht redesigntes Template mit
-    // direkt sichtbarem Abmelden-Button (kein Profil-Chip-Popover; das Popover-Redesign
-    // betrifft nur `⚡spaces.blade.php` unter `/spaces`, verifiziert im Quelltext). Kein
-    // vorgeschalteter Chip-Klick nötig — s. Bug-Report an den Koordinator.
-    await page.goto('/')
+    // Signing out (nostrAuth.doLogout → logout() → clearCache()). Since P3 the button
+    // lives on „Ich" (`⚡ich.blade.php`), in ONE place and directly visible — `/` is a
+    // redirect to Start since P2 and carries no sign-out of its own.
+    await page.goto('/ich')
     await page.getByRole('button', { name: 'Abmelden' }).click()
     await page.waitForURL('**/nostr-login')
 

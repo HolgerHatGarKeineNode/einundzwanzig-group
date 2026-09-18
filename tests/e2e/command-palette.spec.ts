@@ -278,7 +278,7 @@ test('Ohne Eingabe: Räume + Aktionen, nie leer — Mitglieder/Spaces erst mit E
     await expect(paletteEmpty(page)).toBeHidden()
 })
 
-test('Mit Eingabe: ALLE Sektionen, feste Reihenfolge — seit P4 mit den vier Portal-Sektionen', async ({ page }) => {
+test('Mit Eingabe: ALLE Sektionen, feste Reihenfolge — seit P5 samt „Zusagen"', async ({ page }) => {
     await openApp(page)
     await openPaletteViaKeyboard(page)
 
@@ -307,7 +307,11 @@ test('Mit Eingabe: ALLE Sektionen, feste Reihenfolge — seit P4 mit den vier Po
     const order = await page
         .locator('[data-palette-heading]')
         .evaluateAll((els) => els.map((el) => el.getAttribute('data-palette-heading')))
-    expect(order).toEqual(['rooms', 'members', 'spaces', 'meetups', 'events', 'courses', 'lecturers', 'actions'])
+    // `zusagen` joined the list in P5 (the RSVP action of D12) and sits directly before
+    // the always-identical actions — it IS one, just one that carries rows of its own.
+    expect(order).toEqual([
+        'rooms', 'members', 'spaces', 'meetups', 'events', 'courses', 'lecturers', 'zusagen', 'actions',
+    ])
 })
 
 test('Treffer: Räume, Mitglieder und Aktionen liefern konkrete, benannte Zeilen', async ({ page }) => {
@@ -509,10 +513,23 @@ test.describe('Mobil', () => {
         await expect(paletteInput(page)).toBeFocused()
     })
 
-    test('Kein ⌘K-Versprechen: kein Rail-Kürzel, keine Kürzel-Zeile in der Palette', async ({ page }) => {
+    test('no ⌘K promise on a phone: nothing visible claims it, and no shortcut row in the palette', async ({ page }) => {
         await openApp(page)
 
-        await expect(page.locator('[aria-keyshortcuts="Meta+K Control+K"]')).toHaveCount(0)
+        /*
+         * **Visibility, not presence — since P6.** The command bar (D10) stands in the
+         * document with `hidden … xl:flex` and carries the ⌘K field; below `xl` it is
+         * `display:none` and therefore neither in the accessibility tree nor reachable by
+         * keyboard. That is exactly this case's promise: on a phone no key combination is
+         * claimed that does not exist there.
+         *
+         * Until P6 this was `toHaveCount(0)`. Same statement while the only ⌘K element
+         * hung in an `x-if` of the rail — now that the bar is hidden by CSS, the count
+         * measures the CONSTRUCTION instead of the promise.
+         */
+        const kuerzel = page.locator('[aria-keyshortcuts="Meta+K Control+K"]')
+        const sichtbar = await kuerzel.evaluateAll((els) => els.filter((el) => el.checkVisibility()).length)
+        expect(sichtbar, 'auf 390 px darf kein Element ⌘K versprechen').toBe(0)
 
         await page.locator('[data-palette-open]').click()
         await expect(paletteDialog(page)).toBeVisible({ timeout: 10_000 })

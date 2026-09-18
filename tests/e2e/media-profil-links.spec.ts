@@ -130,7 +130,7 @@ test('SICHERHEIT: die Domain führt den Namen für JEMAND ANDEREN — der Verwei
 
     try {
         await boot(page)
-        await page.goto('/articles')
+        await page.goto('/bereich/artikel')
         const karte = await oeffneKarte(page, USER_PUB)
 
         const link = verweis(karte, 'karte')
@@ -185,7 +185,7 @@ test('BESTÄTIGT: nennt die .well-known genau diesen Schlüssel, trägt der Verw
 
     try {
         await boot(page)
-        await page.goto('/articles')
+        await page.goto('/bereich/artikel')
         const karte = await oeffneKarte(page, USER_PUB)
 
         const link = verweis(karte, 'karte')
@@ -219,7 +219,7 @@ test('OHNE NIP-05 steht der Verweis trotzdem — und ist ein echter externer Ank
 
     try {
         await boot(page)
-        await page.goto('/articles')
+        await page.goto('/bereich/artikel')
         const karte = await oeffneKarte(page, USER_PUB)
 
         const link = verweis(karte, 'karte')
@@ -291,7 +291,7 @@ test('LEERE Basis: die Zeile bleibt verborgen und hat kein href — kein Tabstop
 
     try {
         await boot(page, '')
-        await page.goto('/articles')
+        await page.goto('/bereich/artikel')
         const karte = await oeffneKarte(page, USER_PUB)
 
         const link = verweis(karte, 'karte')

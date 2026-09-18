@@ -168,7 +168,7 @@ test('KERNBEWEIS: zwei Autoren mit identischem Anzeigenamen bleiben getrennt —
 
         // Die Schranke: gäbe es den fremden Artikel gar nicht, wäre die Zeile oben
         // trivial erfüllt. Auf der LISTE muss er stehen.
-        await page.goto('/articles')
+        await page.goto('/bereich/artikel')
         await expect(page.getByRole('heading', { name: fremder, exact: true })).toBeVisible({ timeout: 20_000 })
         await expect(page.getByRole('heading', { name: meiner, exact: true })).toBeVisible()
     } finally {

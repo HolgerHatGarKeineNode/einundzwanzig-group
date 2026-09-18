@@ -24,7 +24,7 @@
  * `support/board-fixtures.ts` — dieselbe Begründung wie dort: `/articles/{naddr}` braucht
  * einen `serve` mit gesetzter `NOSTR_BOARD_URL`.
  */
-import { naddrEncode } from 'nostr-tools/nip19'
+import { naddrEncode, npubEncode } from 'nostr-tools/nip19'
 import { test, expect, type Page } from './support/board-fixtures'
 import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
@@ -245,4 +245,143 @@ test('Desktop (xl): die xl-Anordnung fuegt KEINEN Fokus-Stopp hinzu', async ({ p
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.waitForTimeout(300)
     expect(await wegeZuIch(), 'ab xl: der Avatar der Kommandoleiste').toBe(1)
+})
+
+/*
+ * ── Folded in from `desktop-p5-navigation.spec.ts` (P7, approved removal) ────────────
+ *
+ * That file tested the Ortskarten bar, which P2 deleted (D2), so three quarters of it had
+ * no surface left — its core case asserted that the bar carries no `role="tab"`, and there
+ * is no bar. Two of its promises are about the ARTICLE surface and survive the deletion;
+ * they are folded in here rather than dropped, which is the condition D15 puts on a
+ * removal: the replacement has to cover what stays true.
+ *
+ * What was NOT folded in, with the reason:
+ *  · „kein role=tab im lebenden DOM" and „die Live-Zeile springt nicht" — both measure the
+ *    deleted bar itself;
+ *  · the two assertions inside the cases below that read `[data-ortskarte]` (gone with the
+ *    component) and `[data-rail-fuss="artikel"]` (the rail footer, deleted in P6 — the
+ *    left bar has three children now, and „where am I" is answered by the room rows).
+ */
+
+test('the author page is reachable by a LINK — not only through the address bar', async ({ page, baseURL }) => {
+    // The point of the case: P4 built `/articles/autor/{npub}` and NOTHING linked there.
+    // This one clicks its way to it.
+    const kennung = `lf-p7-autor-${rnd()}`
+    publishArticle(boardWs(baseURL as string), ADMIN, ADMIN_PUB, {
+        identifier: kennung,
+        title: `P7Autor-${rnd()}`,
+        content: 'Ein Absatz reicht.',
+        publishedAt: 1_700_000_040,
+    })
+    const naddr = naddrEncode({ kind: 30023, pubkey: ADMIN_PUB, identifier: kennung, relays: [] })
+
+    await loginToBoard(page)
+    await page.goto(`/articles/${naddr}`)
+    await expect(page.locator('[data-artikel-text]')).toBeVisible({ timeout: 20_000 })
+
+    const link = page.locator('[data-autor-link]')
+    await expect(link).toBeVisible({ timeout: 20_000 })
+
+    // The target stands on the element BEFORE the click — and it is the npub form. A hex
+    // pubkey would resolve in the address just as well, but no other client reads it as an
+    // identity.
+    const npub = npubEncode(ADMIN_PUB)
+    await expect(link).toHaveAttribute('href', new RegExp(`/articles/autor/${npub}$`))
+
+    await link.click()
+    await page.waitForURL(`**/articles/autor/${npub}`, { timeout: 20_000 })
+
+    // Arrived: the author card stands, and WITHOUT an error state. Both together — otherwise
+    // a „this npub cannot be read" would also count as a successful click.
+    await expect(page.locator('[data-autor-karte]')).toBeVisible({ timeout: 20_000 })
+    await expect(page.locator('[data-autor-fehler]')).toHaveCount(0)
+})
+
+test('Desktop: the article list is three columns from xl and four from 2xl — and the stage is wider than the reading cap', async ({ page, baseURL }) => {
+    // Four articles so four columns have four cards. The first one is the highlighted card
+    // and spans two columns — hence five.
+    for (let i = 0; i < 5; i++) {
+        publishArticle(boardWs(baseURL as string), ADMIN, ADMIN_PUB, {
+            identifier: `lf-p7-raster-${i}-${rnd()}`,
+            title: `P7Raster-${i}-${rnd()}`,
+            content: 'Kurz.',
+            publishedAt: 1_700_000_050 + i,
+        })
+    }
+
+    await loginToBoard(page)
+    await page.goto('/bereich/artikel')
+    // **Wait for the GRID.** The card list only stands after the relay answered, and
+    // `x-show` keeps it at `display:none` until then. Measuring before that measures an
+    // invisible grid; the probe below throws in that case, which is the right reaction.
+    await expect(page.locator('[data-artikel-raster]')).toBeVisible({ timeout: 30_000 })
+
+    /**
+     * The column count of the CARD grid, from the resolved layout.
+     *
+     * **`getComputedStyle().gridTemplateColumns` returns the DECLARED value for a
+     * `display:none` element** instead of the resolved tracks — i.e. `repeat(4, minmax(0,
+     * 1fr))`. Split on spaces that is three pieces, whether it says 3 or 4. A hidden grid
+     * therefore ALWAYS reported „3 columns", and that is what once made this case falsely
+     * green at 1440 px and falsely red at 1700 px. Only real `px` tracks are counted, and an
+     * invisible grid is an error rather than a measurement.
+     */
+    const spalten = async (): Promise<number> =>
+        page.evaluate(() => {
+            const raster = document.querySelector<HTMLElement>('[data-artikel-raster]')
+            if (!raster) {
+                throw new Error('Kein Karten-Raster in der Bühne — die Sonde misst nichts.')
+            }
+            if (raster.offsetParent === null) {
+                throw new Error('Das Karten-Raster ist unsichtbar — dann ist jede Spaltenzahl geraten.')
+            }
+            const spuren = getComputedStyle(raster).gridTemplateColumns.split(' ').filter(Boolean)
+            if (!spuren.every((s) => s.endsWith('px'))) {
+                throw new Error(`Keine aufgelösten Spuren, sondern „${spuren.join(' ')}" — die Sonde misst den Klassennamen.`)
+            }
+
+            return spuren.length
+        })
+
+    /** Inner width of the stage's content column and the root font size that goes with it. */
+    const buehne = async (): Promise<{ breite: number; rem: number }> =>
+        page.evaluate(() => {
+            const outlet = document.getElementById('buehne')
+            if (!outlet) {
+                throw new Error('Keine Bühne im DOM — die Sonde misst nichts.')
+            }
+            const deckel = outlet.firstElementChild as HTMLElement | null
+            if (!deckel) {
+                throw new Error('Die Bühne hat kein Deckel-Element — app-shell umgebaut?')
+            }
+
+            return {
+                breite: Math.round(deckel.getBoundingClientRect().width),
+                rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+            }
+        })
+
+    // At 1440 px `xl` (1280) applies, not `2xl` (1536).
+    expect(page.viewportSize()?.width).toBe(1440)
+    await expect.poll(spalten, { timeout: 20_000 }).toBe(3)
+
+    // **The 62 rem reading cap does NOT bind here.** That is the measurable effect of
+    // `width="wide"` at this width: with the cap the content column would stop at 62 rem,
+    // without it, it fills the stage. The 96 rem only show beyond ~1856 px — this is the
+    // promise that is testable at all at 1440 px.
+    const vor = await buehne()
+    expect(vor.breite).toBeGreaterThan(Math.round(62 * vor.rem))
+
+    // And the counter-probe one surface over: `/bereich/chat` keeps the reading cap.
+    await page.goto('/bereich/chat')
+    await expect(page.locator('[data-rail]')).toBeVisible({ timeout: 25_000 })
+    const chat = await buehne()
+    expect(chat.breite).toBe(Math.round(62 * chat.rem))
+
+    // 2xl: four columns. `setViewportSize` beats the project default per case.
+    await page.goto('/bereich/artikel')
+    await expect(page.locator('[data-artikel-raster]')).toBeVisible({ timeout: 30_000 })
+    await page.setViewportSize({ width: 1700, height: 900 })
+    await expect.poll(spalten, { timeout: 20_000 }).toBe(4)
 })

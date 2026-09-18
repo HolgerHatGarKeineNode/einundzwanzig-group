@@ -232,7 +232,7 @@ test('P6: a hidden author disappears from the chat list and comes back', async (
     //
     // Deliberately not through the chat row: that row is gone, which is exactly why the
     // management section exists.
-    await page.goto('/settings')
+    await page.goto('/ich/einstellungen')
     const section = page.locator('[data-settings-section="mutes"]')
     await expect(section).toBeVisible({ timeout: 20_000 })
     await expect(section.locator('[data-mute-remove]')).toHaveCount(1, { timeout: 20_000 })
@@ -360,7 +360,7 @@ test('P6 LAYOUT: the hide action and the management list at 375 px and 1280 px �
         await page.keyboard.press('Escape')
 
         // ── The management section ──────────────────────────────────────────
-        await page.goto('/settings')
+        await page.goto('/ich/einstellungen')
         const section = page.locator('[data-settings-section="mutes"]')
         await expect(section).toBeVisible({ timeout: 20_000 })
         const sbox = await section.boundingBox()

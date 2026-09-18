@@ -75,8 +75,15 @@ function createdAt(content: string): number {
 const roomDot = (page: Page) =>
     page.getByRole('button', { name: new RegExp(ROOM_NAME) }).locator('span.bg-brand-500.text-zinc-950')
 
-/** Der Punkt an der Ecke des Chat-Icons der Bottom-Nav (speist sich aus `any`). */
-const navDot = (page: Page) => page.getByRole('link', { name: /Chat/ }).locator('span.size-2.rounded-full')
+/**
+ * The dot at the corner of the nav icon (fed from `any`).
+ *
+ * **Since P2 it hangs on the „Postfach" slot, no longer on „Chat".** The bottom bar has
+ * three slots (Start · search · inbox, D2) and the dot sits on the one that gets
+ * `unreadDot` (`bottom-nav.blade.php`, `:unread-dot="true"`). What the anchors measure is
+ * unchanged — they ask whether the marker appears and disappears again.
+ */
+const navDot = (page: Page) => page.getByRole('link', { name: /Postfach/ }).locator('span.size-2.rounded-full')
 
 /** Liegt GENAU diese kind-9 (+ ihr Tracker-Eintrag) im Kaltstart-Cache? */
 function messageCached(page: Page, content: string): Promise<boolean> {
@@ -200,6 +207,8 @@ function readStateRows(page: Page): Promise<Record<string, number>> {
 async function openSpaces(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
+    // Since P2 a login lands on `/start` (D3); the room list is `/bereich/chat`.
+    await page.goto('/bereich/chat')
     await expect(page.getByRole('button', { name: new RegExp(ROOM_NAME) })).toBeVisible({ timeout: 20_000 })
 }
 
@@ -487,6 +496,7 @@ test('Anker 4: fehlender unread-Store rendert nichts und wirft nichts', async ({
     })
 
     await loginNsec(page, NSEC)
+    await page.goto('/bereich/chat')
     await expect(page.getByRole('button', { name: new RegExp(ROOM_NAME) })).toBeVisible({ timeout: 20_000 })
 
     // Der Store fehlt NUR in der Oberfläche — der Lesestand-Pfad läuft weiter. Es gibt

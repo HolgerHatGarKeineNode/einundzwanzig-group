@@ -168,7 +168,7 @@ async function oeffneRepo(page: Page, dtag: string): Promise<void> {
         ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
     }, `${ZOOID_WS}/`)
     await loginNsec(page, NSEC)
-    await page.goto('/forge?tab=repos')
+    await page.goto('/bereich/forge?tab=repos')
     await page.waitForFunction(
         () => {
             const el = document.querySelector('[x-data^="nostrForge"]')
@@ -342,7 +342,7 @@ test.describe('Forge: das README des Code-Browsers', () => {
 
 
         // Dieselbe Sitzung, dieselbe IndexedDB: neu laden und erneut öffnen.
-        await page.goto('/forge?tab=repos')
+        await page.goto('/bereich/forge?tab=repos')
         await page
             .locator('[data-forge-repo]')
             .filter({ has: page.getByText(REPO_D, { exact: true }) })

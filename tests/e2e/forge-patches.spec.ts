@@ -237,7 +237,7 @@ async function oeffneForge(page: Page): Promise<void> {
     // gescheitert (11 × „resolved to <a data-forge-repo> … unexpected value
     // hidden"). Auf der zweispaltigen Bühne ab 56 rem ist der Parameter
     // wirkungslos; der Test läuft damit in beiden Formen.
-    await page.goto('/forge?tab=repos')
+    await page.goto('/bereich/forge?tab=repos')
     // Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `loading` steht,
     // ist die Werkbank per `x-show` aus, und jede Messung liefe gegen 0 — grün,
     // ohne irgendetwas geprüft zu haben.
@@ -1017,7 +1017,7 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
             )
 
             try {
-                await page.goto('/forge?tab=repos')
+                await page.goto('/bereich/forge?tab=repos')
                 await page.locator('[data-forge-repo]').filter({ hasText: REPO_NAME }).first().click()
                 await page.getByRole('tab', { name: /^Issues/ }).click()
                 await expect(page.locator('[data-forge-issue]').first()).toBeVisible({ timeout: 30_000 })
@@ -1053,7 +1053,7 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
                     {
                         name: 'Workspace-Liste', wurzel: '[data-forge-vorgang-link]', labels: false,
                         hin: async () => {
-                            await page.goto('/forge?tab=issues')
+                            await page.goto('/bereich/forge?tab=issues')
                             await expect(page.locator('[data-forge-region="issues"]')).toBeVisible({ timeout: 30_000 })
                         },
                     },
@@ -1309,7 +1309,7 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
      */
     test('DoD P5: die Zeitleiste ist ein Bauteil und traegt ihre Anker', async ({ page }) => {
         await oeffneForge(page)
-        await page.goto('/forge?tab=activity')
+        await page.goto('/bereich/forge?tab=activity')
         await expect(page.locator('[data-forge-activity]').first()).toBeVisible({ timeout: 30_000 })
 
         const m = await page.evaluate(() => {
@@ -1423,7 +1423,7 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
 
         try {
             await oeffneForge(page)
-            await page.goto('/forge?tab=issues')
+            await page.goto('/bereich/forge?tab=issues')
             // Die Gruppe DIESES Repos, nicht die erste auf der Fläche.
             const meine = `[data-forge-gruppe][data-address$=":${REPO_D}"]`
             await expect(

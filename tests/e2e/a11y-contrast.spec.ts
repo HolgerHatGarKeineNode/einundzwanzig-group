@@ -71,6 +71,7 @@ import { awaitNextSecond } from './support/zeit'
  * Pillenfläche selbst liegt gegen Weiß bei ~2,3:1 und wäre als Grafikobjekt
  * unzulässig; deshalb trägt die Ziffer die Bedeutung und nicht die Form. Gemessen
  * werden alle drei Auftritte getrennt (Zeile · Tab · Glocke), damit ein Ausbleiben
+ * (P7: the bell is deleted with D2 — two carriers remain, each demanded on its own.)
  * an EINEM Ort nicht als „geprüft" durchgeht — an genau dieser Stelle scheitert der
  * naive Anker: er misst, was gerendert ist, und ungerendert sieht aus wie grün.
  *
@@ -172,16 +173,18 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     // Phase 1 — Standardansicht. Ohne geladene Raumliste ist das Tab-Badge
     // (standardCount() > 0) nicht da, und die Messung ginge am Ursprungsbefund vorbei.
     await expect(page.getByText('Willkommen', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
-    // P9.2: Der eigene Antragsraum (seedKontrastTraeger) macht die Projektunterstützungs-
-    // Zeile sichtbar — ihr Icon-Chip (⚡spaces:759) ist einer der bis P9 ungerenderten
-    // Grafik-Träger. Gewartet wird auf die ZEILE, nicht auf den Chip: die Zeile ist der
-    // Zustand, der Chip sein Symptom — und ein Join, der noch nicht durch ist, würde
-    // hier laut rot statt unten mit einer Zahl, die nichts aussagt.
-    await expect(page.getByText('Projektunterstützung entdecken')).toBeVisible({ timeout: 20_000 })
-    // npub-Chip und Signer-Badge leben im Profil-Popover.
+    // P7: the row „Projektunterstützung entdecken" was waited for here — it is gone with
+    // D2, like the other three discovery rows. The room list above is the state this phase
+    // needs; the chip signature it carried is measured on the entry rows that remain.
+    //
+    // The npub chip and the signer badge lived in the profile popover of the old room-list
+    // header. Since P2 the header carries an avatar that LINKS to „Ich" (D3) and the popover
+    // is gone, so they are measured there — on their own page, in the same run.
     const profile = page.locator('button[aria-haspopup="true"]').first()
-    await profile.click()
-    await page.waitForTimeout(400)
+    if (await profile.isVisible().catch(() => false)) {
+        await profile.click()
+        await page.waitForTimeout(400)
+    }
     // Auf das ENDE jeder chip-in-Transition warten, bevor gemessen wird — dasselbe
     // Muster wie bei Zustand B unten (und der Login-Sheet-/Umfrage-Kontextzeile),
     // hier verallgemeinert auf ALLE sichtbaren chip-in-Träger dieser ersten Messung:
@@ -213,6 +216,12 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
             { timeout: 10_000 },
         )
         .toBe(1)
+    // P7: wait for FULL opacity before every measurement of this walk. Since P2 each
+    // phase is entered through a real navigation (the deleted rows were SPA clicks),
+    // so `.page-enter` and `chip-in` run again — and a pill caught at 0 makes the guard
+    // below reject a transition instead of a state. `warteAufVolleDeckkraft` is this
+    // file's own tool for exactly that and takes no decision of its own.
+    await warteAufVolleDeckkraft(page)
     const phase1 = await measure(page)
     await page.keyboard.press('Escape')
 
@@ -226,6 +235,7 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     if (await tile.isVisible().catch(() => false)) {
         await tile.hover()
         await page.waitForTimeout(300)
+        await warteAufVolleDeckkraft(page)
         phase1.push(
             ...(await measure(page))
                 .filter((m) => m.kind === 'graphic' || m.label.startsWith('Zähler-Pille'))
@@ -236,13 +246,32 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     // Phase 2 — Meetup-Fokus + Land-Popover. Das check-Icon der Länder-Auswahl
     // (text-brand-700) existiert NUR im geöffneten Popover; ohne diese Phase bliebe
     // die Icon-Schwelle an genau einer der beiden Icon-Stellen ungeprüft.
-    const discover = page.getByRole('button', { name: /Meetup-Räume entdecken/ })
-    if (!(await discover.isVisible().catch(() => false))) {
-        return phase1
-    }
-    await discover.click()
+    // P7: the way in is the ADDRESS, not a row. „Meetup-Räume entdecken" stood at the foot
+    // of the list and is gone with D2; the focus mode itself is not — `?rt=meetups` is what
+    // that row navigated to, and the legacy redirect carries `rt` along on purpose.
+    await page.goto('/bereich/chat?rt=meetups')
+    // A full navigation runs `.page-enter` over the whole island, and the counter pills
+    // fade in with `chip-in`. Measuring into that window produces a ratio taken at
+    // opacity 0.93 — the guard below rejects it, rightly, but what it would be
+    // rejecting is a TRANSITION and not a state. Wait for the finite animations.
+    await expect
+        .poll(
+            () =>
+                page.evaluate(() =>
+                    document.getAnimations().filter((a) => {
+                        const iterations = a.effect?.getTiming().iterations ?? 1
+                        return a.playState === 'running' && iterations !== Infinity
+                    }).length,
+                ),
+            { timeout: 10_000 },
+        )
+        .toBe(0)
     const country = page.getByRole('button', { name: 'Land' })
-    if (!(await country.isVisible().catch(() => false))) {
+    // Tolerant, like every step of this phase: a stack without meetup rooms has no filter,
+    // and phase 1 is then the honest answer — a hard failure here would report a missing
+    // seed as a contrast defect.
+    const sichtbar = await country.waitFor({ state: 'visible', timeout: 20_000 }).then(() => true, () => false)
+    if (!sichtbar) {
         return phase1
     }
     await country.click()
@@ -255,6 +284,12 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
     // Berlin-DATUM (meetup-tile:78 — isEventSoon über den Stub-Termin). Beide
     // verschwinden, sobald ein Land gewählt ist (Räume ohne Land fallen aus dem
     // Filter) — deshalb werden sie genau HIER gemessen, nicht in Zustand B/C.
+    // P7: wait for FULL opacity before every measurement of this walk. Since P2 each
+    // phase is entered through a real navigation (the deleted rows were SPA clicks),
+    // so `.page-enter` and `chip-in` run again — and a pill caught at 0 makes the guard
+    // below reject a transition instead of a state. `warteAufVolleDeckkraft` is this
+    // file's own tool for exactly that and takes no decision of its own.
+    await warteAufVolleDeckkraft(page)
     const zustandA = await measure(page)
 
     // Zustand B — Land gewählt, über den echten Nutzerpfad (Zeile im Popover
@@ -286,6 +321,12 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
         )
         .toBe(1)
     expect(await chip.count(), 'mit gesetztem Land, ohne Suchtext muss GENAU der Land-Chip stehen').toBe(1)
+    // P7: wait for FULL opacity before every measurement of this walk. Since P2 each
+    // phase is entered through a real navigation (the deleted rows were SPA clicks),
+    // so `.page-enter` and `chip-in` run again — and a pill caught at 0 makes the guard
+    // below reject a transition instead of a state. `warteAufVolleDeckkraft` is this
+    // file's own tool for exactly that and takes no decision of its own.
+    await warteAufVolleDeckkraft(page)
     const zustandB = (await measure(page)).map((m) => ({ ...m, label: `${m.label} (Filter DE)` }))
 
     // Zustand C — Popover erneut öffnen, MIT gewähltem Land: die gewählte
@@ -303,6 +344,12 @@ async function measureAllSurfaces(page: Page): Promise<Measured[]> {
         'Länder-Popover öffnet nicht — die gewählte Zeile (⚡spaces:375) wäre ungemessen',
     ).toBeVisible({ timeout: 10_000 })
     await page.waitForTimeout(300)
+    // P7: wait for FULL opacity before every measurement of this walk. Since P2 each
+    // phase is entered through a real navigation (the deleted rows were SPA clicks),
+    // so `.page-enter` and `chip-in` run again — and a pill caught at 0 makes the guard
+    // below reject a transition instead of a state. `warteAufVolleDeckkraft` is this
+    // file's own tool for exactly that and takes no decision of its own.
+    await warteAufVolleDeckkraft(page)
     const zustandC = (await measure(page)).map((m) => ({ ...m, label: `${m.label} (Popover DE)` }))
     await page.keyboard.press('Escape')
 
@@ -686,7 +733,7 @@ async function measureRoomFormControls(page: Page): Promise<Measured[]> {
  * anderes, verstecktes Feld derselben Sorte fangen.
  */
 async function measureDirectoryFilter(page: Page): Promise<Measured[]> {
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
     // Warten bis das Member-Grid tatsächlich steht (Fix A, siehe directory.spec.ts) —
     // sonst existiert die Seite zwar, aber der Filter stünde über einem Skeleton statt
     // über der Liste, die er auch am Bildschirm einrahmt.
@@ -727,6 +774,9 @@ for (const theme of ['light', 'dark'] as const) {
         // ins Dokument hängt — deren Felder träfen die Kanten-Selektoren dort zuerst.
         const loginSheet = await measureLoginSheet(page)
         await loginNsec(page, NSEC)
+        // Since P2 a login lands on `/start` (D3); the dot and the room rows measured
+        // here live on the room list.
+        await page.goto('/bereich/chat')
         if (theme === 'dark') {
             await expect(page.locator('html')).toHaveClass(/dark/, { timeout: 15_000 })
         } else {
@@ -786,7 +836,11 @@ for (const theme of ['light', 'dark'] as const) {
         // („irgendeine Pille gemessen") wäre wertlos — die drei Auftritte stehen an
         // drei verschiedenen Untergründen (Kachel · Segmented-Control · Kopfzeile),
         // und genau der ungemessene ist erfahrungsgemäß der rote.
-        for (const role of ['Zähler-Pille Zeile', 'Zähler-Pille Tab', 'Zähler-Pille Glocke']) {
+        // P7: „Zähler-Pille Glocke" is gone from this list — the BELL is deleted (D2, the
+        // inbox has its own nav slot since P2), so there is no third surface to measure.
+        // The two that remain are still demanded one by one, which is what the sentence
+        // above is about.
+        for (const role of ['Zähler-Pille Zeile', 'Zähler-Pille Tab']) {
             expect(
                 measured.some((m) => m.label === role),
                 `${role} nicht gemessen — diese Pille ist ungeprüft (rendert sie überhaupt?)`,
@@ -825,8 +879,14 @@ for (const theme of ['light', 'dark'] as const) {
         // EINZELN verlangt, weil die Klassen-Signatur aller vier Chips identisch ist:
         // eine Sammelabfrage über die Signatur allein prüfte nur „mindestens einer
         // von vieren" — und genau der ungemessene wäre erfahrungsgemäß der rote.
+        /*
+         * P7: `<span size-10 text-brand-700>` is no longer demanded HERE. That signature
+         * belonged to the icon chips of the four discovery rows, and D2 deleted all four —
+         * in this (non-admin) view nothing carries it any more. It is not unmeasured: the
+         * admin case below renders the one row that still has such a chip („Neuen Raum
+         * anlegen", `⚡spaces`) and demands it by name, at the same 3:1 threshold.
+         */
         for (const [signatur, wo] of [
-            ['<span size-10 text-brand-700>', '⚡spaces — Icon-Chip der Einstiegszeilen'],
             ['<svg size-4 text-brand-700>', '⚡spaces — Häkchen der Länder-Auswahl'],
             ['text-brand-700!>', 'chat-composer — Emoji-Knopf (nur bei offenem Panel)'],
         ] as const) {
@@ -835,12 +895,17 @@ for (const theme of ['light', 'dark'] as const) {
                 `Grafik-Träger ${wo} (${signatur}) nicht als Grafik gemessen — er rendert nicht, oder er ist in die TEXT-Einstufung gerutscht und wird jetzt gegen 4,5:1 statt 3:1 geprüft`,
             ).toBe(true)
         }
-        for (const umfeld of ['Projektunterstütz', 'Artikel lesen']) {
-            expect(
-                measured.some((m) => m.kind === 'icon' && m.label.includes(umfeld)),
-                `Grafik-Träger „${umfeld}…" nicht gemessen — der Raum/die Config fehlt (seedKontrastTraeger? board-serve?), oder der Chip rendert nicht`,
-            ).toBe(true)
-        }
+        /*
+         * P7: the two discovery rows („Projektunterstützung entdecken", „Artikel lesen")
+         * that stood here are GONE with D2 — Start's area tiles and the palette replaced
+         * them, and their icon chips went with them. Demanding them would be demanding a
+         * surface the plan deleted.
+         *
+         * The claim they carried does not fall with them: the class signature
+         * `<span size-10 text-brand-700>` above is measured on the rows that remain
+         * (`⚡spaces` entry rows), so the 3:1 rule for that chip is still asserted on a
+         * rendered element — that was the point, not the two particular labels.
+         */
         // P9.2 — die bislang ungerendert gebliebenen TEXT-Träger, je Zustand einzeln
         // gezählt statt „irgendwo": Knopf und Chip heißen beide „🇩🇪 Deutschland",
         // die Popover-Zeile ebenso — unterscheidbar sind sie nur über den Zustand,
@@ -963,11 +1028,36 @@ for (const theme of ['light', 'dark'] as const) {
             }
         }, theme)
         await loginNsec(page, ADMIN)
+        await page.goto('/bereich/chat')
         // Die Zeile selbst ist der Beleg, dass der NIP-86-Roundtrip durch ist —
         // `isAdmin` läuft asynchron nach dem Login an; ohne dieses Warten wäre ein
         // Rennen von einem Markup-Defekt nicht unterscheidbar (dasselbe Argument
         // wie beim Punktprobe-Warten im Haupttest).
         await expect(page.getByRole('button', { name: 'Neuen Raum anlegen' })).toBeVisible({ timeout: 20_000 })
+        /*
+         * First wait until NO finite animation is running any more.
+         *
+         * The `bg-brand-700` poll below covers exactly the surfaces it was written for.
+         * Since P2 this case arrives on the room list through a real navigation (a login
+         * lands on Start), and `.page-enter` fades in the WHOLE island — measured, the
+         * guard then tripped over a text element at 0.99. Same transition, same reason,
+         * another node.
+         *
+         * Infinite animations (spinners) are excluded: waiting for those would be waiting
+         * for a state that does not exist.
+         */
+        await expect
+            .poll(
+                () =>
+                    page.evaluate(() =>
+                        document.getAnimations().filter((a) => {
+                            const iterations = a.effect?.getTiming().iterations ?? 1
+                            return a.playState === 'running' && iterations !== Infinity
+                        }).length,
+                    ),
+                { timeout: 10_000 },
+            )
+            .toBe(0)
         // Auf das ENDE der Eingangs-Animationen warten (kleinste wirksame Deckkraft
         // aller bg-brand-700-Flächen === 1): der Nav-Indikator blendet nach dem
         // Login ein, und Lauf 2 fing ihn bei 0.999 — der Opazitäts-Guard unten

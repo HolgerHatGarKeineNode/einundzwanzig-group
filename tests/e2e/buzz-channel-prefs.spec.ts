@@ -206,7 +206,7 @@ async function bootChannelList(page: Page, width = 375): Promise<void> {
         ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
     }, BUZZ_URL)
     await loginNsec(page, BUZZ_USER_NSEC)
-    await page.goto('/forge?tab=workspaces')
+    await page.goto('/bereich/forge?tab=workspaces')
     await expect(page.locator('[data-forge-workspaces]')).toBeVisible({ timeout: 25_000 })
     await expect(page.locator(`[data-forge-kanalzeile][data-room-h="${BUZZ_ROOM_WELCOME}"]`))
         .toBeVisible({ timeout: 25_000 })
@@ -221,7 +221,7 @@ async function bootChannelList(page: Page, width = 375): Promise<void> {
  */
 async function bootRail(page: Page): Promise<void> {
     await page.setViewportSize({ width: 1280, height: 900 })
-    await page.goto('/spaces')
+    await page.goto('/bereich/chat')
     const rail = page.locator('[data-rail]')
     await expect(rail).toBeVisible({ timeout: 25_000 })
     // Establish the state, do not toggle it — the collapsed default is not this file's

@@ -606,7 +606,7 @@ test.describe('Buzz-Relay (E2E, nur E2E_RELAY=buzz)', () => {
         // fremde Verbindung gar nicht, und der Anker wäre grün, ohne etwas zu prüfen.
         // Genau so ist er im ersten Entwurf durch die Mutationsprobe gefallen.
         await loginNsec(page, BUZZ_OWNER_NSEC)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
         await page.waitForTimeout(4_000)
         await page.goto(`/rooms/${BUZZ_ROOM_WELCOME}`)
         await expect(page.getByPlaceholder('Nachricht schreiben…')).toBeVisible({ timeout: 20_000 })

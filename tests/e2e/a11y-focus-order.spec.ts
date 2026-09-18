@@ -172,7 +172,7 @@ test.describe('Suche-ohne-Treffer: Fokus zurück ins Suchfeld (P3.1/P3.5)', () =
     test('Mitgliederverzeichnis', async ({ page }) => {
         await useZooid(page)
         await loginNsec(page, NSEC)
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
 
         const search = page.getByPlaceholder('Mitglied suchen…')
         await expect(search).toBeVisible({ timeout: 15_000 })
@@ -186,7 +186,7 @@ test.describe('Suche-ohne-Treffer: Fokus zurück ins Suchfeld (P3.1/P3.5)', () =
     test('Raumliste (mobil, xl:hidden)', async ({ page }) => {
         await useZooid(page)
         await loginNsec(page, NSEC)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
 
         const search = page.getByPlaceholder('Raum suchen…')
         await expect(search).toBeVisible({ timeout: 15_000 })
@@ -214,7 +214,7 @@ test.describe('Suche-ohne-Treffer: Fokus zurück ins Suchfeld (P3.1/P3.5)', () =
     test('Suchfeld nicht gerendert (?q= ohne showRoomSearch()) → Fokus auf roomList-Auffang, nicht <body>', async ({ page }) => {
         await useZooid(page)
         await loginNsec(page, NSEC)
-        await page.goto('/spaces?q=kein-raum-heisst-so-xyz123')
+        await page.goto('/bereich/chat?q=kein-raum-heisst-so-xyz123')
 
         const cta = page.getByRole('button', { name: 'Suche leeren' })
         await expect(cta).toBeVisible({ timeout: 15_000 })
@@ -238,7 +238,7 @@ test.describe('room-form-Modal: Fokus nach Schließen NIE auf <body> (P3.5, spac
     test('normaler Fall: nativer Dialog-Fokus kehrt zum Auslöser zurück', async ({ page }) => {
         await useZooid(page)
         await loginNsec(page, ADMIN_HEX)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
 
         const trigger = page.getByRole('button', { name: 'Neuen Raum anlegen', exact: true })
         await expect(trigger).toBeVisible({ timeout: 15_000 })
@@ -263,7 +263,7 @@ test.describe('room-form-Modal: Fokus nach Schließen NIE auf <body> (P3.5, spac
         // Unterschied ist WORÜBER der Auslöser verschwindet.
         await useZooid(page)
         await loginNsec(page, ADMIN_HEX)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
 
         const trigger = page.getByRole('button', { name: 'Neuen Raum anlegen', exact: true })
         await expect(trigger).toBeVisible({ timeout: 15_000 })
