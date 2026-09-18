@@ -114,13 +114,26 @@ export const vereinMeBody = (overrides: JsonBody = {}): unknown =>
 export const vereinInvoiceBody = (overrides: JsonBody = {}): unknown =>
     wrap({ bolt11: null, checkout_url: null, invoice_id: 'inv-e2e', ...overrides })
 
+/**
+ * `GET /api/v1/membership/payments` — the contribution years (P5, „Ich › Verein").
+ *
+ * The envelope is a LIST and not a resource: the association answers here with
+ * `PaymentEventResource::collection`. Measured field by field against that shape in
+ * `packages/einundzwanzig-group/js/mitgliedschaftModelle.test.ts`.
+ */
+export const vereinPaymentsBody = (rows: JsonBody[]): unknown => ({
+    data: rows.length > 0
+        ? rows
+        : [{ year: 2026, amount: 21, currency: 'EUR', paid: true, receipt_url: 'https://verein.e2e-test.invalid/i/2026' }],
+})
+
 // ── Proxy-Stub ────────────────────────────────────────────────────────────────
 
 type StubResponse = { status: number; body?: unknown }
 /** Darf async sein (z. B. eine künstliche Verzögerung vor der Antwort testen). */
 type Responder = (callIndex: number) => StubResponse | Promise<StubResponse>
-type Handlers = { config?: Responder; me?: Responder; applications?: Responder; invoice?: Responder; refresh?: Responder }
-type Calls = { config: number; me: number; applications: number; invoice: number; refresh: number }
+type Handlers = { config?: Responder; me?: Responder; payments?: Responder; applications?: Responder; invoice?: Responder; refresh?: Responder }
+type Calls = { config: number; me: number; payments: number; applications: number; invoice: number; refresh: number }
 
 /**
  * Fängt `/api/verein/**` vollständig ab — nichts davon erreicht je den echten
@@ -132,7 +145,7 @@ type Calls = { config: number; me: number; applications: number; invoice: number
  * exakte `refresh`-Aufkommen im Nachfass-Plan.
  */
 export async function routeVerein(page: Page, handlers: Handlers): Promise<{ calls: Calls }> {
-    const calls: Calls = { config: 0, me: 0, applications: 0, invoice: 0, refresh: 0 }
+    const calls: Calls = { config: 0, me: 0, payments: 0, applications: 0, invoice: 0, refresh: 0 }
 
     await page.route('**/api/verein/**', async (route) => {
         const req = route.request()
@@ -154,6 +167,10 @@ export async function routeVerein(page: Page, handlers: Handlers): Promise<{ cal
             hit = await dispatch('config', handlers.config)
         } else if (method === 'GET' && pathname.endsWith('/me')) {
             hit = await dispatch('me', handlers.me)
+        } else if (method === 'GET' && pathname.endsWith('/payments')) {
+            // BEFORE the two payment endpoints below, and without a conflict: those
+            // require `/payments/<year>/…`, this one is the list itself (P5).
+            hit = await dispatch('payments', handlers.payments)
         } else if (method === 'POST' && pathname.endsWith('/applications')) {
             hit = await dispatch('applications', handlers.applications)
         } else if (method === 'POST' && /\/payments\/\d+\/invoice$/.test(pathname)) {
