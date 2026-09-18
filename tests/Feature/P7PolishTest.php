@@ -23,7 +23,7 @@ function authed(TestCase $test): TestCase
 
 test('Login-Sheet: Slide/Scale sind reduced-motion-gegated (Fade bleibt)', function () {
     // Global im Layout gemountet → auf jeder Chrome-Seite im DOM.
-    $res = authed($this)->get(route('group.spaces'))->assertOk();
+    $res = authed($this)->get(route('group.bereich.chat'))->assertOk();
 
     // Tailwind v4 schreibt das Wichtig-Zeichen HINTER die Utility (`translate-y-0!`),
     // v3 davor (`!translate-y-0`). Das Markup ist am 2026-08-19 umgestellt worden
@@ -58,7 +58,7 @@ test('Chat-Composer: Emoji-Knopf trägt die v4-Wichtig-Form (Zwilling zu :24)', 
 });
 
 test('Wallet-Hero: Count-Up + grüner Farb-Flash bei Zuwachs', function () {
-    $res = authed($this)->get(route('group.wallet'))->assertOk();
+    $res = authed($this)->get(route('group.bereich.wallet'))->assertOk();
 
     // $watch statt x-effect (keine Selbst-Retrigger-Schleife) + rAF-Tween-Signatur.
     $res->assertSee("\$watch('balanceSats'", false);
@@ -68,7 +68,7 @@ test('Wallet-Hero: Count-Up + grüner Farb-Flash bei Zuwachs', function () {
 });
 
 test('Kontrast: Reconnect-Banner trägt dunklen Text auf Orange (kein Weiß-auf-Orange)', function () {
-    $res = authed($this)->get(route('group.spaces'))->assertOk();
+    $res = authed($this)->get(route('group.bereich.chat'))->assertOk();
 
     $res->assertSee('text-brand-950', false);
     $res->assertSee('bg-brand-950 px-2 py-0.5 font-semibold text-brand-50', false);
@@ -81,16 +81,40 @@ test('Kontrast: Login-Hinweise laufen über text-muted statt text-zinc-500', fun
     $res->assertDontSee('text-xs text-zinc-500', false);
 });
 
-test('Kontrast: Landing-Meta über text-muted', function () {
-    $res = $this->get(route('home'))->assertOk();
+test('contrast: the meta lines of Start run through text-muted', function () {
+    // Until P2 this case measured the landing page under `/`. That is gone with Concept C —
+    // `/` forwards to Start, and Start IS the surface a guest sees first. The statement stays
+    // the same: secondary text runs through `text-muted` (the token the contrast measurement
+    // knows) and not through a hard-coded `text-zinc-500`.
+    // Measured inside the PAGE BODY and not across the whole document: since the desktop
+    // shell the profile card hangs in `app-frame` as an overlay — that is, on EVERY page —
+    // and carries a pre-existing `text-zinc-500` there. A document-wide `assertDontSee` would
+    // therefore not be strict but simply unsatisfiable, and the case would lose its statement
+    // about the surface it is meant to check.
+    $html = (string) $this->get(route('group.start'))->assertOk()->getContent();
 
-    $res->assertSee('tracking-wide text-muted', false);
-    $res->assertDontSee('tracking-wider text-zinc-500', false);
+    $buehne = mb_strstr($html, 'data-tab-outlet');
+    expect($buehne)->not->toBeFalse('marker data-tab-outlet missing — the narrowing would have no subject');
+    $buehne = mb_strstr((string) $buehne, '</main>', true);
+    expect($buehne)->not->toBeFalse('no closing </main> — the narrowing would have no subject');
+
+    expect((string) $buehne)->toContain('text-muted');
+
+    // What is looked for is the BARE utility, not every occurrence of the string: Flux
+    // declares its default as `[:where(&)]:text-zinc-500` — a rule with specificity 0 that
+    // exists precisely to be overridden by `text-muted`. Counting it would make the case
+    // unsatisfiable, and an unsatisfiable case eventually gets deleted instead of read.
+    preg_match_all('/(?<!\]:)text-zinc-500/', (string) $buehne, $hart);
+    expect($hart[0])->toBeEmpty('secondary text on Start runs hard through text-zinc-500 instead of text-muted');
+
+    // POSITIVE CONTROL for the probe: it DOES find the Flux default form — so it is spelled
+    // correctly and does not report an empty set because it is grasping at nothing.
+    expect((string) $buehne)->toContain(']:text-zinc-500');
 });
 
 test('Tap-Targets: primäre Buttons (Wallet/Directory/Chat-Composer) tragen icon-btn-touch', function () {
-    authed($this)->get(route('group.wallet'))->assertOk()->assertSee('icon-btn-touch', false);
-    authed($this)->get(route('group.directory'))->assertOk()->assertSee('icon-btn-touch', false);
+    authed($this)->get(route('group.bereich.wallet'))->assertOk()->assertSee('icon-btn-touch', false);
+    authed($this)->get(route('group.bereich.leute'))->assertOk()->assertSee('icon-btn-touch', false);
     // Chat-Kernpfad: Senden/Anhängen/Beitreten (Review-Fund plan/medium).
     authed($this)->get(route('group.room', ['h' => 'welcome']))->assertOk()->assertSee('icon-btn-touch', false);
 });

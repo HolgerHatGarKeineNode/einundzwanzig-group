@@ -87,6 +87,24 @@ export const testServerEnv = ({ slot, mitBoard = false, ohneWorkspace = false }:
         // env — prod bleibt bei null (`config/database.php`).
         DB_JOURNAL_MODE: 'WAL',
         DB_BUSY_TIMEOUT: '5000',
+        /*
+         * **The cache does NOT go through that SQLite.**
+         *
+         * Measured in the P7 sweep, in the server's own log:
+         * `SQLSTATE[HY000]: General error: 5 database is locked … SQL: update "cache" set
+         * "value" = i:8` — that is the RATE LIMITER's counter, and the request it belonged
+         * to answered 500. Six `serve` processes share one SQLite file; WAL and the busy
+         * timeout above help the READERS, but a hot counter row written on every request of
+         * every worker is exactly the write they cannot help with.
+         *
+         * `file` and not `array`: the k1 challenge of the NIP-98 login handoff is written by
+         * one request and read by the next, and `PHP_CLI_SERVER_WORKERS` means that can be
+         * another PROCESS — an in-memory store would break the login. The file store is
+         * shared the same way the database store was, without the single writer lock.
+         *
+         * Production is untouched: it runs neither SQLite nor this env.
+         */
+        CACHE_STORE: 'file',
         // Der PHP-Built-in-Server serialisiert sonst schon HTML- + Asset-Chunk-Requests
         // EINES Seitenaufbaus.
         PHP_CLI_SERVER_WORKERS: '4',
@@ -143,5 +161,28 @@ export const testServerEnv = ({ slot, mitBoard = false, ohneWorkspace = false }:
         // Schlüssel-Riegels: was der Server nicht sieht, kann er nicht signieren.
         NOSTR_BOT_NSEC: '',
         NOSTR_BOT_RELAY: '',
+
+        // ── The association portal (P4/P7) ─────────────────────────────────────────
+        //
+        // **A loopback port nothing listens on, and that is the point.** `portal_url` has
+        // a PRODUCTION default in the package config, so without this line the test server
+        // answers `/suche/portal-index` and renders `/bereich/meetups` by calling
+        // `https://portal.einundzwanzig.space` — from the SERVER, where neither the relay
+        // guard nor Chromium's host-resolver rules can see it (they watch the browser).
+        // Measured in the P7 sweep; the hermetic run had one leg outside all along.
+        //
+        // NOT empty: an empty `portal_url` removes the `meetups`/`kurse` tiles from Start
+        // (`AreaRegistry`, `requires`), which would change the markup the suite measures.
+        // A dead loopback keeps the configuration and fails the fetch instantly — the same
+        // shape `⚡`-specs use for a deliberately dead relay, and the catalog is fail-soft
+        // (`HttpPortalCatalog`: empty lists, status `offline`).
+        //
+        // The three specs that need real rows stub the endpoint in the browser
+        // (`palette-portal`, `zusage-390`, `a11y-contrast`), which is unaffected by this.
+        PORTAL_URL: 'http://127.0.0.1:1',
+        // The rate of `/suche/portal-index`. One page load of Start asks it once, and a
+        // worker does far more than 60 of those a minute — the production limit turned
+        // into 429s in unrelated tests (P7). The number a visitor gets is unchanged.
+        GROUP_PORTAL_INDEX_RATE: '6000,1',
     }
 }

@@ -142,7 +142,7 @@ test.describe('Buzz-Melde-Queue (E2E, nur E2E_RELAY=buzz)', () => {
         expect(stored.channel_id, '`channel_id` liefert das `h` für die 9005-Löschung').toBe(BUZZ_ROOM_WELCOME)
 
         // ── 2. Queue: der Report erscheint (GET /moderation/reports, NIP-98) ────
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
         await expect(page.locator('[x-data="nostrDirectory"]')).toBeVisible({ timeout: 20_000 })
 
         const queueRow = async (): Promise<{ id: string; reportedId: string; roomH: string } | null> =>

@@ -38,14 +38,14 @@ test('the chat composer takes any file: its input carries no accept filter', fun
 
 test('the space icon input stays restricted to images', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.directory'))
+        ->get(route('group.bereich.leute'))
         ->assertOk()
         ->assertSee('<input type="file" accept="image/*" class="hidden" x-ref="spaceIcon"', false);
 });
 
 test('the room picture input stays restricted to images', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.spaces'))
+        ->get(route('group.bereich.chat'))
         ->assertOk()
         ->assertSee('<input type="file" accept="image/*" class="hidden" x-ref="roomPic"', false);
 });

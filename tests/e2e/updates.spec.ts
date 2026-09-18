@@ -331,6 +331,9 @@ function readStateAll(page: Page): Promise<number> {
 async function login(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
+    // Since P2 a login lands on `/start`, not on the room list (D3) — every case below
+    // measures the room list, so the helper opens it.
+    await page.goto('/bereich/chat')
 }
 
 /**
@@ -380,18 +383,25 @@ async function spyHistoryBack(page: Page): Promise<void> {
 const backCalls = (page: Page): Promise<number> =>
     page.evaluate(() => (window as unknown as { __backCalls?: number }).__backCalls ?? 0)
 
-/** Die Header-Glocke auf `/spaces` — der im Plan vorgesehene Einstieg in „Neu". */
-const bell = (page: Page) => page.getByRole('link', { name: /^Neu/ })
+/**
+ * The Postfach slot of the bottom bar — the way into the inbox since P2 (Concept C).
+ *
+ * Until then it was a BELL in the header of the room list, and it stood there because a
+ * fourth nav tab would have thrown the old bar's column class back to three. The Postfach is
+ * a slot now, so the bell is gone (D2) — and with it its number: the slot carries an unread
+ * DOT, not a count (see anchor 8).
+ */
+const inboxSlot = (page: Page) => page.getByRole('link', { name: /^Postfach/ })
 
 /**
- * Öffnet „Neu" so, wie ein Nutzer es tut: Glocke auf `/spaces` (`wire:navigate`).
- * Warum nicht `page.goto` — siehe Modul-Docstring.
+ * Opens the inbox the way a user does: the Postfach slot (`wire:navigate`).
+ * Why not `page.goto` — see the module docstring.
  */
 async function openUpdates(page: Page): Promise<void> {
-    await expect(bell(page)).toBeVisible({ timeout: 25_000 })
-    await bell(page).click()
-    await expect(page).toHaveURL(/\/updates$/, { timeout: 25_000 })
-    await expect(page.getByRole('heading', { name: 'Neu', exact: true })).toBeVisible({ timeout: 25_000 })
+    await expect(inboxSlot(page)).toBeVisible({ timeout: 25_000 })
+    await inboxSlot(page).click()
+    await expect(page).toHaveURL(/\/postfach$/, { timeout: 25_000 })
+    await expect(page.getByRole('heading', { name: 'Postfach', exact: true })).toBeVisible({ timeout: 25_000 })
 }
 
 /**
@@ -433,14 +443,6 @@ const threadRow = (page: Page, name: string) =>
 /** Die 2-px-Herkunfts-Rail einer Zeile (`x-show`, bleibt im DOM). */
 const rail = (row: ReturnType<typeof roomRow>) => row.locator('span.w-0\\.5').first()
 
-/**
- * Kopf-Pfeil von `/updates` zurück auf die Übersicht. Bewusst als LINK adressiert:
- * ohne `backExpr` rendert `app-header` einen `<a wire:navigate>` (der Raum dagegen
- * einen echten `<button>` mit Alpine-Aktion) — `getByRole('button')` läuft hier in
- * einen Timeout, und der sähe aus wie ein hängender Screen.
- */
-const updatesBack = (page: Page) => page.getByRole('link', { name: 'Zurück' })
-
 /** Sammelt `pageerror` + `console.error` — beides muss leer bleiben. */
 function collectErrors(page: Page): string[] {
     const errors: string[] = []
@@ -476,8 +478,8 @@ test('Anker 1: /updates rendert, Skeleton kommt vom Server, Leerzustand ist ein 
     await loginNsec(page, NSEC)
 
     // ── a) roher Antwort-Body, kein JS ────────────────────────────────────────
-    const res = await page.request.get('/updates')
-    expect(res.status(), 'Route /updates muss für den eingeloggten Nutzer 200 liefern').toBe(200)
+    const res = await page.request.get('/postfach')
+    expect(res.status(), 'Route /postfach muss für den eingeloggten Nutzer 200 liefern').toBe(200)
     const html = await res.text()
     const skeletons = html.match(/skeleton size-10/g)?.length ?? 0
     console.log(`[anker1] server-gerenderte Skeleton-Zeilen: ${skeletons}`)
@@ -549,8 +551,8 @@ test('Anker 2: Zeile → /rooms/{h}?from=updates, Kopf-Pfeil führt zurück nach
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 25_000 })
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/updates$/, { timeout: 25_000 })
-    await expect(page.getByRole('heading', { name: 'Neu', exact: true })).toBeVisible({ timeout: 25_000 })
+    await expect(page).toHaveURL(/\/postfach$/, { timeout: 25_000 })
+    await expect(page.getByRole('heading', { name: 'Postfach', exact: true })).toBeVisible({ timeout: 25_000 })
 
     // ── kalt: derselbe Link, frisch aufgerufen, ohne App-internen Vorgänger ────
     await page.goto(`/rooms/${room.h}?from=updates`)
@@ -559,9 +561,9 @@ test('Anker 2: Zeile → /rooms/{h}?from=updates, Kopf-Pfeil führt zurück nach
     const before = await backCalls(page)
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/updates$/, { timeout: 25_000 })
+    await expect(page).toHaveURL(/\/postfach$/, { timeout: 25_000 })
     url = new URL(page.url())
-    expect(url.pathname).toBe('/updates')
+    expect(url.pathname).toBe('/postfach')
     expect(
         (await backCalls(page)) - before,
         'ohne App-Vorgänger muss das UP-Ziel explizit angesteuert werden, nicht history.back()',
@@ -624,8 +626,8 @@ test('Anker 3: Thread-Zeile → /rooms/{h}/thread/{nevent}?from=updates, zweimal
 
     // 2. Kopf-Pfeil: zurück nach „Neu".
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/updates$/, { timeout: 25_000 })
-    await expect(page.getByRole('heading', { name: 'Neu', exact: true })).toBeVisible({ timeout: 25_000 })
+    await expect(page).toHaveURL(/\/postfach$/, { timeout: 25_000 })
+    await expect(page.getByRole('heading', { name: 'Postfach', exact: true })).toBeVisible({ timeout: 25_000 })
 })
 
 /**
@@ -662,7 +664,7 @@ test('Anker 4: Kaltstart im Thread ohne from → 2× Zurück auf /spaces, ohne h
     await expect(page).toHaveURL(new RegExp(`/rooms/${room.h}$`), { timeout: 25_000 })
 
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/spaces$/, { timeout: 25_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 25_000 })
     await expect(page.getByText('Zooid Test Space')).toBeVisible({ timeout: 25_000 })
 
     const calls = (await backCalls(page)) - before
@@ -687,7 +689,7 @@ test('Anker 4: Kaltstart im Thread ohne from → 2× Zurück auf /spaces, ohne h
  * (bestätigte Auslegung) — er fällt korrekt auf den Default und wird in der Thread-URL
  * durchgereicht. Deshalb steht er nur in der Ziel-, nicht in der Durchreich-Prüfung.
  */
-test('Anker 5: kaputtes ?from= landet auf /spaces und taucht in keiner Thread-URL auf', async ({ page }) => {
+test('Anker 5: kaputtes ?from= landet auf dem Default-Ziel und taucht in keiner Thread-URL auf', async ({ page }) => {
     test.setTimeout(150_000)
 
     await spyHistoryBack(page)
@@ -732,9 +734,9 @@ test('Anker 5: kaputtes ?from= landet auf /spaces und taucht in keiner Thread-UR
         // a) Und er darf kein Navigationsziel werden.
         const before = await backCalls(page)
         await page.getByRole('button', { name: 'Zurück' }).click()
-        await expect(page).toHaveURL(/\/spaces$/, { timeout: 25_000 })
+        await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 25_000 })
         const url = new URL(page.url())
-        expect(url.pathname, `?from=${junk} führte nicht auf das Default-Ziel`).toBe('/spaces')
+        expect(url.pathname, `?from=${junk} führte nicht auf das Default-Ziel`).toBe('/bereich/chat')
         expect((await backCalls(page)) - before, `?from=${junk}: UP-Ziel muss explizit angesteuert werden`).toBe(0)
     }
 })
@@ -888,7 +890,7 @@ test('Anker 7: aria-label beginnt mit dem Ungelesen-Zustand, kappt den Snippet u
  *     Test gegen den sichtbaren Text wäre nur zufällig grün (Timing), nicht robust —
  *     siehe Kommentar bei Teil 5. Zusätzlich: keine ANDERE Region zeigt je Zähler-Text.
  */
-test('Anker 8: Ungelesen-Zahlen erscheinen an den vorgesehenen Orten — Nav bleibt Punkt, keine Live-Region zählt', async ({ page }) => {
+test('Anchor 8: unread counts appear at their intended places — the bar stays a dot, no live region counts', async ({ page }) => {
     test.setTimeout(120_000)
 
     const room = makeRoom()
@@ -918,16 +920,17 @@ test('Anker 8: Ungelesen-Zahlen erscheinen an den vorgesehenen Orten — Nav ble
     console.log(`[anker8] Tab-Pille „Räume": "${roomsTabText}"`)
     expect(roomsTabText, 'Cap-Format: exakt bis 99, danach 99+').toMatch(/^(\d{1,2}|99\+)$/)
 
-    // ── 3. Glocke: nur FORMAT (Begründung im Docstring) ──────────────────────────────
-    // `\s*` statt eines festen Leerzeichens vor „ungelesene": defensiv gegen Whitespace-
-    // Varianten, prüft das FORMAT (Zahl + Wort), nicht die exakte Zeichenkette.
-    await expect
-        .poll(async () => (await bell(page).getAttribute('aria-label')) ?? '', { timeout: 20_000 })
-        .toMatch(/^Neu, \d+\s*ungelesene/)
-    const bellLabel = (await bell(page).getAttribute('aria-label')) as string
-    console.log(`[anker8] Glocken-Label: "${bellLabel}"`)
-    const bellPillText = ((await bell(page).locator('span.bg-brand-500.rounded-pill').textContent()) ?? '').trim()
-    expect(bellPillText, 'Cap-Format der Glocke: exakt bis 9, danach 9+').toMatch(/^([1-9]|9\+)$/)
+    // ── 3. The bell is gone with P2 — the Postfach SLOT is the shell marker ─────────
+    // A number stood here: the bell's cap format (exactly up to 9, then `9+`) plus its
+    // `aria-label` „Neu, N ungelesene …". Both went with the bell (D2): the inbox is a slot
+    // of the bar now, and a slot at 11 px label size answers one question — "do I have to go
+    // in there?" — with a DOT, never with a number (§4.1 no. 5). What used to be part 4 of
+    // this anchor is therefore the whole of it, and it now covers the shell marker as such
+    // and not merely "the nav has no number".
+    //
+    // The COUNT itself (`$store.unread.updates`) still exists and still feeds the desktop
+    // command bar in P6; until then it has no visible consumer, and anchor 20 measures it
+    // against the dot rather than against a digit.
 
     // ── 4. Bottom-Nav bleibt der PUNKT — keine Zahl (§4.1 Nr. 5, unverändert seit P3) ─
     const navDots = page.getByRole('navigation', { name: 'Hauptnavigation' }).locator('span.size-2.rounded-full')
@@ -963,7 +966,7 @@ test('Anker 8: Ungelesen-Zahlen erscheinen an den vorgesehenen Orten — Nav ble
     expect(boundRegions, 'genau EIN aria-live-Knoten darf an $store.unread.liveText gebunden sein').toHaveLength(1)
 
     const strayCounters = liveRegions.filter((r) => !r.boundToLiveText && /\d+\s*(ungelesen|neu)/i.test(r.text))
-    console.log(`[anker8] Live-Regionen mit Zähler außerhalb der Glocken-Bindung: ${JSON.stringify(strayCounters)}`)
+    console.log(`[anker8] Live-Regionen mit Zähler außerhalb der Zählregion: ${JSON.stringify(strayCounters)}`)
     expect(strayCounters, 'eine ANDERE Live-Region trägt fälschlich einen Ungelesen-Zähler').toEqual([])
 })
 
@@ -974,7 +977,7 @@ test('Anker 8: Ungelesen-Zahlen erscheinen an den vorgesehenen Orten — Nav ble
  * gerechnete Werte dreimal in Folge zu optimistisch. Hier stehen deshalb nur
  * `getBoundingClientRect`-Messungen am gerenderten Baum.
  */
-test('Anker 9: Zeilenhöhe ≥ 76 px, Glocke ≥ 44×44, kein Querlauf bei 320 px', async ({ page }) => {
+test('Anchor 9: row height >= 76 px, Postfach slot >= 44x44, no sideways scroll at 320 px', async ({ page }) => {
     test.setTimeout(120_000)
 
     const room = makeRoom()
@@ -982,12 +985,14 @@ test('Anker 9: Zeilenhöhe ≥ 76 px, Glocke ≥ 44×44, kein Querlauf bei 320 p
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
     await publishMessage(page, room.h, `Geometrie-${rnd()} — eine Zeile mit genug Text, damit der Snippet zwei Zeilen füllt.`)
 
-    // ── Glocke auf /spaces ────────────────────────────────────────────────────
-    await expect(bell(page)).toBeVisible({ timeout: 25_000 })
-    const bellBox = (await bell(page).boundingBox()) as { width: number; height: number }
-    console.log(`[anker9] Glocke: ${bellBox.width}×${bellBox.height} px`)
-    expect(bellBox.width, 'Glocke unter 44 px breit (WCAG 2.5.8)').toBeGreaterThanOrEqual(44)
-    expect(bellBox.height, 'Glocke unter 44 px hoch (WCAG 2.5.8)').toBeGreaterThanOrEqual(44)
+    // ── The Postfach slot of the bar ──────────────────────────────────────────
+    // The bell was measured here until P2. The target-size demand is unchanged and it moved
+    // with the surface: the way into the inbox has to be hittable (WCAG 2.5.8).
+    await expect(inboxSlot(page)).toBeVisible({ timeout: 25_000 })
+    const slotBox = (await inboxSlot(page).boundingBox()) as { width: number; height: number }
+    console.log(`[anker9] Postfach-Slot: ${slotBox.width}×${slotBox.height} px`)
+    expect(slotBox.width, 'Postfach-Slot unter 44 px breit (WCAG 2.5.8)').toBeGreaterThanOrEqual(44)
+    expect(slotBox.height, 'Postfach-Slot unter 44 px hoch (WCAG 2.5.8)').toBeGreaterThanOrEqual(44)
 
     // ── Zeilenhöhe auf /updates ───────────────────────────────────────────────
     await openUpdates(page)
@@ -1003,10 +1008,13 @@ test('Anker 9: Zeilenhöhe ≥ 76 px, Glocke ≥ 44×44, kein Querlauf bei 320 p
     // Erst /updates messen (wir stehen dort), dann per Kopf-Pfeil auf /spaces —
     // beides warm, damit die Liste auch bei 320 px gefüllt bleibt.
     await page.setViewportSize({ width: 320, height: 720 })
-    for (const path of ['/updates', '/spaces']) {
-        if (path === '/spaces') {
-            await updatesBack(page).click()
-            await expect(page).toHaveURL(/\/spaces/, { timeout: 25_000 })
+    // P7: the inbox is a HUB since P2 and its header carries no back arrow any more — it is
+    // one of the three nav slots, not a page one arrives at from somewhere. The second
+    // surface is therefore reached the way a person reaches it: through the navigation.
+    for (const path of ['/postfach', '/bereich/chat']) {
+        if (path === '/bereich/chat') {
+            await page.goto(path)
+            await expect(page).toHaveURL(/\/bereich\/chat/, { timeout: 25_000 })
         }
         await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 25_000 })
         await page.waitForTimeout(1000)
@@ -1214,7 +1222,7 @@ test('Anker 12: geteilter Thread-Link im frischen Tab — zweimal Zurück landet
         ).toBe('updates')
 
         await fresh.getByRole('button', { name: 'Zurück' }).click()
-        await expect(fresh).toHaveURL(/\/updates$/, { timeout: 25_000 })
+        await expect(fresh).toHaveURL(/\/postfach$/, { timeout: 25_000 })
         expect((await backCalls(fresh)) - before, 'im frischen Tab darf kein history.back() fallen').toBe(0)
 
         // ── b) Kontrast: RAUM-Link im selben frischen Tab ─────────────────────
@@ -1223,7 +1231,7 @@ test('Anker 12: geteilter Thread-Link im frischen Tab — zweimal Zurück landet
         await expect(fresh.getByRole('heading', { name: `# ${room.name}` })).toBeVisible({ timeout: 25_000 })
         const beforeRoom = await backCalls(fresh)
         await fresh.getByRole('button', { name: 'Zurück' }).click()
-        await expect(fresh).toHaveURL(/\/updates$/, { timeout: 25_000 })
+        await expect(fresh).toHaveURL(/\/postfach$/, { timeout: 25_000 })
         expect((await backCalls(fresh)) - beforeRoom).toBe(0)
         console.log('[anker12] Raum-Link führt ebenfalls nach /updates — die Asymmetrie ist geschlossen')
     } finally {
@@ -1420,8 +1428,8 @@ test('Anker 14: kalter Direkteinstieg auf /updates zeigt dieselbe Zeile wie die 
         })()
     })
 
-    await page.goto('/updates')
-    await expect(page.getByRole('heading', { name: 'Neu', exact: true })).toBeVisible({ timeout: 25_000 })
+    await page.goto('/postfach')
+    await expect(page.getByRole('heading', { name: 'Postfach', exact: true })).toBeVisible({ timeout: 25_000 })
 
     const coldRow = roomRow(page, room.name)
     try {
@@ -1933,144 +1941,84 @@ test('Anker 19: Raum-Badge zeigt exakt N — Badge und Rauminhalt stimmen übere
 })
 
 /**
- * ANKER 20 — Gate 3, Teil 2: die Glockenzahl entspricht exakt der Zahl ungelesener
- * `/updates`-Zeilen (Plan-Freigabekriterium).
+ * ANKER 20 — Gate 3, part 2: the shell marker agrees with the inbox itself.
  *
- * Bewusst KEIN vorab geratener Erwartungswert: `$store.unread.updates` summiert über
- * ALLE je von diesem Test-Account beigetretenen Räume (dieselbe globale Summe, die
- * Anker 8 deshalb nur auf Format prüft). Statt eine Zahl zu raten, wird die Glocke
- * gegen die tatsächlich in „Neu" sichtbaren ungelesenen Zeilen SELBST gegengeprüft —
- * eine Selbstkonsistenzprüfung, kein Soll-Ist-Vergleich. Weicht sie ab, ist das ein
- * Fehler im Produkt, nicht im Test.
+ * ── What this anchor measured until P2, and what it can still measure ───────────────
  *
- * Zwei vom Datenseiten-Autor selbst gemeldete, bewusst NICHT als Bug zu behandelnde
- * Fallen, gegen die dieser Anker sich absichert:
+ * It compared a NUMBER with a NUMBER: the bell's count against the unread rows visible in
+ * „Neu", exhaustively paginated, as a self-consistency check rather than against a guessed
+ * expectation. The bell is gone with Concept C (D2) and the inbox is a slot of the bar,
+ * which carries a DOT — an 11 px label has room for "do I have to go in there?", not for a
+ * figure.
  *
- *   1. **Paginierung.** `/updates` rendert initial nur 30 Zeilen (`UPDATES_PAGE`). Bei
- *      mehr als 30 angesammelten ungelesenen Zeilen zählte die Liste 30, während die
- *      Glocke korrekt den Gesamtbestand meldet — „Ältere anzeigen" wird deshalb
- *      geklickt, bis die Liste erschöpft ist, ERST DANN wird gezählt.
- *   2. **Ladefenster.** Auf kaltem `/spaces` sind `loadRoomActivity`/`loadSpaceThreads`
- *      noch unterwegs; die Glocke zählt vorübergehend zu NIEDRIG und wächst nach, die
- *      Liste konvergiert gegen denselben (höheren) Stand — kein Widerspruch, aber ein
- *      Zeitfenster. Eine feste Wartezeit vor dem Lesen risikiert genau diesen
- *      Zwischenstand einzufrieren (gemessen: eine naive "zwei gleiche Reads
- *      hintereinander"-Stabilitätsprüfung konvergierte auf den allerersten, noch
- *      leeren Zwischenstand "0" — zwei Reads im Abstand weniger Millisekunden sind vor
- *      dem ersten Emit trivial gleich). Gemessen wird deshalb gegen eine BEDINGUNG,
- *      nicht gegen einen Zeitpunkt: `waitStable()` verlangt mehrere gleiche Lesungen im
- *      Sekundenabstand, und die äußere Schleife misst Glocke UND Zeilen im Wechsel neu,
- *      bis beide Seiten (unabhängig voneinander) zur Ruhe gekommen sind und
- *      übereinstimmen — nicht nur einmal kurz zufällig gleich waren.
+ * The demand survives the loss of the digit, and it is the one that mattered: the marker in
+ * the shell and the list behind it must not contradict each other. Measured in both
+ * directions, because only the pair is a statement:
+ *
+ *   ON  — after an own message there is at least one unread row, and the dot is there.
+ *   OFF — after „Alles als gelesen markiert" there is none, and the dot is gone.
+ *
+ * The second half is the one that would catch a dot wired to a constant. Without it the
+ * case would also be green for a marker that is always on.
+ *
+ * **What is NOT measured any more:** whether the number is exactly right. `$store.unread.updates`
+ * still exists (P6 gives it a visible consumer in the desktop command bar) and its arithmetic
+ * is node-tested in `js/unread.test.ts`; but a figure nobody renders cannot be compared
+ * against a surface, and comparing it against itself would be a constant checked against
+ * itself.
+ *
+ * The two traps the earlier version documented are gone with the counting: pagination
+ * (`UPDATES_PAGE` = 30 rows) does not matter for "at least one", and the load window does not
+ * either — `expect.poll` waits for the CONDITION instead of freezing an intermediate figure.
  */
-test('Anker 20: Glockenzahl entspricht exakt den ungelesenen /updates-Zeilen (Gate 3)', async ({ page }) => {
-    test.setTimeout(180_000)
+test('Anchor 20: the unread dot of the bar and the Postfach never contradict each other (gate 3)', async ({ page }) => {
+    test.setTimeout(120_000)
 
-    // Eigener Beitrag, damit die Probe auch bei einem ansonsten leeren Account etwas zu
-    // prüfen hat — sie bleibt trotzdem eine Selbstkonsistenzprüfung, kein geratener Wert.
     const room = makeRoom()
     await login(page)
     await expect(page.getByRole('button', { name: new RegExp(room.name) })).toBeVisible({ timeout: 25_000 })
-    await publishMessage(page, room.h, `Glocke-${rnd()}`)
-
-    await expect(bell(page)).toBeVisible({ timeout: 25_000 })
-    const readBellCount = async (): Promise<number> => {
-        const label = (await bell(page).getAttribute('aria-label')) ?? ''
-        const match = label.match(/^Neu, (\d+)\s*ungelesene/)
-        return match ? Number(match[1]) : 0
-    }
+    await publishMessage(page, room.h, `Punkt-${rnd()}`)
 
     /**
-     * Wartet auf eine STABILE Zahl (mehrere gleiche Lesungen im Sekundenabstand) statt
-     * auf einen Zeitpunkt — genau das, was die Auftrags-Warnung zum Ladefenster verlangt.
+     * The dot on the Postfach slot. Same signature as `roomDot` in `unread-dot.spec.ts`: a
+     * solid 8 px circle without a theme variant, rendered by `x-if` — at zero there is no
+     * node at all, which is why presence is read through `count()` and not through a class.
      */
-    async function waitStable(read: () => Promise<number>, opts: { stableFor?: number; stepMs?: number; maxWaitMs?: number } = {}): Promise<number> {
-        const { stableFor = 4, stepMs = 1000, maxWaitMs = 45_000 } = opts
-        const deadline = Date.now() + maxWaitMs
-        let last = -1
-        let streak = 0
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const value = await read()
-            streak = value === last ? streak + 1 : 1
-            last = value
-            if (streak >= stableFor) {
-                return value
-            }
-            if (Date.now() > deadline) {
-                throw new Error(`Zahl wurde nach ${maxWaitMs} ms nicht stabil (zuletzt gesehen: ${last})`)
-            }
-            await page.waitForTimeout(stepMs)
-        }
-    }
+    const dot = inboxSlot(page).locator('span.size-2.rounded-full')
 
-    // ERST auf das Eintreffen warten, DANN auf Stabilität. `waitStable` allein genügt
-    // hier nicht: es wartet darauf, dass die Zahl sich nicht mehr ÄNDERT — vier gleiche
-    // Lesungen im Sekundentakt reichen ihm. Ist die Nachricht nach vier Sekunden noch
-    // unterwegs, liest es viermal die 0, hält sie für stabil und der Test fällt mit
-    // „muss mindestens EINE Zeile beitragen". Genau so ist er im Gesamtlauf vom
-    // 2026-07-29 gefallen, während er einzeln zuverlässig lief: unter Last dauert die
-    // Zustellung länger als die Stabilitätsfrist. Kein Produktfehler — der Test hat auf
-    // „ändert sich nicht mehr" geprüft, wo er „ist angekommen" meinte.
-    // 60s → 90s: gemessen am 2026-08-11, Vollsuite mit sechs Workern, Timeout bei 60s
-    // überschritten — derselbe, im Kommentar oben bereits für 2026-07-29 dokumentierte
-    // Effekt (Zustellung dauert unter Last länger als die Stabilitätsfrist), diesmal am
-    // Timeout selbst statt an waitStable(). Reines Budget, keine Änderung der Aussage.
-    //
-    // OBERGRENZE (P1, restposten-aus-ux-plan.md): siehe Anker 19 oben — derselbe
-    // Ursachen-Kandidat (Befehlspalette erhöht den Seiten-Boot-Aufwand) ist geprüft und
-    // NICHT bestätigt, keine behebbare Ursache also. Reißt dieses Budget NOCH EINMAL
-    // unter unverändertem Worker-Aufbau, ist die Umgehung gescheitert: dann keine dritte
-    // Anhebung, sondern eine strukturelle Lösung (Worker-Drosselung für toPass-lastige
-    // Specs, P1 Schritt 4).
-    await expect
-        .poll(readBellCount, {
-            message: 'die eigene Nachricht muss mindestens EINE Zeile beitragen',
-            timeout: 90_000,
-        })
-        .toBeGreaterThan(0)
+    // ── ON ──────────────────────────────────────────────────────────────────────
+    await expect(inboxSlot(page)).toBeVisible({ timeout: 25_000 })
+    await expect(dot, 'nach der eigenen Nachricht muss der Punkt der Bar stehen').toBeVisible({ timeout: 90_000 })
 
-    let bellCount = await waitStable(readBellCount)
-    console.log(`[anker20] Glocke zunächst stabil bei ${bellCount} ungelesenen Hinweisen`)
-    expect(bellCount, 'die eigene Nachricht muss mindestens EINE Zeile beitragen').toBeGreaterThan(0)
-
+    // And the list behind it really has a row — otherwise the dot would be the only witness
+    // of its own claim.
     await openUpdates(page)
     await expect(roomRow(page, room.name)).toBeVisible({ timeout: 30_000 })
+    const unreadRows = await page.getByRole('button', { name: new RegExp(`^${UNREAD_PREFIX}`) }).count()
+    console.log(`[anker20] ungelesene Zeilen im Postfach: ${unreadRows}`)
+    expect(unreadRows, 'der Punkt steht, aber das Postfach zeigt keine ungelesene Zeile').toBeGreaterThan(0)
 
-    const olderButton = page.getByRole('button', { name: 'Ältere anzeigen' })
-    /** Paginiert erschöpfend (Falle 1) und zählt danach die sichtbaren ungelesenen Zeilen. */
-    async function countUnreadRowsExhaustively(): Promise<number> {
-        let guard = 0
-        while ((await olderButton.isVisible()) && guard < 60) {
-            await olderButton.click()
-            await page.waitForTimeout(150)
-            guard += 1
-        }
-        expect(
-            await olderButton.isVisible(),
-            'Paginierung nach 60 Seiten nicht erschöpft — die Zeilen-Zählung wäre unvollständig (angesammelte Test-Räume aufräumen, siehe Memory „zooid lokal SQLite-Bloat")',
-        ).toBe(false)
-        return page.getByRole('button', { name: new RegExp(`^${UNREAD_PREFIX}`) }).count()
-    }
+    // ── OFF ─────────────────────────────────────────────────────────────────────
+    // „Alles" acknowledges every row; the dot has to follow. This is the half that fails for
+    // a marker wired to a constant.
+    await page.getByRole('button', { name: 'Alles als gelesen markieren' }).click()
+    await expect(page.getByText('Alles als gelesen markiert.')).toBeVisible({ timeout: 20_000 })
 
-    // Beide Seiten können unabhängig voneinander noch nachladen (Falle 2) — im Wechsel
-    // neu messen, bis sie übereinstimmen, statt der ersten (evtl. noch wandernden)
-    // Übereinstimmung zu vertrauen.
-    let rowCount = await countUnreadRowsExhaustively()
-    let attempts = 0
-    while (rowCount !== bellCount && attempts < 8) {
-        bellCount = await waitStable(readBellCount, { stableFor: 3, stepMs: 800, maxWaitMs: 15_000 })
-        rowCount = await countUnreadRowsExhaustively()
-        attempts += 1
-    }
-
-    console.log(`[anker20] Glocke=${bellCount}, sichtbare ungelesene Zeilen=${rowCount} (${attempts} Nachmessungen)`)
-    expect(rowCount, 'Glockenzahl und tatsächlich sichtbare ungelesene Zeilen müssen exakt übereinstimmen').toBe(bellCount)
+    await expect
+        .poll(async () => page.getByRole('button', { name: new RegExp(`^${UNREAD_PREFIX}`) }).count(), { timeout: 30_000 })
+        .toBe(0)
+    await expect(dot, 'ohne ungelesene Zeile darf die Bar keinen Punkt tragen').toHaveCount(0, { timeout: 30_000 })
 })
 
 /**
  * ANKER 21 — Cap-Grenzen an den realen Orten (§4.1/§4.2): `99+` an Raum- und Tab-Pille,
- * `9+` an der Glocke, je an der Schwelle UND Schwelle+1.
+ * je an der Schwelle UND Schwelle+1.
+ *
+ * The third place was the bell until P2, with a smaller cap of its own (`9+`, because it sat
+ * between the exit link and the profile chip, where three digits would have squeezed the name
+ * row). It is gone with Concept C (D2), and so is that cap: the bar carries a dot.
+ * `BELL_CAP` stays node-tested in `js/unread.ts` until P6 gives it a visible place in the
+ * command palette again.
  *
  * Bewusst KEINE echten 99/100 Ereignisse über den Relay: die Cap-ARITHMETIK selbst
  * (`formatUnreadCount`) ist in `js/unread.test.ts` bereits erschöpfend Node-getestet
@@ -2103,7 +2051,7 @@ test('Anker 20: Glockenzahl entspricht exakt den ungelesenen /updates-Zeilen (Ga
  * zwischen `count()` und dem Lesen verschwindet. Damit hängt die Laufzeit jeder
  * Iteration nie länger als ~500 ms, unabhängig von Seed-Größe oder Systemlast.
  */
-test('Anker 21: Cap-Grenzen — 99+ an Raum-/Tab-Pille, 9+ an der Glocke, je an der Schwelle', async ({ page }) => {
+test('Anker 21: Cap-Grenzen — 99+ an Raum-/Tab-Pille, je an der Schwelle', async ({ page }) => {
     test.setTimeout(120_000)
 
     const room = makeRoom()
@@ -2124,8 +2072,6 @@ test('Anker 21: Cap-Grenzen — 99+ an Raum-/Tab-Pille, 9+ an der Glocke, je an 
 
     const roomPill = page.getByRole('button', { name: new RegExp(room.name) }).locator('span.bg-brand-500.rounded-pill')
     const roomsTabPill = page.getByRole('tab', { name: /^Räume/ }).locator('span.bg-brand-500.rounded-pill')
-    const bellPill = bell(page).locator('span.bg-brand-500.rounded-pill')
-
     /**
      * Erzwingt den Store-Wert in einer ENGEN Schleife (kein Leerlauf zwischen Schreiben
      * und Lesen) und gibt auf, sobald `expected` erscheint ODER das Zeitbudget endet —
@@ -2139,7 +2085,7 @@ test('Anker 21: Cap-Grenzen — 99+ an Raum-/Tab-Pille, 9+ an der Glocke, je an 
      * `count()` und dem eigentlichen Lesen ab — beide Male mit BEGRENZTER Wartezeit,
      * nie mit dem impliziten globalen Timeout eines ungebremsten `textContent()`.
      */
-    async function pinnedText(pill: ReturnType<typeof bell>, rooms: number, bellUpdates: number, expected: string, msg: string): Promise<void> {
+    async function pinnedText(pill: ReturnType<typeof inboxSlot>, rooms: number, bellUpdates: number, expected: string, msg: string): Promise<void> {
         const deadline = Date.now() + 20_000
         let last = ''
         while (Date.now() < deadline) {
@@ -2159,12 +2105,10 @@ test('Anker 21: Cap-Grenzen — 99+ an Raum-/Tab-Pille, 9+ an der Glocke, je an 
     // ── an der Schwelle: die Zahl ist bekannt, kein „+" ──────────────────────────────
     await pinnedText(roomPill, 99, 9, '99', 'Raum-Pille an der Schwelle (99)')
     await pinnedText(roomsTabPill, 99, 9, '99', 'Tab-Pille an der Schwelle (99)')
-    await pinnedText(bellPill, 99, 9, '9', 'Glocke an der Schwelle (9)')
 
     // ── einen über der Schwelle: gekappt ─────────────────────────────────────────────
     await pinnedText(roomPill, 100, 10, '99+', 'Raum-Pille über der Schwelle')
     await pinnedText(roomsTabPill, 100, 10, '99+', 'Tab-Pille über der Schwelle')
-    await pinnedText(bellPill, 100, 10, '9+', 'Glocke über der Schwelle')
 })
 
 /**

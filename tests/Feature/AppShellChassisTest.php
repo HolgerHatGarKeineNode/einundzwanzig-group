@@ -56,79 +56,117 @@ function bottomNavHtml(TestResponse $res): string
     return substr($content, $start, $end - $start);
 }
 
-test('P2 Web-Host-Config: group.spaces rendert die 3 Web-Tabs (Chat · Wallet · Einstellungen) via app-shell', function () {
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
+test('CORE PROOF: the bottom bar has EXACTLY three slots — Start, Search, Postfach', function () {
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.bereich.chat'))->assertOk();
 
-    // Seite liegt in der app-shell (main-Outlet + config-getriebene Nav), nicht mehr
-    // im rohen <main> mit hardcoded bottom-nav.
+    // The page sits inside the app-shell (main outlet + nav), not in a bare <main>.
     $res->assertSee('data-tab-outlet', false);
     $res->assertSee('aria-label="Hauptnavigation"', false);
-    $res->assertSee('grid-cols-3', false);
-    // Web = self-host Chat+Wallet-Client: Chat · Wallet · Einstellungen — KEIN
-    // Meetups/Mehr/Portal, keine „Mitglieder" als Bottom-Tab mehr (→ §3.3).
-    foreach (['Chat', 'Wallet', 'Einstellungen'] as $label) {
-        $res->assertSee($label);
-    }
-    // Gemeint ist die BOTTOM-NAV, nicht die ganze Seite und nicht die Rail-Fußzeile
-    // (die trägt dieselben Tabs ein zweites Mal, s. `bottomNavHtml()`): seit P4
-    // (Befehlspalette) trägt die Palette eine Sektionsüberschrift „Mitglieder" — die
-    // ist kein Bottom-Tab. Eine seitenweite Zeichenketten-Prüfung beantwortet die
-    // Frage „ist Mitglieder ein Tab?" nicht mehr; geprüft wird deshalb NUR die
-    // fixe Bottom-Bar.
-    expect(bottomNavHtml($res))->not->toContain('>Mitglieder<');
-    // Wallet-Tab ist per Nav erreichbar (verlinkt die Wallet-Route).
-    $res->assertSee('href="'.route('group.wallet').'"', false);
-    // Kein Takeover: ohne `group.exit` (eigenständiger Web-Client) gibt es keinen
-    // Host-Rücksprung — und auch keinen Home-Link. Die Startseite braucht keinen
-    // Link auf sich selbst; ihre Marke ist der Space-Block (Icon + NIP-11-Name),
-    // seit dem Kopf-Redesign in `60a696e` (Space- und User-Identität getrennt).
-    // Der Brand-Mark lebt weiter im `app-header` — geprüft im Test darunter.
-    $res->assertDontSee('aria-label="Zurück zu', false);
-    $res->assertDontSee('aria-label="Startseite"', false);
-    // Aktiver Tab trägt `brand-800` — die Klasse am `<a>` färbt das LABEL mit, ist also
-    // TEXT (WCAG 1.4.3, ≥ 4,5:1) und nicht Grafik. Auf dem Nav-Grund `bg-zinc-50/90`
-    // über der zinc-50-Seite misst brand-800 **6,15:1** (gerechnet mit
-    // `docs/plans/2026-08-11T1321-restposten-aus-ux-plan/p2-kontrast.mjs brand-800 zinc-50`,
-    // gerendert bestätigt als `KONTRAST[light]`-Eintrag „Chat" im Anker
-    // `tests/e2e/a11y-contrast.spec.ts`, ebenfalls 6,15).
-    //
-    // Hier stand bis 2026-08-15 `assertSee('text-brand-700 dark:text-brand-400')` mit dem
-    // Kommentar „kontrastsicherer brand-700 (≥4.5:1)". Beides war falsch, und der Test
-    // war TROTZDEM grün: `nav-tab.blade.php` trägt seit der Farbumstellung 0× die
-    // Zeichenkette, aber `⚡spaces.blade.php` trägt sie an seinen Icon-Chips weiter 5× —
-    // und `assertSee` prüft die GANZE Seite. Der Test band den aktiven Tab nicht mehr.
-    // Die Zahl war ohnehin nie richtig: brand-700 liegt auf diesem Grund bei 4,21:1
-    // (`p2-kontrast.mjs brand-700 zinc-50`), reißt die 4,5 also.
-    //
-    // Deshalb auf die Bottom-Bar geankert und ABGEZÄHLT statt „irgendwo": die Bar trägt
-    // drei Tabs, und „in der Bar steht brand-800" beantwortet die Frage „trägt der
-    // AKTIVE Tab die Farbe?" nicht — genau eine Zeile darf sie tragen.
+
     $nav = bottomNavHtml($res);
-    expect(substr_count($nav, 'aria-current="page"'))->toBe(1, 'Bottom-Bar markiert nicht genau einen Tab als aktiv');
-    expect(substr_count($nav, 'text-brand-800 dark:text-brand-400'))
-        ->toBe(1, 'genau der aktive Tab trägt die Textfarbe brand-800 (6,15:1) — keiner oder mehrere ist beides falsch');
-    // Der Rückfall auf brand-700 als TEXTfarbe ist der Regress, den diese Phase behoben
-    // hat (4,21:1 < 4,5:1). `bg-brand-700` am Aktiv-Balken bleibt davon unberührt: er ist
-    // ein Grafikobjekt (1.4.11, ≥ 3:1) und trägt dort mit denselben 4,21:1.
-    expect($nav)->not->toContain('text-brand-700');
-    $res->assertDontSee('nav-pill absolute inset-x-0 top-0 mx-auto h-1 w-8 rounded-full bg-accent', false);
+
+    // ── Three slots, and the number is a LITERAL, not a count ─────────────────────
+    // Until P2 the column class came from `count(config('group.nav'))`, and three hosts
+    // published three different tab sets. Now it is markup: three slots are a property of
+    // the design, not of a list.
+    expect($nav)->toContain('grid-cols-3');
+    expect($nav)->not->toContain('grid-cols-4');
+
+    // Counted inside the NAV block and not across the page: "Start" also stands in the
+    // brand-mark label, "Suche" in the command palette.
+    expect(substr_count($nav, '>Start<'))->toBe(1);
+    expect(substr_count($nav, '>Suche<'))->toBe(1);
+    expect(substr_count($nav, '>Postfach<'))->toBe(1);
+
+    // Three children in the grid, no more: two links plus the search button.
+    expect(substr_count($nav, '<a'))->toBe(2);
+    expect(substr_count($nav, '<button'))->toBe(1);
+
+    // The destinations. Start and Postfach are links, Search is NOT one — it is not a
+    // place, it dispatches `open-command-palette` (D6).
+    expect($nav)->toContain('href="'.route('group.start').'"');
+    expect($nav)->toContain('href="'.route('group.postfach').'"');
+    expect($nav)->toContain('data-palette-open');
+    expect($nav)->toContain('open-command-palette');
+
+    // ── What the bar no longer carries ────────────────────────────────────────────
+    // Chat, wallet and settings were the three web tabs until P2. They are areas now, resp.
+    // live under „Ich" — as a tab they would be a second statement of place next to Start.
+    foreach (['>Chat<', '>Wallet<', '>Einstellungen<', '>Mitglieder<'] as $altesLabel) {
+        expect($nav)->not->toContain($altesLabel);
+    }
+
+    // No host exit any more and no bell: `group.exit` is gone, and the Postfach IS a slot.
+    $res->assertDontSee('aria-label="Zurück zu', false);
+    expect($nav)->not->toContain('icon.bell');
+
+    // Active state: EXACTLY one row carries it, and it carries it as the TEXT colour
+    // `brand-800` (6.15:1 on the nav ground zinc-50, computed with
+    // `docs/plans/2026-08-11T1321-restposten-aus-ux-plan/p2-kontrast.mjs`). `brand-700`
+    // would be 4.21:1 and misses the 4.5 — that is the regression this colour catches.
+    //
+    // On `/bereich/chat` NO slot is active: the chat surface is an area, not a nav
+    // destination. The active state is therefore measured on `/start`.
+    expect(substr_count($nav, 'aria-current="page"'))->toBe(0, 'an area must not colour a nav slot as active');
+
+    $aufStart = bottomNavHtml($this->get(route('group.start'))->assertOk());
+    expect(substr_count($aufStart, 'aria-current="page"'))->toBe(1, 'on /start the bar does not mark exactly one slot');
+    expect(substr_count($aufStart, 'text-brand-800 dark:text-brand-400'))->toBe(1);
+    expect($aufStart)->not->toContain('text-brand-700');
+});
+
+test('the avatar in the header is the one way to Ich — on every surface, and host-redirectable', function () {
+    $session = ['nostr_pubkey' => str_repeat('a', 64)];
+
+    // On EVERY surface with a header, not just on one: the avatar replaces the profile chip
+    // that stood on the room list alone until P2 (and the rail footer, which never exists on
+    // a phone).
+    foreach (['group.start', 'group.bereich.chat', 'group.postfach', 'group.ich.lesezeichen'] as $route) {
+        $html = (string) $this->withSession($session)->get(route($route))->assertOk()->getContent();
+
+        expect(substr_count($html, 'data-app-header-avatar'))->toBe(1, $route);
+        expect($html)->toContain('href="'.route('group.ich').'"');
+        // Guest interception as on a nav tab: in the CAPTURE phase, because `wire:navigate`
+        // commits the SPA navigation on `mousedown` already.
+        expect($html)->toContain('$store.authGate.gateTap');
+    }
+
+    // And the HOST names the target. A deliberately WRONG target so the case is not
+    // tautological — with the default it pointed at `/ich` anyway.
+    config(['group.me_route' => 'group.ich.lesezeichen']);
+    $html = (string) $this->withSession($session)->get(route('group.start'))->assertOk()->getContent();
+
+    $anker = strpos($html, 'data-app-header-avatar');
+    expect($anker)->toBeInt();
+    // The `href` stands BEFORE the anchor inside the same tag — measured in the window in
+    // front of it, so that no arbitrary bookmark link on the page carries the statement.
+    expect(substr($html, max(0, (int) $anker - 200), 200))->toContain(route('group.ich.lesezeichen'));
 });
 
 /**
- * Die Gegenprobe zum „kein Rücksprung"-Satz oben: Der Ausgang ist keine Eigenschaft
- * der Seite, sondern der Host-Config. Ohne diesen Test wäre die Aussage rein negativ —
- * ein versehentlich entfernter exit-Zweig fiele niemandem auf, und der Nutzer säße im
- * Vollbild-Takeover fest (genau der Fall, für den `group.exit` existiert).
+ * ── The counter-proof for the host exit (`config('group.exit')`) used to stand here ───
+ *
+ * The case set `group.exit` and demanded a visible „‹ Meetups" exit in the header. The key
+ * is gone with P2, and with it its justification: the chat was a full-screen takeover NEXT
+ * TO the app's own bar, and without an exit the user was stuck. Since Concept C there is one
+ * shell in both hosts — there is no "back into the app" any more, because you never left it.
+ *
+ * What remains of the case is its NEGATIVE half, and that stands in the core proof above
+ * (`assertDontSee('aria-label="Zurück zu')`): an exit pointing at the same frame would be a
+ * claim about a border that does not exist.
  */
-test('P2 Host-Takeover: mit config(group.exit) trägt group.spaces den Rücksprung, statt eines Home-Links', function () {
-    config(['group.exit' => ['route' => 'group.settings', 'label' => 'Meetups']]);
+test('a re-introduced config(group.exit) no longer changes the header', function () {
+    // The same latch as for `group.nav` below: the key is gone, but a host can set it. It
+    // then has to do nothing.
+    config(['group.exit' => ['route' => 'group.ich.einstellungen', 'label' => 'Meetups']]);
 
-    $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.spaces'))
-        ->assertOk()
-        ->assertSee('aria-label="'.__('Zurück zu :label', ['label' => 'Meetups']).'"', false)
-        ->assertSee('href="'.route('group.settings').'"', false)
-        ->assertDontSee('aria-label="Startseite"', false);
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
+        ->get(route('group.bereich.chat'))
+        ->assertOk();
+
+    $res->assertDontSee('aria-label="Zurück zu Meetups"', false);
+    // POSITIVE CONTROL: the page was rendered at all.
+    $res->assertSee('data-tab-outlet', false);
 });
 
 /**
@@ -138,29 +176,50 @@ test('P2 Host-Takeover: mit config(group.exit) trägt group.spaces den Rückspru
  */
 test('app-header zeigt ohne back und ohne exit den Brand-Mark als Home-Link', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.settings'))
+        ->get(route('group.ich.einstellungen'))
         ->assertOk()
         ->assertSee('aria-label="Startseite"', false)
         ->assertSee('href="'.route('home').'"', false);
 });
 
-test('bottom-nav iteriert config(group.nav): eine Config-Zeile ergibt vier Tabs', function () {
+test('the bar is NO LONGER config-driven — three slots, whatever a host sets', function () {
+    // The latch against going back. `config('group.nav')` is gone from all three hosts with
+    // P2; a host that sets the key again tomorrow must not be able to change the bar —
+    // exactly that drift was the reason for the hard cut.
     config(['group.nav' => [
-        ['key' => 'chat', 'route' => 'group.spaces', 'icon' => 'chat-bubble-left-right', 'label' => 'Chat', 'gate' => 'nostr'],
-        ['key' => 'wallet', 'route' => 'group.spaces', 'icon' => 'bolt', 'label' => 'Wallet', 'gate' => 'nostr'],
-        ['key' => 'meetups', 'route' => 'group.spaces', 'icon' => 'calendar', 'label' => 'Meetups', 'gate' => 'guest'],
-        ['key' => 'more', 'route' => 'group.spaces', 'icon' => 'squares-2x2', 'label' => 'Mehr', 'gate' => 'guest'],
+        ['key' => 'chat', 'route' => 'group.bereich.chat', 'icon' => 'chat-bubble-left-right', 'label' => 'Chat', 'gate' => 'nostr'],
+        ['key' => 'wallet', 'route' => 'group.bereich.wallet', 'icon' => 'bolt', 'label' => 'Wallet', 'gate' => 'nostr'],
+        ['key' => 'meetups', 'route' => 'group.start', 'icon' => 'calendar', 'label' => 'Meetups', 'gate' => 'guest'],
+        ['key' => 'more', 'route' => 'group.start', 'icon' => 'squares-2x2', 'label' => 'Mehr', 'gate' => 'guest'],
     ]]);
 
     $html = Blade::render('<x-group::bottom-nav />');
 
     expect($html)
-        ->toContain('grid-cols-4')
-        ->toContain('Chat')->toContain('Wallet')->toContain('Meetups')->toContain('Mehr');
+        ->toContain('grid-cols-3')
+        ->not->toContain('grid-cols-4')
+        ->and($html)->not->toContain('>Meetups<')
+        ->and($html)->not->toContain('>Mehr<');
+
+    // POSITIVE CONTROL: the bar renders something at all, so the promises above are not
+    // measuring an empty string.
+    expect($html)->toContain('>Start<')->toContain('>Postfach<');
+});
+
+test('the host redirects the Start slot through `start_route` — Postfach and Search not', function () {
+    // Start is the only slot with a config line: a foreign host may have a start surface of
+    // its own. The Postfach is a surface OF THE PACKAGE (its island hangs on welshman), and
+    // Search is not a place at all.
+    config(['group.start_route' => 'group.ich']);
+
+    $html = Blade::render('<x-group::bottom-nav />');
+
+    expect($html)->toContain('href="'.route('group.ich').'"');
+    expect($html)->toContain('href="'.route('group.postfach').'"');
 });
 
 test('nav-tab gate=nostr fängt Tap ohne Session über den authGate-Store ab', function () {
-    $html = Blade::render('<x-group::nav-tab route="group.spaces" icon="chat-bubble-left-right" label="Räume" gate="nostr" />');
+    $html = Blade::render('<x-group::nav-tab route="group.bereich.chat" icon="chat-bubble-left-right" label="Räume" gate="nostr" />');
 
     expect($html)
         // §4.2: der Tap läuft über den globalen authGate-Store (gateTap); der Store
@@ -176,7 +235,7 @@ test('nav-tab gate=nostr fängt Tap ohne Session über den authGate-Store ab', f
 });
 
 test('nav-tab gate=guest ist ein reiner wire:navigate-Link ohne Login-Intercept', function () {
-    $html = Blade::render('<x-group::nav-tab route="group.spaces" icon="calendar" label="Meetups" gate="guest" />');
+    $html = Blade::render('<x-group::nav-tab route="group.bereich.chat" icon="calendar" label="Meetups" gate="guest" />');
 
     expect($html)
         ->toContain('wire:navigate')
@@ -324,7 +383,7 @@ test('app-frame rendert GENAU EIN Wurzelelement (Livewire-Vertrag)', function ()
  */
 test('P1 Forge: die Befehlspalette führt zur Übersicht — mit Workspace, und nur dann', function () {
     config(['group.workspace_url' => 'wss://buzz.test/']);
-    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
+    $res = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.bereich.chat'))->assertOk();
 
     // `@js()` escapt die Anführungszeichen als `\u0022` — geprüft wird also die
     // Zeichenkette, die WIRKLICH im Attribut steht, nicht die, die man erwartet.
@@ -332,7 +391,7 @@ test('P1 Forge: die Befehlspalette führt zur Übersicht — mit Workspace, und 
     $res->assertSee('\u0022label\u0022:\u0022Forge\u0022', false);
 
     config(['group.workspace_url' => null]);
-    $ohne = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.spaces'))->assertOk();
+    $ohne = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get(route('group.bereich.chat'))->assertOk();
 
     $ohne->assertDontSee('\u0022id\u0022:\u0022forge\u0022', false);
 });
@@ -356,7 +415,7 @@ test('P2 Rail: der Workspace steht an zweiter Stelle, direkt unter den Räumen',
     config(['group.workspace_url' => 'wss://buzz.test/']);
 
     $html = $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.spaces'))
+        ->get(route('group.bereich.chat'))
         ->assertOk()
         ->getContent();
 
@@ -380,66 +439,15 @@ test('P2 Rail: der Workspace steht an zweiter Stelle, direkt unter den Räumen',
 });
 
 /**
- * Der Aktiv-Zustand der Artikel-Zeile in der Rail-Fußzeile.
+ * ── Two cases about the articles row of the rail FOOTER used to stand here ────────────
  *
- * **Warum das serverseitig prüfbar ist und nicht in Playwright gehört.** Der Zustand
- * kommt aus `request()->routeIs()` (`desktop-rail.blade.php`) und steht damit schon im
- * ausgelieferten HTML. Der `xl`-Viewport entscheidet nur darüber, ob Alpine das
- * `<template x-if="$store.viewport?.desktop">` INSTANZIIERT — nicht darüber, was Blade
- * hineinrendert. Die billigere Schicht trägt die Aussage also vollständig; dass die
- * Zeile im Browser auch sichtbar ist, hält `longform-reader.spec.ts` fest.
+ * They checked that the row marks itself as the current place on `/articles` and in the
+ * full article view, and does not on the room list. The footer's four area rows
+ * (Artikel · Forge · Lesezeichen · Verschlüsselt) are gone with P2 — D2, a hard cut: Start
+ * carries "Alle Bereiche" and the command palette finds every place.
  *
- * **Warum die Zeile isoliert wird.** `/articles` ist auf derselben Seite mehrfach
- * verlinkt (Befehlspalette, Einstiegszeile im Entdecken-Block). Ein `str_contains`
- * auf das ganze Dokument würde also irgendeinen dieser Links messen — oder gar keinen,
- * und trotzdem grün werden. Der Anker ist deshalb die Kombination aus Ziel und der
- * Zeilen-Geometrie `min-h-9`, die nur die Rail-Zeile trägt.
+ * That they ARE gone is pinned by `RailSkelettTest` ("the removed footer blocks stand on
+ * NEITHER of the two sides any more"), with a positive control. The question "does the
+ * surface mark the current place?" is answered for the bar by the core proof at the top;
+ * for the area tiles it is answered by P6, when the rail becomes "Deine Leiste".
  */
-function railArtikelAnker(string $html): string
-{
-    preg_match_all('/<a\b[^>]*>/i', $html, $treffer);
-
-    $zeilen = array_values(array_filter(
-        $treffer[0],
-        static fn (string $tag): bool => str_contains($tag, '/articles"') && str_contains($tag, 'min-h-9'),
-    ));
-
-    // Fail-closed: findet der Anker die Zeile nicht, ist das „kann ich nicht messen"
-    // und nicht „bestanden". Ein Prüfwerkzeug, das bei fehlender Eingabe grün meldet,
-    // misst irgendwann nichts mehr und sagt es nicht.
-    expect($zeilen)->toHaveCount(1, 'die Rail-Fußzeilen-Zeile zu /articles ist nicht (oder mehrfach) im Markup — der Test misst sonst den falschen Link');
-
-    return $zeilen[0];
-}
-
-test('Rail-Fußzeile: die Artikel-Zeile markiert sich nur auf den Artikel-Routen als aktueller Ort', function () {
-    $session = ['nostr_pubkey' => str_repeat('a', 64)];
-
-    $aufArtikeln = railArtikelAnker((string) $this->withSession($session)
-        ->get(route('group.articles'))->assertOk()->getContent());
-
-    // Programmatisch UND sichtbar: Farbe allein darf den Zustand nicht tragen
-    // (WCAG 1.4.1), `aria-current` allein wäre für sehende Nutzer unsichtbar.
-    expect($aufArtikeln)->toContain('aria-current="page"');
-    expect($aufArtikeln)->toContain('font-semibold');
-    expect($aufArtikeln)->not->toContain('text-muted');
-
-    // Gegenprobe auf der Startseite: dieselbe Zeile, dieselbe Rail, anderer Ort.
-    // Ohne diese Hälfte bliebe der Test grün, wenn `aria-current` unbedingt stünde.
-    $aufSpaces = railArtikelAnker((string) $this->withSession($session)
-        ->get(route('group.spaces'))->assertOk()->getContent());
-
-    expect($aufSpaces)->not->toContain('aria-current');
-    expect($aufSpaces)->toContain('text-muted');
-    expect($aufSpaces)->not->toContain('font-semibold');
-});
-
-test('Rail-Fußzeile: auch die Artikel-Vollansicht zählt als "hier" — ein gelesener Artikel liegt unter Artikel', function () {
-    // `naddr` muss nicht auflösbar sein: die Route rendert die Shell in jedem Fall,
-    // und geprüft wird die Rail, nicht der Artikel. Genau darum steht diese Aussage
-    // hier und nicht im Reader-Test.
-    $anker = railArtikelAnker((string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.article', ['naddr' => 'naddr1beispiel']))->assertOk()->getContent());
-
-    expect($anker)->toContain('aria-current="page"');
-});

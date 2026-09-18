@@ -57,7 +57,7 @@ test('Space-Seite rendert NIP-11-Namen als Titel und Space-icon als OG-Bild (B5)
     ]);
 
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.spaces'))
+        ->get(route('group.bereich.chat'))
         ->assertOk()
         ->assertSee('<title>Verein', false)
         ->assertSee('/img/og?src='.rawurlencode('https://r/i.png'));
@@ -65,7 +65,7 @@ test('Space-Seite rendert NIP-11-Namen als Titel und Space-icon als OG-Bild (B5)
 
 test('Space-Seite fällt ohne Relay-Info auf „Space" + Marken-OG zurück (B5)', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.spaces'))
+        ->get(route('group.bereich.chat'))
         ->assertOk()
         ->assertSee('<title>Space', false)
         ->assertSee('og.png');

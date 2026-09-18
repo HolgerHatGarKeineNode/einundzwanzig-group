@@ -48,7 +48,7 @@ const pubOf = (sec: string): string => execFileSync(NAK, ['key', 'public', sec])
 async function openDirectory(page: Page, reader: WireReader): Promise<void> {
     await useZooid(page)
     await loginNsec(page, reader.nsec)
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
     await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 20_000 })
 }
 

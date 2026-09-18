@@ -202,12 +202,12 @@ test('event older than the age window is rejected', function () {
 });
 
 test('gate redirects guests to login', function () {
-    $this->get('/spaces')->assertRedirect(route('group.nostr-login'));
+    $this->get('/bereich/chat')->assertRedirect(route('group.nostr-login'));
 });
 
 test('gate allows authenticated pubkey', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get('/spaces')
+        ->get('/bereich/chat')
         ->assertOk();
 });
 
@@ -215,23 +215,23 @@ test('gate remembers the deep-linked url so login can resume there', function ()
     // §4.2 „Deep-Link-Refresh → Login mit korrektem return": ein direkter Hit auf
     // eine gegatete Route (Refresh/geteilter Link) merkt sich die Zielroute in
     // url.intended — der Login springt danach exakt dorthin zurück, nicht aufs Default.
-    $this->get('/settings/wallet')
+    $this->get('/bereich/wallet')
         ->assertRedirect(route('group.nostr-login'));
 
-    expect(session('url.intended'))->toBe(url('/settings/wallet'));
+    expect(session('url.intended'))->toBe(url('/bereich/wallet'));
 });
 
 test('login returns the intended url as redirect target', function () {
     // Der ganze resume-Bogen: gegateter Deep-Link → Login-Handoff → der Server
     // gibt die gemerkte Ziel-URL als `redirect` zurück (der Client assign()t sie).
-    $this->get('/settings/wallet')->assertRedirect(route('group.nostr-login'));
+    $this->get('/bereich/wallet')->assertRedirect(route('group.nostr-login'));
 
     $challenge = $this->getJson('/nostr/challenge')->json('challenge');
     $event = signHttpAuth(route('group.nostr.login'), 'POST', $challenge);
 
     $this->postJson(route('group.nostr.login'), ['event' => $event])
         ->assertOk()
-        ->assertJson(['redirect' => url('/settings/wallet')]);
+        ->assertJson(['redirect' => url('/bereich/wallet')]);
 });
 
 test('mobile flag is false on the web', function () {
@@ -245,7 +245,7 @@ test('mobile flag is true and gate passes through when nativephp runs', function
     // durch, die Insel gated client-seitig anhand von window.__nostrMobile.
     config()->set('nativephp-internal.running', true);
 
-    $this->get('/spaces')
+    $this->get('/bereich/chat')
         ->assertOk()
         ->assertSee('window.__nostrMobile = window.__nostrMobile ?? true', false);
 });

@@ -15,12 +15,12 @@ test('wallet page renders the client-side wallet island', function () {
 });
 
 test('wallet route requires a nostr session (guest redirected to nostr-login)', function () {
-    $this->get(route('group.wallet'))->assertRedirect(route('group.nostr-login'));
+    $this->get(route('group.bereich.wallet'))->assertRedirect(route('group.nostr-login'));
 });
 
 test('wallet route is reachable with a nostr session', function () {
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.wallet'))
+        ->get(route('group.bereich.wallet'))
         ->assertOk();
 });
 

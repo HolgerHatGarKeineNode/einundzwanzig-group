@@ -65,10 +65,15 @@ function autorUrl(string $autor): string
 
 // ── 1. Die Route ───────────────────────────────────────────────────────────────────
 
-test('die Route existiert und liegt hinter dem Nostr-Gate', function () {
-    // Ohne Session: derselbe Riegel wie bei jeder anderen Fläche unter `nostr.auth`.
-    $this->get(route('group.articles.author', ['autor' => 'npub1abc']))
-        ->assertRedirect(route('group.nostr-login'));
+test('since P2 the route is readable WITHOUT a session (D4)', function () {
+    // Until P2 the counter-proof for the `nostr.auth` latch stood here. Concept C takes the
+    // three article routes out of the gate on purpose: a shared `naddr` and an author page
+    // are exactly what a guest steers at from outside, and the board relay is
+    // `restricted_writes` — what is readable here is curated.
+    //
+    // The reader stays anonymous while doing so: `js/core.ts` answers no NIP-42 challenge for
+    // these relays, so his pubkey does not go out.
+    $this->get(route('group.articles.author', ['autor' => 'npub1abc']))->assertOk();
 });
 
 test('route() baut die npub-Form ohne Umkodierung', function () {

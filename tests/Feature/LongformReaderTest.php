@@ -50,7 +50,7 @@ test('Ohne konfigurierte Artikel-Quelle: /articles zeigt den ehrlichen "keine Qu
     config()->set('group.board_relay_url', null);
 
     $res = $this->withSession(['nostr_pubkey' => longformFakeSessionPubkey()])
-        ->get(route('group.articles'))
+        ->get(route('group.bereich.artikel'))
         ->assertOk();
     $html = longformResponseHtml($res);
 
@@ -66,7 +66,7 @@ test('Mit konfigurierter Artikel-Quelle: /articles rendert das Lade-Skeleton, NI
     config()->set('group.board_relay_url', 'wss://board.example.test/');
 
     $res = $this->withSession(['nostr_pubkey' => longformFakeSessionPubkey()])
-        ->get(route('group.articles'))
+        ->get(route('group.bereich.artikel'))
         ->assertOk();
     $html = longformResponseHtml($res);
 
@@ -80,7 +80,7 @@ test('Leerer String gilt als NICHT konfiguriert — dieselbe Weiche wie null (en
     config()->set('group.board_relay_url', '');
 
     $html = longformResponseHtml($this->withSession(['nostr_pubkey' => longformFakeSessionPubkey()])
-        ->get(route('group.articles'))->assertOk());
+        ->get(route('group.bereich.artikel'))->assertOk());
 
     expect($html)->toContain('Keine Artikel-Quelle eingerichtet.');
     expect($html)->not->toContain('Noch keine Artikel.');

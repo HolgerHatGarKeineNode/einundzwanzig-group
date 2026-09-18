@@ -74,7 +74,7 @@ async function openForgeAt320(page: Page): Promise<void> {
     await useZooid(page)
     await page.setViewportSize({ width: 320, height: 720 })
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
 }
 
 /**
@@ -222,7 +222,7 @@ test('der Ueberlauf-Waechter erkennt eine grob injizierte Sonde in BEIDEN Ebenen
     ).toBeLessThanOrEqual(dokWaehrendContainerSchlecht.clientWidth)
 
     // ── frischer Zustand vor der zweiten Sonde ────────────────────────────────
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
     await expect(page.getByRole('tab', { name: 'Aktivität', exact: true })).toBeVisible({ timeout: 20_000 })
     const dokVorher = await documentOverflow(page)
 

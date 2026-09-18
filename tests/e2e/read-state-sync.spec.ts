@@ -191,13 +191,20 @@ async function readRoomGenuinely(page: Page, room: { h: string; name: string }, 
     await page.goto(`/rooms/${room.h}`)
     await expect(page.getByText(marker, { exact: true })).toBeVisible({ timeout: 25_000 })
     await page.getByRole('button', { name: 'Zurück' }).click()
-    await expect(page).toHaveURL(/\/spaces$/, { timeout: 25_000 })
+    await expect(page).toHaveURL(/\/bereich\/chat$/, { timeout: 25_000 })
 }
 
-/** Öffnet „Neu" über die Glocke und markiert wirklich ALLES gelesen (`markAllRead()`). */
+/**
+ * Opens the inbox through the navigation and really marks EVERYTHING read
+ * (`markAllRead()`).
+ *
+ * Until P2 the BELL („Neu") led there; it fell with the rebuild of the room list, and the
+ * way is now the nav slot „Postfach" (D2/D5). Still a click and not a `goto`: the button
+ * hangs on `hasUnread()`, and the state it is clicked from belongs to the case.
+ */
 async function markAllReadGenuinely(page: Page): Promise<void> {
-    await page.getByRole('link', { name: /^Neu/ }).click()
-    await expect(page).toHaveURL(/\/updates$/, { timeout: 25_000 })
+    await page.locator('a[href$="/postfach"]').last().click()
+    await expect(page).toHaveURL(/\/postfach$/, { timeout: 25_000 })
     const allesButton = page.getByRole('button', { name: 'Alles als gelesen markieren' })
     await expect(allesButton, 'ohne etwas Ungelesenes bleibt der Knopf unsichtbar (hasUnread())').toBeVisible({ timeout: 30_000 })
     await allesButton.click()

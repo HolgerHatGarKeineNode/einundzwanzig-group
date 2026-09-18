@@ -229,7 +229,7 @@ test.describe('Buzz-Workspace: NIP-50-Suche (E2E, nur E2E_RELAY=buzz)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, BUZZ_USER_NSEC)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
 
         await openWorkspaceScope(page, WORD.toLowerCase())
 
@@ -271,7 +271,7 @@ test.describe('Buzz-Workspace: NIP-50-Suche (E2E, nur E2E_RELAY=buzz)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, BUZZ_USER_NSEC)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
 
         await openWorkspaceScope(page, `kupferzwerg or ${WORD.toLowerCase()}`)
         await paletteInput(page).press('Enter')
@@ -293,7 +293,7 @@ test.describe('Buzz-Workspace: NIP-50-Suche (E2E, nur E2E_RELAY=buzz)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, BUZZ_USER_NSEC)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
 
         await openWorkspaceScope(page, PERSON_NAME.toLowerCase())
         await paletteInput(page).press('Enter')
@@ -323,7 +323,7 @@ test.describe('Buzz-Workspace: NIP-50-Suche (E2E, nur E2E_RELAY=buzz)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
         }, BUZZ_URL)
         await loginNsec(page, BUZZ_USER_NSEC)
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
 
         await openWorkspaceScope(page, 'quastenflossergrossmutter')
         await paletteInput(page).press('Enter')

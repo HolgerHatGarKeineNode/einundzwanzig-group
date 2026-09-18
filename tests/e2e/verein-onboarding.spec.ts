@@ -266,8 +266,14 @@ test('Zahlung in Prüfung: nach neun erfolglosen Nachfass-Runden erklärt die Fl
 
 // ── 6. Lesefehler ist kein „kein Mitglied" ───────────────────────────────────
 
-test('Lesefehler: ein nicht lesbarer Space behauptet nicht „kein Mitglied"', async ({ page }) => {
+test('Lesefehler: ein nicht lesbarer Space behauptet nicht „kein Mitglied"', async ({ page, relayWaechter }) => {
     test.setTimeout(30_000)
+    // The deliberately dead relay of `stubDeadSpace` (port 1, nothing listens) is declared
+    // to the relay guard — it is the SUBJECT of this case, not an accident. Without the
+    // declaration the guard fails the test for reaching a socket outside its worker ports,
+    // and the message reads like a hermeticity breach rather than the probe it is. Same
+    // repair P6 made for `desktop-boot-geometrie.spec.ts`.
+    relayWaechter.erlaube('ws://127.0.0.1:1/')
     const { nsec } = freshNsec()
     await stubVereinDocument(page)
     await useZooid(page)

@@ -78,7 +78,7 @@ for (const schrift of [16, 20] as const) {
         await stelleStandardschrift(page, schrift)
         await page.setViewportSize({ width: 1024, height: 800 })
         await loginNsec(page, NSEC)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await expect(page.locator('[data-forge-tabs]')).toHaveCount(1, { timeout: 20_000 })
 
         // Vorbedingung: die Schriftgröße ist wirklich gestellt. Ohne diese Zeile
@@ -151,7 +151,7 @@ test('der Inhaltsdeckel faellt nie, waehrend das Fenster waechst (1280–1920 px
     await useZooid(page)
     await page.setViewportSize({ width: 1280, height: 900 })
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
     await expect(page.locator('#buehne')).toHaveCount(1, { timeout: 20_000 })
 
     const breiten = new Set<number>()

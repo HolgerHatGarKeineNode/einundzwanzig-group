@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /*
@@ -267,4 +269,126 @@ function ensureHostChromium(): void
             touch($marker);
         }
     }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Portal API fakes (P4, D6/D9)
+|--------------------------------------------------------------------------
+|
+| Here and not inside one of the test files, because TWO files need the same answers
+| (`PortalCatalogTest`, `PortalSeitenTest`) — and a function defined in a test file exists
+| only while Pest loads that exact file. Running a single file (`--filter`) would leave it
+| silently absent.
+|
+*/
+
+/**
+ * Forget every Portal stub registered so far.
+ *
+ * `Http::fake()` MERGES its stubs and the FIRST matching one wins — a second `fake()` with
+ * a 500 for the same URL therefore changes nothing, and a test that means „now the Portal
+ * is down" silently keeps measuring the healthy answer. Cost the first version of
+ * `PortalSeitenTest` four green-for-the-wrong-reason cases.
+ */
+function portalFakesZuruecksetzen(): void
+{
+    app()->forgetInstance(Factory::class);
+    Http::clearResolvedInstances();
+}
+
+/**
+ * The four public lists, in the shape the Portal really answers with (measured
+ * 2026-09-18 against `portal.einundzwanzig.space`).
+ *
+ * @param  array<string, mixed>  $overrides
+ */
+function portalFakes(array $overrides = []): void
+{
+    portalFakesZuruecksetzen();
+
+    $fakes = [
+        'portal.test/api/mobile/meetups' => Http::response([
+            [
+                'id' => 90, 'name' => 'Einundzwanzig Nordburgenland', 'slug' => 'einundzwanzig-nordburgenland',
+                'city' => 'Nordburgenland', 'country' => 'AT', 'latitude' => 47.84, 'longitude' => 16.6,
+                'logo' => 'https://portal.test/storage/1228/logo.jpg', 'next_event_start' => '2026-09-18 14:00',
+            ],
+            [
+                'id' => 309, 'name' => 'Bitcoin Meetup Jever', 'slug' => 'bitcoin-meetup-jever',
+                'city' => 'Jever', 'country' => 'DE', 'latitude' => 53.5, 'longitude' => 7.9,
+                'logo' => null, 'next_event_start' => null,
+            ],
+            // A record without a slug AND without a portalLink: unmappable, and the
+            // contract says such a row is DROPPED and not guessed (a meetup without a slug
+            // has no page to link to).
+            ['id' => 999, 'name' => 'Kaputt', 'city' => 'Nirgendwo', 'country' => 'DE'],
+        ]),
+        'portal.test/api/meetups*' => Http::response([
+            [
+                'id' => 90, 'has_room' => true, 'name' => 'Einundzwanzig Nordburgenland',
+                'portalLink' => 'https://portal.test/at/meetup/einundzwanzig-nordburgenland',
+                'url' => 'https://t.me/nordburgenland', 'country' => 'AT', 'city' => 'Nordburgenland',
+                'longitude' => 16.6, 'latitude' => 47.84, 'twitter_username' => 'nbgl',
+                'website' => 'https://nordburgenland.test', 'simplex' => '', 'signal' => null,
+                'nostr' => 'npub1abc', 'rsvp_enabled' => true, 'attendees_public' => true,
+                'next_event' => ['id' => 2614, 'start' => '2026-09-18 14:00', 'attendees' => 3, 'might_attendees' => 1],
+                'intro' => "Wir treffen uns **jeden** Donnerstag.\nBis dann!", 'logo' => 'https://portal.test/storage/1228/logo.jpg',
+            ],
+        ]),
+        'portal.test/api/meetup-events/*' => Http::response([
+            [
+                'id' => 3854, 'start' => '2026-09-21 16:00', 'location' => 'Landau', 'description' => null,
+                'link' => null, 'attendees' => 0, 'might_attendees' => 0,
+                'meetup.name' => 'Einundzwanzig Landau',
+                'meetup.portalLink' => 'https://portal.test/de/meetup/einundzwanzig-landau',
+                'meetup.country' => 'DE', 'meetup.city' => 'Landau', 'meetup.logo' => null,
+                'meetup.rsvp_enabled' => true,
+                'nostr_address' => '31923:daf83d92768b5d0005373f83e30d4203c0b747c170449e02fea611a0da125ee6:meetup-event-3854',
+            ],
+            [
+                'id' => 2614, 'start' => '2026-09-18 14:00', 'location' => 'Gasthof', 'description' => 'Vortrag',
+                'link' => 'https://example.test/termin', 'attendees' => 3, 'might_attendees' => 1,
+                'meetup.name' => 'Einundzwanzig Nordburgenland',
+                'meetup.portalLink' => 'https://portal.test/at/meetup/einundzwanzig-nordburgenland',
+                'meetup.country' => 'AT', 'meetup.city' => 'Nordburgenland', 'meetup.logo' => null,
+                'meetup.rsvp_enabled' => true, 'nostr_address' => null,
+            ],
+        ]),
+        'portal.test/api/courses?*' => Http::response([
+            [
+                'id' => 44, 'name' => 'Basiskurs Tag 1', 'image' => 'https://portal.test/storage/2027/kurs.jpg',
+                'description' => 'Grundlagen', 'next_event' => '2026-11-25 17:30:00',
+                'lecturer' => ['id' => 144, 'name' => 'Johannes', 'subtitle' => '21neumarkt.de', 'image' => 'https://portal.test/storage/2026/j.jpg'],
+            ],
+            // No own image: the Portal answers its own placeholder, which is a 404. The
+            // mapping has to treat it as „no image" — otherwise every such course shows a
+            // broken picture instead of its initial.
+            ['id' => 45, 'name' => 'Ohne Bild', 'image' => 'https://portal.test/img/einundzwanzig.png', 'next_event' => null],
+        ]),
+        'portal.test/api/courses/44' => Http::response([
+            'id' => 44, 'name' => 'Basiskurs Tag 1', 'description' => 'Grundlagen',
+            'image' => 'https://portal.test/storage/2027/kurs.jpg',
+            'portalLink' => 'https://portal.test/de/course/44',
+            'lecturer' => ['id' => 144, 'name' => 'Johannes', 'image' => null],
+            'events' => [[
+                'id' => 7, 'course_id' => 44, 'venue_id' => 3, 'from' => '2026-11-25 17:30:00',
+                'to' => '2026-11-25 20:00:00', 'link' => null,
+                'venue' => ['name' => 'Bürgerhaus', 'city' => ['name' => 'Neumarkt']],
+            ]],
+        ]),
+        'portal.test/api/lecturers?*' => Http::response([
+            ['id' => 119, 'name' => 'Alex Buck', 'subtitle' => null, 'future_events_count' => 0, 'next_event' => null, 'image' => 'https://portal.test/storage/1841/a.jpg'],
+            ['id' => 144, 'name' => 'Johannes', 'subtitle' => '21neumarkt.de', 'future_events_count' => 2, 'next_event' => '2026-11-25 17:30:00', 'image' => null],
+        ]),
+        'portal.test/api/lecturers/144' => Http::response([
+            'id' => 144, 'name' => 'Johannes', 'subtitle' => '21neumarkt.de', 'intro' => 'Hallo',
+            'description' => 'Lange Beschreibung', 'image' => null, 'active' => true,
+            'nostr' => 'npub1xyz', 'website' => 'https://21neumarkt.de', 'twitter_username' => '@neumarkt',
+            'lightning_address' => 'j@21neumarkt.de',
+            'courses' => [['id' => 44, 'name' => 'Basiskurs Tag 1', 'image' => null, 'next_event' => '2026-11-25 17:30:00']],
+        ]),
+    ];
+
+    Http::fake(array_merge($fakes, $overrides));
 }

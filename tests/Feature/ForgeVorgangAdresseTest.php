@@ -47,11 +47,11 @@ it('lässt den serverseitigen /spaces-Redirect unberührt', function () {
      */
     $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
         ->get('/spaces?tab=workspaces')
-        ->assertRedirect(route('group.forge').'?tab=workspaces');
+        ->assertRedirect(route('group.bereich.forge').'?tab=workspaces');
 
     // KONTROLLE: ohne den Parameter bleibt `/spaces` die Raumliste. Ohne sie
     // misst der Fall darüber nur, dass diese Route überhaupt umleitet.
-    $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get('/spaces')->assertOk();
+    $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])->get('/bereich/chat')->assertOk();
 });
 
 /*
@@ -60,7 +60,7 @@ it('lässt den serverseitigen /spaces-Redirect unberührt', function () {
 
 it('rendert die drei Bestandskacheln als Links — und die Patch-Zelle bewusst nicht', function () {
     $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.forge'))->assertOk()->getContent();
+        ->get(route('group.bereich.forge'))->assertOk()->getContent();
 
     foreach (['repos', 'issues', 'pulls'] as $ziel) {
         expect($html)->toContain('data-forge-kachel="'.$ziel.'"');
@@ -78,7 +78,7 @@ it('rendert die drei Bestandskacheln als Links — und die Patch-Zelle bewusst n
 
 it('baut den Listen-Umschalter als Button-Gruppe, nicht als Tablist', function () {
     $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.forge'))->assertOk()->getContent();
+        ->get(route('group.bereich.forge'))->assertOk()->getContent();
 
     /*
      * `desktop-forge.spec.ts:397-411` hält `getByRole('tab')).toHaveCount(0)` auf
@@ -93,7 +93,7 @@ it('baut den Listen-Umschalter als Button-Gruppe, nicht als Tablist', function (
 
 it('führt die drei Listen der linken Spur als eigene Regionen', function () {
     $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.forge'))->assertOk()->getContent();
+        ->get(route('group.bereich.forge'))->assertOk()->getContent();
 
     // Die Region-Marken sind zugleich die Sprungziele von `_springZuRegion`:
     // der Selektor dort baut sich aus dem Tab-Wert.
@@ -104,7 +104,7 @@ it('führt die drei Listen der linken Spur als eigene Regionen', function () {
 
 it('lässt die mobile Tab-Reihe bei DREI Reitern', function () {
     $html = (string) $this->withSession(['nostr_pubkey' => str_repeat('a', 64)])
-        ->get(route('group.forge'))->assertOk()->getContent();
+        ->get(route('group.bereich.forge'))->assertOk()->getContent();
 
     /*
      * `issues`/`pulls` sind seit P3 gültige `?tab=`-Werte, aber KEINE Reiter.

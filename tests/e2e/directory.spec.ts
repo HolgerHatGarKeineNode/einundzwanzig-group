@@ -42,7 +42,7 @@ function relayName(): string {
 async function openDirectoryAs(page: Page, secret: string): Promise<void> {
     await useZooid(page)
     await loginNsec(page, secret)
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
 }
 
 /** Standard: als Wegwerf-Test-User (kein Admin). */
@@ -447,7 +447,7 @@ test('P4: the preview keeps its figures when both live sources empty underneath 
 
     await useZooid(page)
     await loginNsec(page, reader.nsec)
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
     await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 20_000 })
 
     await enterSelection(page, [admin, testKeys().pk])
@@ -506,7 +506,7 @@ test('P4: the preview counts n of m out of the list the relays answered with', a
 
     await useZooid(page)
     await loginNsec(page, reader.nsec)
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
     await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 20_000 })
 
     await enterSelection(page, [admin, shared])
@@ -554,7 +554,7 @@ test('P4: a directory chunk that never arrives leaves a callout and no half-buil
     await useZooid(page)
     await page.route('**/assets/directoryIsland-*.js', (route) => route.abort('failed'))
     await loginNsec(page, NSEC)
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
 
     const callout = page.locator('[data-directory-chunk-error]')
     await expect(callout).toBeVisible({ timeout: 20_000 })
@@ -594,7 +594,7 @@ test('P4: a silent own relay offers the load step again and names the relay that
 
         await useZooid(page)
         await loginNsec(page, reader.nsec)
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
         await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 20_000 })
 
         await enterSelection(page, [])

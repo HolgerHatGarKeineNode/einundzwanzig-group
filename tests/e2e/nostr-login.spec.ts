@@ -1,4 +1,4 @@
-import { test, expect } from './support/fixtures'
+import { test, expect, type Page } from './support/fixtures'
 import { testKeys } from './support/keys'
 import { installNip07 } from './support/nip07'
 import { startRelay } from './support/relay'
@@ -7,6 +7,19 @@ import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
+
+/**
+ * Whom is this browser signed in as? Asked on „Ich" — the one page that PRINTS the npub
+ * (`partials/ich/identitaet.blade.php`).
+ *
+ * Until P2 the room list carried it in its profile chip, and these cases read it off
+ * `body` wherever the login happened to land. P2 moved the identity to „Ich" (D3), so
+ * reading the landing page would now measure a page that never claimed to show it.
+ */
+async function zeigtNpub(page: Page, npub: string): Promise<void> {
+    await page.goto('/ich')
+    await expect(page.locator('body')).toContainText(npub, { timeout: 15_000 })
+}
 
 /**
  * M1.5 — die Client-Login-Pfade end-to-end: welshman-Signer im Browser →
@@ -25,15 +38,15 @@ test.describe('Nostr-Login (E2E)', () => {
         await page.goto('/nostr-login')
         await page.getByRole('button', { name: /Browser-Erweiterung/ }).click()
 
-        await page.waitForURL('**/spaces')
-        await expect(page.locator('body')).toContainText(npub)
+        await page.waitForURL('**/start')
+        await zeigtNpub(page, npub)
     })
 
     test('nsec-Login meldet über den Handoff im Gate an', async ({ page }) => {
         const { npub } = testKeys()
 
         await loginNsec(page, NSEC)
-        await expect(page.locator('body')).toContainText(npub)
+        await zeigtNpub(page, npub)
     })
 
     test('Reauth: verlorene Server-Session wird auf der Login-Seite automatisch wiederhergestellt', async ({ page, context }) => {
@@ -45,10 +58,11 @@ test.describe('Nostr-Login (E2E)', () => {
         // Reboot/Ablauf simulieren: Server-Session (Cookies) weg, Client-Session bleibt.
         await context.clearCookies()
 
-        // /spaces → Gate wirft auf /nostr-login → Auto-Reauth (NIP-98) → zurück zu /spaces.
-        await page.goto('/spaces')
-        await page.waitForURL('**/spaces', { timeout: 15_000 })
-        await expect(page.locator('body')).toContainText(npub)
+        // A gated surface → the gate throws to /nostr-login → auto re-auth (NIP-98) → back
+        // to that same surface. Since P2 the room list is called `/bereich/chat`.
+        await page.goto('/bereich/chat')
+        await page.waitForURL('**/bereich/chat', { timeout: 15_000 })
+        await zeigtNpub(page, npub)
     })
 
     test('NIP-46-Bunker-Login meldet über den lokalen Relay im Gate an', async ({ page, relayWaechter }) => {
@@ -70,8 +84,9 @@ test.describe('Nostr-Login (E2E)', () => {
             await page.getByPlaceholder('bunker://…').fill(bunker.uri)
             await page.getByRole('button', { name: 'Mit Bunker verbinden' }).click()
 
-            await page.waitForURL('**/spaces', { timeout: 20_000 })
-            await expect(page.locator('body')).toContainText(npub)
+            // A login without a remembered target lands on `/start` since P2.
+            await page.waitForURL('**/start', { timeout: 20_000 })
+            await zeigtNpub(page, npub)
         } finally {
             bunker.close()
             await relay.close()
@@ -109,14 +124,16 @@ test.describe('Nostr-Login (E2E)', () => {
     test('Logout leert beide Sessions und das Gate sperrt wieder', async ({ page }) => {
         await loginNsec(page, NSEC)
 
-        // Abmelden liegt hinter dem Profil-Chip-Popover (Kopf-Umbau ⚡spaces.blade.php):
-        // erst öffnen, dann den (vorher display:none) Abmelden-Button klicken.
-        await page.getByRole('button', { name: /Angemeldet als/ }).click()
+        // Signing out lives on „Ich" since P3 (`⚡ich.blade.php`) — until then it sat behind
+        // the profile-chip popover of the old room-list header. The way there is the avatar in
+        // the page header, which carries exactly this `aria-label` (`me-avatar.blade.php`).
+        await page.getByRole('link', { name: /Angemeldet als/ }).click()
+        await page.waitForURL('**/ich')
         await page.getByRole('button', { name: 'Abmelden' }).click()
         await page.waitForURL('**/nostr-login')
 
-        // Gate greift jetzt wieder: /spaces → Redirect zurück zum Login.
-        await page.goto('/spaces')
+        // The gate applies again: the room list → redirect back to the login.
+        await page.goto('/bereich/chat')
         await page.waitForURL('**/nostr-login')
     })
 })

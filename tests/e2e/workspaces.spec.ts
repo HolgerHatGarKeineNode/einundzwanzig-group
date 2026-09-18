@@ -85,7 +85,7 @@ const roomSpaceUrl = (page: Page): Promise<string> =>
  * Der Anker ist `[data-forge-workspaces]`.
  */
 const oeffneWorkspaces = async (page: Page): Promise<Locator> => {
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
     const tab = page.getByRole('tab', { name: 'Kanäle' })
     await expect(tab).toBeVisible({ timeout: 20_000 })
     await tab.click()
@@ -350,7 +350,7 @@ test.describe('Workspaces-Tab (zooid aktiv, Buzz als zweiter Space)', () => {
         // … und zurück auf die Raumliste. Sie IST der Vereins-Space: der ephemere
         // Workspace muss dabei wegfallen, sonst käme der Nutzer nur über die
         // Einstellungen zurück und sähe derweil die falschen Räume.
-        await page.goto('/spaces')
+        await page.goto('/bereich/chat')
         await expect(page.locator('[x-data="nostrSpaces"]')).toBeVisible({ timeout: 20_000 })
         const active = await page.evaluate(() => {
             const el = document.querySelector('[x-data="nostrSpaces"]')!

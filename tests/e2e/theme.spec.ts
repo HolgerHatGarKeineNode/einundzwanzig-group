@@ -42,6 +42,6 @@ test('D4: Theme-Präferenz überlebt wire:navigate', async ({ page }) => {
     await page.locator('ui-radio[aria-label="Dunkel"]').click()
     await expect(page.locator('html')).toHaveClass(/dark/)
 
-    await page.goto('/directory')
+    await page.goto('/bereich/leute')
     await expect(page.locator('html')).toHaveClass(/dark/)
 })

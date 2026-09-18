@@ -238,7 +238,7 @@ test.describe('Buzz-Forge: die Form des Agentenvorschlags und der Weckmeldung', 
      */
     async function vorschlagOeffnen(page: Page, suche = agent.name) {
         await anmelden(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO, exact: true })).toBeVisible({ timeout: 30_000 })
@@ -353,7 +353,7 @@ test.describe('Buzz-Forge: die Form des Agentenvorschlags und der Weckmeldung', 
 
     test('die Weckmeldung: zwei Symbole, ein Verwerfen-Ziel von 24 px', async ({ page }) => {
         await anmelden(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO, exact: true })).toBeVisible({ timeout: 30_000 })
@@ -414,7 +414,7 @@ test.describe('Buzz-Forge: die Form des Agentenvorschlags und der Weckmeldung', 
         const page = await ctx.newPage()
         try {
             await anmelden(page)
-            await page.goto('/forge')
+            await page.goto('/bereich/forge')
             await page.getByRole('tab', { name: 'Repositories' }).click()
             await page.locator('[data-forge-repo]').filter({ hasText: REPO }).first().click()
             await expect(page.getByRole('heading', { level: 1, name: REPO, exact: true })).toBeVisible({

@@ -54,7 +54,7 @@ test('Ohne konfigurierte Signal-Relays steht KEIN __nostrArticleRelays im Dokume
     config()->set('group.article_relay_urls', null);
 
     $res = $this->withSession(['nostr_pubkey' => articleMetricsFakeSessionPubkey()])
-        ->get(route('group.articles'))
+        ->get(route('group.bereich.artikel'))
         ->assertOk();
 
     // Der Variablenname steht hier als LITERAL. Ein Vergleich gegen eine Konstante wäre
@@ -71,7 +71,7 @@ test('Mit konfigurierten Signal-Relays reicht der Server sie WÖRTLICH in die In
     config()->set('group.article_relay_urls', 'wss://nos.lol, wss://relay.damus.io');
 
     $res = $this->withSession(['nostr_pubkey' => articleMetricsFakeSessionPubkey()])
-        ->get(route('group.articles'))
+        ->get(route('group.bereich.artikel'))
         ->assertOk();
     $html = articleMetricsHtml($res);
 
@@ -93,7 +93,7 @@ test('Die Artikel-QUELLE bleibt davon unberührt — die Kuratierungsregel gilt 
     config()->set('group.article_relay_urls', 'wss://nos.lol');
 
     $res = $this->withSession(['nostr_pubkey' => articleMetricsFakeSessionPubkey()])
-        ->get(route('group.articles'))
+        ->get(route('group.bereich.artikel'))
         ->assertOk();
     $html = articleMetricsHtml($res);
 

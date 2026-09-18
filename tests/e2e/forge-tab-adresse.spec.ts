@@ -31,13 +31,13 @@ const NSEC = process.env.NOSTR_TEST_NSEC as string
 test('der Forge-Tab wird in ?tab= gespiegelt — und der Startwert steht NICHT drin', async ({ page }) => {
     await useZooid(page)
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
 
     const tab = (name: string) => page.getByRole('tab', { name, exact: true })
     await expect(tab('Aktivität')).toBeVisible({ timeout: 20_000 })
 
     // Startwert: saubere Adresse, kein Parameter. Genau die Zusage aus `forgeTab.ts`.
-    await expect(page).toHaveURL(/\/forge$/)
+    await expect(page).toHaveURL(/\/bereich\/forge$/)
 
     // Jeder andere Tab landet in der Adresse. Die Beschriftung ist seit dem
     // 2026-08-23 „Kanäle" — der BEZEICHNER in der Adresse bleibt `workspaces`,
@@ -52,7 +52,7 @@ test('der Forge-Tab wird in ?tab= gespiegelt — und der Startwert steht NICHT d
     // stehen zu lassen. Ohne diesen Zweig wäre die saubere Adresse oben eine
     // Eigenschaft des ersten Aufrufs statt eine Regel.
     await tab('Aktivität').click()
-    await expect(page).toHaveURL(/\/forge$/, { timeout: 10_000 })
+    await expect(page).toHaveURL(/\/bereich\/forge$/, { timeout: 10_000 })
 })
 
 test('die weitergeleitete Adresse kommt an: /forge?tab=workspaces öffnet den dritten Tab', async ({ page }) => {
@@ -61,7 +61,7 @@ test('die weitergeleitete Adresse kommt an: /forge?tab=workspaces öffnet den dr
 
     // Der Zielzustand der Weiterleitung, hier direkt angesteuert — die Kette aus
     // Redirect + Leser + Rückschreiben ist damit über alle drei Hälften geschlossen.
-    await page.goto('/forge?tab=workspaces')
+    await page.goto('/bereich/forge?tab=workspaces')
     await expect(page.locator('[data-forge-workspaces]')).toBeVisible({ timeout: 20_000 })
     await expect(page.getByRole('tab', { name: 'Kanäle', exact: true })).toHaveAttribute('aria-selected', 'true')
 
@@ -77,9 +77,9 @@ test('ein ungültiger Tab-Parameter wird aus der Adresse GERÄUMT, nicht steheng
     // `readForgeTab` verwirft ihn (node-getestet). Die Adresse muss nachziehen, sonst
     // behauptet sie weiter etwas, das der Bildschirm nicht zeigt — und der Nutzer teilt
     // genau diesen Link erneut.
-    await page.goto('/forge?tab=quatsch')
+    await page.goto('/bereich/forge?tab=quatsch')
     await expect(page.getByRole('tab', { name: 'Aktivität', exact: true })).toBeVisible({ timeout: 20_000 })
-    await expect(page).toHaveURL(/\/forge$/, { timeout: 10_000 })
+    await expect(page).toHaveURL(/\/bereich\/forge$/, { timeout: 10_000 })
 })
 
 test('der gestrichene Projekte-Tab wird aus der Adresse GERÄUMT — nicht nur ignoriert', async ({ page }) => {
@@ -91,9 +91,9 @@ test('der gestrichene Projekte-Tab wird aus der Adresse GERÄUMT — nicht nur i
     // ihn öffnet, hat nichts falsch gemacht. Er muss auf der Aktivität landen, und die
     // Adresse muss nachziehen — sonst behauptet sie weiter einen Tab, den es nicht gibt,
     // und wird in dieser Form erneut geteilt.
-    await page.goto('/forge?tab=projects')
+    await page.goto('/bereich/forge?tab=projects')
     await expect(page.getByRole('tab', { name: 'Aktivität', exact: true })).toBeVisible({ timeout: 20_000 })
-    await expect(page).toHaveURL(/\/forge$/, { timeout: 10_000 })
+    await expect(page).toHaveURL(/\/bereich\/forge$/, { timeout: 10_000 })
 
     // Und der Tab ist wirklich fort, nicht nur unbeschriftet.
     await expect(page.getByRole('tab', { name: 'Projekte', exact: true })).toHaveCount(0)

@@ -98,7 +98,7 @@ test.describe('Moderation history (E2E, E2E_RELAY=buzz only)', () => {
         await waitForAction('untimeout', victim)
 
         await loginNsec(page, BUZZ_OWNER_NSEC)
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
         await expect(page.locator('[x-data="nostrDirectory"]')).toBeVisible({ timeout: 20_000 })
 
         await page.getByRole('button', { name: /Meldungen/ }).click()
@@ -162,7 +162,7 @@ test.describe('Moderation history (E2E, E2E_RELAY=buzz only)', () => {
         const statuses = auditStatuses(page)
 
         await loginNsec(page, BUZZ_USER_NSEC)
-        await page.goto('/directory')
+        await page.goto('/bereich/leute')
         await expect(page.locator('[x-data="nostrDirectory"]')).toBeVisible({ timeout: 20_000 })
 
         // The trigger sits behind `x-show="isAdmin"` — a non-moderator cannot reach the

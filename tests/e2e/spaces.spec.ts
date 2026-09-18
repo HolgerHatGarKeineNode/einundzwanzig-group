@@ -24,16 +24,31 @@ function createRoomNak(h: string, name: string, extraTags: string[] = []): void 
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9002', '-t', `h=${h}`, '-t', `name=${name}`, ...extraTags, ZOOID_WS])
 }
 
-/** Loggt via nsec ein und landet im Gate (`/spaces`). */
+/**
+ * The way into a focus mode.
+ *
+ * The discovery rows („Meetup-Räume entdecken", „Projektunterstützung entdecken") were the
+ * way in until P2 and are gone with Concept C (D2): the level above the chat is Start now.
+ * `?rt=` is the surviving entry — `bridge.ts` reads it on mount, and the legacy redirect of
+ * `/spaces` carries the parameter along, so shared links keep working.
+ */
+const openFocus = (page: Page, mode: 'meetups' | 'proposals') =>
+    page.goto(`/bereich/chat?rt=${mode}`)
+
+/** Loggt via nsec ein und oeffnet die Raumliste (`/bereich/chat`). */
 async function login(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
+    // Since P2 a login lands on `/start`, not on the room list (D3) — every case below
+    // measures the room list, so the helper opens it.
+    await page.goto('/bereich/chat')
 }
 
-/** Loggt als Relay-Admin ein und landet auf der Räume-Seite (`/spaces`). */
+/** Signs in as the relay admin and opens the room list (`/bereich/chat` since P2). */
 async function loginAdmin(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, ADMIN_HEX)
+    await page.goto('/bereich/chat')
 }
 
 /**
@@ -80,8 +95,11 @@ test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async 
     await expect(page.getByText('local verify relay')).toBeVisible()
 
     // Beigetretene Räume (39002-Mitglied) + der entdeckbare `dev` unter „Andere Räume"
-    await expect(page.getByText('Willkommen')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Allgemein')).toBeVisible()
+    // Addressed through the ROW and not through bare text: since P5 the same page carries
+    // a notice about the missing relay list that contains the word „Allgemein" as well —
+    // `getByText` then matched two nodes and fell over the strict mode.
+    await expect(page.getByRole('button', { name: '# Willkommen' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: '# Allgemein' })).toBeVisible()
     await expect(page.getByText('Andere Räume')).toBeVisible()
     await expect(page.getByText('Dev')).toBeVisible()
 
@@ -100,10 +118,12 @@ test('M2: aktiver Space + Räume erscheinen live nach Login gegen zooid', async 
 test('M2: Space-Wechsel liegt in den Einstellungen', async ({ page }) => {
     await login(page)
 
-    // Über die Bottom-Nav in die Einstellungen — der Space-Wechsel liegt seit der
-    // vereinheitlichten Settings-Seite als „Space & Räume"-Section unter /settings (§6.5).
+    // Into the settings through „Ich" — the space switch is the „Space & Räume" section of
+    // the unified settings page (§6.5), and that page hangs under „Ich" since P2 (D3). The
+    // bottom nav has no slot for it any more: three slots, D2.
+    await page.goto('/ich')
     await page.getByRole('link', { name: 'Einstellungen' }).click()
-    await page.waitForURL('**/settings')
+    await page.waitForURL('**/ich/einstellungen')
 
     await expect(page.getByText('Space & Räume')).toBeVisible()
     // Space-Auswahl zeigt den NIP-11-Namen (B1), nicht die nackte URL.
@@ -232,10 +252,10 @@ test('P4b: Admin fügt ein Raum-Mitglied per npub hinzu — kein Entfernen mehr 
  * - Standard-Raum   → unter „Andere Räume".
  * - `t=project-support` (Vereins-Antragsraum) → NICHT unter „Andere Räume",
  *   und (seit 2026-07-27) auch dann NICHT unter „Meine Räume", wenn man
- *   Mitglied wird — die ganze Kategorie liegt hinter der Entdecken-Zeile
- *   „Projektunterstützung entdecken", betretbar erst nach einem Klick darauf.
+ *   Mitglied wird. Since P2 that whole category lives in focus mode `?rt=proposals`
+ *   (before P2: behind a discovery row, see `openFocus`).
  * - `t=meetup`      → REGRESSION: unverändert raus aus „Andere Räume" und rein
- *   in den Meetup-Pool (die Entdecken-Karte zählt ihn).
+ *   in den Meetup-Pool (`?rt=meetups`).
  *
  * Kategorisieren heißt nicht verstecken — der zweite Teil des Tests ist der,
  * der zählt.
@@ -260,39 +280,29 @@ test('P4c: Antragsraum fällt aus „Andere Räume", bleibt aber als Mitglied er
     // Beide kategorisierten Räume sind aus der Standard-Liste raus …
     await expect(page.getByText(propName, { exact: true })).toHaveCount(0)
     await expect(page.getByText(meetupName, { exact: true })).toHaveCount(0)
-    // … der Meetup-Raum aber weiterhin im Meetup-Pool (Entdecken-Karte) — die
-    // Projektunterstützung darf dort NICHT mitgezählt werden.
-    const discover = page.getByRole('button', { name: /Meetup-Räume entdecken/ })
-    await expect(discover).toBeVisible({ timeout: 15_000 })
-    await discover.click()
+    // … the meetup room is still in the meetup pool, and the proposal room must NOT be
+    // counted there.
+    await openFocus(page, 'meetups')
     await expect(page.getByText(meetupName, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(propName, { exact: true })).toHaveCount(0)
 
     // Jetzt Mitglied im Antragsraum machen (kind 9000 → 39002) …
     execFileSync(NAK, ['event', '--auth', '--sec', ADMIN_HEX, '-k', '9000', '-t', `h=${propH}`, '-t', `p=${pubOf(NSEC)}`, ZOOID_WS])
-    // `goto('/spaces')` statt `reload()`: der Entdecken-Klick oben schaltet in den
-    // Meetup-Fokus, und der lebt seit dem Filter-URL-Sync in der URL (`?rt=meetups`).
-    // Ein reload() käme also im Meetup-Fokus zurück, wo die Entdecken-Zeile der
-    // Projektunterstützung bewusst nicht gerendert wird — der Test prüfte dann den
-    // falschen Modus. Die parameterlose URL ist die frische Standard-Übersicht.
-    await page.goto('/spaces')
+    // `goto('/bereich/chat')` and not `reload()`: the line above leaves the page in the
+    // meetup focus, which lives in the URL (`?rt=meetups`). A `reload()` would come back
+    // inside that focus and the case would measure the wrong mode. The URL without a
+    // parameter is the fresh default overview.
+    await page.goto('/bereich/chat')
 
     // … und taucht trotzdem NICHT direkt in der Liste auf — auch nicht unter
     // „Meine Räume": die Entdecken-Zeile vertritt die Kategorie GANZ, auch für
     // Mitglieder (Nutzerentscheidung 2026-07-27, zweite Runde).
     await expect(page.getByText(propName, { exact: true })).toHaveCount(0)
 
-    // … sondern hinter der Entdecken-Zeile, die die alte eigene Sektion ersetzt.
-    // Keine exakte Zahl in der Umfangszeile: der zooid-Seed wird zwischen
-    // Testläufen wiederverwendet, `proposalCount()` zählt bei einem Nicht-Admin
-    // ALLE Antragsräume, denen dieser Test-User je beigetreten ist (P5-Lehre,
-    // siehe Suchtest unten) — hier zählt nur, dass die Zeile ihren Umfang zeigt.
-    const discoverProposals = page.getByRole('button', { name: /Projektunterstützung entdecken/ })
-    await expect(discoverProposals).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(/^\d+ (Antragsraum|Antragsräume)$/)).toBeVisible()
-
-    // Erreichbar: Klick öffnet den Antrags-Fokus, der Raum steht in der Liste.
-    await discoverProposals.click()
+    // … but in the proposal FOCUS, which replaced the old section of its own. The size
+    // counter of the discovery row is gone with the row; what this case proves is unchanged
+    // REACHABILITY: the room sits behind `?rt=proposals` and nowhere else.
+    await openFocus(page, 'proposals')
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
 
@@ -323,25 +333,24 @@ test('P4c: fremder Antragsraum zählt beim Admin (Vorstand) in die Entdecken-Zei
     await loginAdmin(page)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    const discover = page.getByRole('button', { name: /Projektunterstützung entdecken/ })
-    await expect(discover).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(propName, { exact: true })).toHaveCount(0)
 
-    await discover.click()
+    await openFocus(page, 'proposals')
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
 })
 
 /**
- * P5 — Projektunterstützung ist filterbar wie die Meetups: die Entdecken-Zeile
- * „Projektunterstützung entdecken" (seit 2026-07-27 dasselbe Zeilen-Muster wie
- * die Meetup-Zeile; vorher ein Textlink „Alle anzeigen" im Sektionskopf einer
- * vollen Zeilenliste) führt in einen eigenen Fokus-Modus (`?rt=proposals`), der
- * Suche kennt, aber KEINEN Land-Filter (Antragsräume tragen kein Land).
+ * P5 — proposal rooms are filterable like the meetups: `?rt=proposals` opens a focus mode
+ * of their own that knows search but has NO country filter (proposal rooms carry no
+ * country).
+ *
+ * Until P2 the way in was a discovery row at the foot of the room list; it is gone with
+ * Concept C (D2). The focus mode itself stayed, and with it this case.
  *
  * Der Test läuft als Admin (Vorstand), weil der nach `_proposalPool()` auch
  * FREMDE Antragsräume sieht — so genügt der 39000-Seed ohne Mitgliedschaft.
  */
-test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals · kein Land-Filter)', async ({ page }) => {
+test('P5: proposal rooms have a focus mode of their own (rt=proposals, no country filter)', async ({ page }) => {
     const rnd = Math.floor(Math.random() * 1e9)
     const stdName = `Std-${rnd}`
     const propA = `PropA-${rnd}`
@@ -356,25 +365,23 @@ test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals ·
     await loginAdmin(page)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    // Der Einstieg: die Entdecken-Zeile — beide Antragsräume liegen dahinter,
-    // nicht mehr einzeln in der Hauptliste (Wunsch 2026-07-27).
-    const discover = page.getByRole('button', { name: /Projektunterstützung entdecken/ })
-    await expect(discover).toBeVisible({ timeout: 15_000 })
+    // Starting point: neither proposal room is in the main list (asked for on 2026-07-27).
     await expect(page.getByText(propA, { exact: true })).toHaveCount(0)
 
-    // Filterwechsel darf KEINEN History-Eintrag erzeugen (nur replaceState) —
-    // sonst bräuchte Zurück je Filterklick einen Schritt (back-navigation.spec.ts).
-    const historyBefore = await page.evaluate(() => history.length)
-    await discover.click()
+    // ── The history promise went away with its subject ───────────────────────────
+    // What stood here: a filter change must create NO history entry (`replaceState` only).
+    // Its subject was the discovery CLICK — a state change without navigation. Since P2 no
+    // surface switches `roomType` without navigating; the focus is NAVIGATED TO, and then a
+    // history entry is correct. What survives of the promise is held by
+    // `back-navigation.spec.ts` (one step back per page, not per filter).
+    await openFocus(page, 'proposals')
     await expect(page).toHaveURL(/[?&]rt=proposals\b/, { timeout: 15_000 })
-    expect(await page.evaluate(() => history.length)).toBe(historyBefore)
 
     // Im Fokus: nur noch Antragsräume, alles andere ist weg.
     await expect(page.getByText(propA, { exact: true })).toBeVisible()
     await expect(page.getByText(propB, { exact: true })).toBeVisible()
     await expect(page.getByText(stdName, { exact: true })).toHaveCount(0)
     await expect(page.getByText('Andere Räume')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: /Meetup-Räume entdecken/ })).toHaveCount(0)
 
     // Kein Land-Filter (Antragsräume tragen kein Land) — die Suche dagegen schon,
     // mit eigenem Platzhalter (Alpine-Bind, nicht der Meetup-Text).
@@ -409,7 +416,6 @@ test('P5: Antragsräume haben einen eigenen Fokus-Modus (Link · rt=proposals ·
     await page.getByRole('button', { name: 'Räume anzeigen' }).first().click()
     await expect(page).not.toHaveURL(/rt=/)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByRole('button', { name: /Projektunterstützung entdecken/ })).toBeVisible()
 })
 
 /** Deep-Link: `?rt=proposals` stellt den Fokus beim Laden her (Kaltstart). */
@@ -424,7 +430,7 @@ test('P5: ?rt=proposals öffnet den Antrags-Fokus direkt', async ({ page }) => {
     await loginAdmin(page)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    await page.goto('/spaces?rt=proposals')
+    await page.goto('/bereich/chat?rt=proposals')
     await expect(page.getByText(propName, { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(stdName, { exact: true })).toHaveCount(0)
     await expect(page.getByPlaceholder('Antragsraum suchen…')).toBeVisible()
@@ -456,11 +462,20 @@ test('P6: ungelesene Nachricht in beigetretenem Antragsraum zeigt die Summenpill
     await login(page)
     await expect(page.getByText(stdName, { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    const discover = page.getByRole('button', { name: /Projektunterstützung entdecken/ })
-    await expect(discover).toBeVisible({ timeout: 15_000 })
+    // ── The pill moves into the FOCUS together with its row ─────────────────────
+    // Until P2 it was measured on the discovery row, which is gone (D2). The question is
+    // the same one — does a user see that something unread waits in a proposal room? — and
+    // the answer now sits on the room row inside the focus.
+    await openFocus(page, 'proposals')
+    const zeile = page.getByText(propName, { exact: true })
+    await expect(zeile).toBeVisible({ timeout: 15_000 })
     // Dieselbe Pillen-Signatur wie in `unread-dot.spec.ts` (`roomDot`): eine
     // deckende Fläche ohne Theme-Variante, `x-if` rendert bei 0 gar keinen Knoten.
-    const pill = discover.locator('span.bg-brand-500.text-zinc-950')
+    // THIS row's pill, not „any": since P6 the tab bar carries a total pill of its own
+    // with the same signature, and a bare selector matched both (strict mode). The room
+    // button narrows it down.
+    const zeilenKnopf = page.getByRole('button', { name: new RegExp(propName) })
+    const pill = zeilenKnopf.locator('span.bg-brand-500.text-zinc-950')
     await expect(pill).toHaveCount(0) // Ausgangslage: nichts ungelesen, keine Pille.
 
     // Fremde Nachricht NACH dem Login → ungelesen.
@@ -540,11 +555,12 @@ test('P7: „Meine Räume" teilt sich ab 5 Zeilen in Räume und Meetups', async 
         const yMeetups = (await sectionLabel(page, 'Meine Meetups').first().boundingBox())?.y ?? 0
         expect(yRaeume, 'Räume stehen über Meetups').toBeLessThan(yMeetups)
 
-        // Und die drei Entdecken-Zeilen darunter sind unangetastet — sie waren
-        // ausdrücklich nicht Teil des Umbaus.
-        // „Neuen Raum anlegen" bleibt bewusst außen vor: die Zeile ist admin-gegated,
+        // The three discovery rows this case also checked until P2 are gone with Concept C
+        // (D2) — what it proves is the SPLIT of „Meine Räume", and that is measured above in
+        // full.
+        //
+        // „Neuen Raum anlegen" was out of scope here before P2 already: admin-gated,
         // dieser Test läuft als normaler Nutzer und sähe sie nie.
-        await expect(page.getByText('Meetup-Räume entdecken')).toBeVisible()
     } finally {
         // Mitgliedschaft zurücknehmen (kind 9022) — der Relay überlebt den Lauf.
         for (const h of angelegt) {

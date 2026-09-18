@@ -70,14 +70,26 @@ const phpDateien = (verzeichnis: string): string[] => {
 }
 
 /**
- * Alle `NOSTR_*`-Schlüssel, die irgendwo per `env(...)` gelesen werden.
+ * The keys read through `env(...)` anywhere that carry an ADDRESS the SERVER itself calls:
+ * every `NOSTR_*` — and, since P7, `PORTAL_URL`.
+ *
+ * **Why `PORTAL_URL` joined.** It is the only non-`NOSTR_` key with a PRODUCTION default
+ * (`https://portal.einundzwanzig.space`, `packages/…/config/group.php`), and since P4 the
+ * server calls it: `/suche/portal-index` and the Portal pages go through
+ * `HttpPortalCatalog`. Measured in the P7 sweep, every run therefore had one leg outside
+ * the hermetic stack — and NEITHER the relay guard NOR Chromium's `--host-resolver-rules`
+ * could see it: both listen at the browser.
+ *
+ * Not in the list, with a reason: `VEREIN_API_URL` (default `''`, silent by itself) and
+ * `VEREIN_PUBLIC_URL` — whose address is LINKED, not called, and a spec measures exactly
+ * that `href`.
  *
  * Das Muster verlangt `env(` unmittelbar vor dem Anführungszeichen — ein `NOSTR_…` in
  * einem Kommentar oder in einer Fehlermeldung zählt also nicht. Beide Anführungsarten,
  * weil PHP beide erlaubt.
  */
 const gelesenSchluessel = (): string[] => {
-    const muster = /env\(\s*['"](NOSTR_[A-Z0-9_]+)['"]/g
+    const muster = /env\(\s*['"](NOSTR_[A-Z0-9_]+|PORTAL_URL)['"]/g
     const gefunden = new Set<string>()
     for (const ort of SUCHORTE) {
         for (const datei of phpDateien(join(WURZEL, ort))) {
@@ -106,7 +118,7 @@ test('der Scanner findet überhaupt etwas — und zwar in BEIDEN Bäumen', () =>
     )
 })
 
-test('JEDER gelesene NOSTR_*-Schlüssel wird von testServerEnv neutralisiert', () => {
+test('every address key the application reads is neutralised by testServerEnv', () => {
     const gesetzt = Object.keys(testServerEnv({ slot: 0 }))
     for (const schluessel of gelesenSchluessel()) {
         assert.ok(

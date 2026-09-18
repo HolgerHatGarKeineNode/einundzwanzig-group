@@ -53,10 +53,81 @@ test.describe('NIP46_PERMS (vollständige Abdeckung)', () => {
             // Koppeln, und weil bestehende Verbindungen nie nachverhandelt werden, waere
             // die Praesenz fuer frueher gekoppelte Nutzer entweder tot oder eine Lawine.
             20001,
+            // 31925 (the NIP-52 answer to a Portal date) since „Ein Eingang" P5 — the ONLY
+            // permission that phase added. Without it an Amber user's first „Zusagen" is
+            // refused and the surface is dead for them: an existing bunker connection is
+            // never renegotiated.
+            31925,
         ]
         for (const kind of required) {
             expect(perms, `sign_event:${kind} muss enthalten sein`).toContain(`sign_event:${kind}`)
         }
+    })
+
+    test('the list is CHARACTER-IDENTICAL to the one written out here — one change per phase', () => {
+        /*
+         * ── Why the expected state is written out in full ─────────────────────────────
+         *
+         * Every change to NIP46_PERMS marks EVERY existing bunker pairing as stale
+         * (`nip46PermsAreStale` → reconnect nudge). That is the price, and it is defensible
+         * once per release; two additions in one release are two nudges for the same user,
+         * and the second one costs the trust the first one still had.
+         *
+         * The cases above check PRESENCE — they cannot see that a phase added three kinds
+         * instead of one. This case can: it compares the complete list in its order.
+         * Whoever adds an entry there has to add the same line here, and thereby say
+         * expressly that it is the one change of this phase.
+         *
+         * State: „Ein Eingang" P5 (2026-09-18) — 42 entries, `sign_event:31925` the only
+         * addition against P4.
+         */
+        const erwartet = [
+            'nip44_encrypt',
+            'nip44_decrypt',
+            'sign_event:0',
+            'sign_event:5',
+            'sign_event:7',
+            'sign_event:9',
+            'sign_event:1018',
+            'sign_event:1068',
+            'sign_event:1111',
+            'sign_event:1984',
+            'sign_event:9000',
+            'sign_event:9001',
+            'sign_event:9002',
+            'sign_event:9005',
+            'sign_event:9007',
+            'sign_event:9008',
+            'sign_event:9021',
+            'sign_event:9022',
+            'sign_event:9030',
+            'sign_event:9031',
+            'sign_event:9032',
+            'sign_event:9033',
+            'sign_event:9040',
+            'sign_event:9041',
+            'sign_event:9042',
+            'sign_event:9043',
+            'sign_event:9044',
+            'sign_event:9734',
+            'sign_event:10003',
+            'sign_event:10009',
+            'sign_event:20001',
+            'sign_event:22242',
+            'sign_event:27235',
+            'sign_event:28934',
+            'sign_event:28936',
+            'sign_event:30078',
+            'sign_event:30300',
+            'sign_event:31925',
+            'sign_event:41010',
+            'sign_event:41011',
+            'sign_event:41012',
+            'sign_event:45002',
+        ]
+
+        expect(perms).toEqual(erwartet)
+        expect(perms.length, 'die Anzahl ist Teil der Zusage').toBe(42)
     })
 
     test('enthält KEIN sign_event:20002 — der Tipp-Indikator wird nicht geschrieben', () => {

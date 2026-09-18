@@ -115,6 +115,9 @@ async function openSpaces(page: Page): Promise<ImageRoutes> {
     await useZooid(page)
     const routes = await armImageRoutes(page)
     await loginNsec(page, NSEC)
+    // Since P2 a login lands on `/start` (D3); the tiles this file measures are on the
+    // room list.
+    await page.goto('/bereich/chat')
     return routes
 }
 
@@ -149,7 +152,9 @@ test('Tür 3 — Meetup-Kachel: http-picture → keine Anfrage, Initiale statt B
     ])
 
     const routes = await openSpaces(page)
-    await page.getByRole('button').filter({ hasText: 'Meetup-Räume entdecken' }).click()
+    // P7: the row „Meetup-Räume entdecken" is gone with D2; the focus mode it navigated to
+    // is not (`?rt=meetups`). The tile under test is the same one.
+    await page.goto('/bereich/chat?rt=meetups')
     await expect(tile(page, name)).toBeVisible({ timeout: 10_000 })
     await waitForEvilImgGone(page)
 
@@ -182,7 +187,11 @@ test('Tür 1 — eigenes Profilbild (kind 0): keine Anfrage, Initiale bleibt', a
     const routes = await openSpaces(page)
     try {
         nak(['event', '--auth', '--sec', NSEC, '-k', '0', '-c', `{"name":"Alice Test","picture":"//evil.example/alice.png"}`, ZOOID_WS])
-        const chip = page.getByRole('button', { name: /Angemeldet als/ })
+        // P7: the profile CHIP of the old room-list header is gone with P2 — the avatar of
+        // the app header carries this label now and is a LINK to „Ich" (`me-avatar`). Same
+        // element for this case's purpose: it is the one that renders the own kind-0
+        // picture.
+        const chip = page.getByRole('link', { name: /Angemeldet als/ })
         await expect(chip).toBeVisible({ timeout: 20_000 })
         await waitForEvilImgGone(page)
 
@@ -427,6 +436,7 @@ async function openSpacesMitRouten(page: Page, extra: (p: Page) => Promise<void>
     const routes = await armImageRoutes(page)
     await extra(page)
     await loginNsec(page, NSEC)
+    await page.goto('/bereich/chat')
     return routes
 }
 
@@ -490,7 +500,9 @@ test('Meetup-Kachel: auch das Original scheitert (500/500) → die Länderflagge
         })
     })
 
-    await page.getByRole('button').filter({ hasText: 'Meetup-Räume entdecken' }).click()
+    // P7: the row „Meetup-Räume entdecken" is gone with D2; the focus mode it navigated to
+    // is not (`?rt=meetups`). The tile under test is the same one.
+    await page.goto('/bereich/chat?rt=meetups')
     const kachel = tile(page, name)
     await expect(kachel).toBeVisible({ timeout: 15_000 })
 

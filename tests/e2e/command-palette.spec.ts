@@ -31,9 +31,22 @@ const visibleSection = (page: Page, key: string) => page.locator(`[data-palette-
 async function openApp(page: Page): Promise<void> {
     await useZooid(page)
     await loginNsec(page, NSEC)
-    // `.first()`: ab `xl` trägt sowohl die Rail-Fußzeile als auch die Bühne den
-    // Space-Namen — beide „Zooid Test Space", ein striktes `getByText` wäre dort
-    // mehrdeutig.
+    /*
+     * ── Why this goes to the room list first (P4) ────────────────────────────────
+     *
+     * Since P2 a login lands on `/start` (`NostrAuthController` → `group.start`,
+     * commit 60e594d), and Start shows the greeting, the pins and the area tiles — NOT
+     * the space name. The wait below therefore ran into its 15 s timeout on every one of
+     * these cases; measured on this branch before P4 touched anything of the palette: 18
+     * of 22 red, all of them in `openApp`, all with `element(s) not found`.
+     *
+     * `/bereich/chat` is where the space name lives, and it is where the palette's ROOM
+     * rows come from — so this is not merely a repaired precondition, it is the state
+     * these cases assume anyway.
+     */
+    await page.goto('/bereich/chat')
+    // `.first()`: from `xl` on both the rail footer and the stage carry the space name —
+    // both „Zooid Test Space", so a strict `getByText` would be ambiguous there.
     await expect(page.getByText('Zooid Test Space').first()).toBeVisible({ timeout: 15_000 })
 }
 
@@ -265,7 +278,7 @@ test('Ohne Eingabe: Räume + Aktionen, nie leer — Mitglieder/Spaces erst mit E
     await expect(paletteEmpty(page)).toBeHidden()
 })
 
-test('Mit Eingabe: alle vier Sektionen, feste Reihenfolge Räume · Mitglieder · Spaces · Aktionen', async ({ page }) => {
+test('Mit Eingabe: ALLE Sektionen, feste Reihenfolge — seit P5 samt „Zusagen"', async ({ page }) => {
     await openApp(page)
     await openPaletteViaKeyboard(page)
 
@@ -279,12 +292,26 @@ test('Mit Eingabe: alle vier Sektionen, feste Reihenfolge Räume · Mitglieder �
     await expect(heading(page, 'spaces')).toBeVisible()
     await expect(heading(page, 'actions')).toBeVisible()
 
-    // Reihenfolge im DOM (nicht nur Sichtbarkeit): Räume vor Mitgliedern vor
-    // Spaces vor Aktionen.
+    /*
+     * Order in the DOM (not merely visibility). Since P4 the four Portal sections (D6) sit
+     * between the spaces and the actions: what a visitor knows (rooms, members, spaces)
+     * first, what he wants to FIND next, and the always-identical actions last. The same
+     * order is pinned welshman-free in `paletteItems.test.ts` — here it is measured on the
+     * rendered document, which is the only place a Blade block could reorder it.
+     *
+     * The Portal HEADINGS are not asserted as visible above: their rows come from
+     * `/suche/portal-index`, and this hermetic stack has no Portal — the four sections
+     * therefore stay empty here, and their behaviour with data is measured in
+     * `palette-portal.spec.ts` against a stubbed index.
+     */
     const order = await page
         .locator('[data-palette-heading]')
         .evaluateAll((els) => els.map((el) => el.getAttribute('data-palette-heading')))
-    expect(order).toEqual(['rooms', 'members', 'spaces', 'actions'])
+    // `zusagen` joined the list in P5 (the RSVP action of D12) and sits directly before
+    // the always-identical actions — it IS one, just one that carries rows of its own.
+    expect(order).toEqual([
+        'rooms', 'members', 'spaces', 'meetups', 'events', 'courses', 'lecturers', 'zusagen', 'actions',
+    ])
 })
 
 test('Treffer: Räume, Mitglieder und Aktionen liefern konkrete, benannte Zeilen', async ({ page }) => {
@@ -458,8 +485,15 @@ test('Alt+↑/↓ wechselt weiterhin den Raum über die Rail (unverändert von P
     // Seiten-Überschrift von oben — die kommt aus einer anderen Quelle) UND eine zweite.
     // Erst dann ist `activeTargetId` sicher in `targets` auffindbar und `next` zeigt
     // wirklich auf einen ANDEREN Raum.
-    await expect(page.getByRole('button', { name: 'Willkommen' })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByRole('button', { name: 'Allgemein' })).toBeVisible({ timeout: 15_000 })
+    /*
+     * `exact: true`, and that is not cosmetic: every room row has a settings button next to
+     * it whose label READS „Einstellungen für Willkommen" — a substring match resolves to
+     * two elements and Playwright fails in strict mode. The case never reached this line
+     * before P4 (its precondition timed out in `openApp`, see there), so the ambiguity had
+     * never been seen.
+     */
+    await expect(page.getByRole('button', { name: 'Willkommen', exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Allgemein', exact: true })).toBeVisible({ timeout: 15_000 })
 
     await page.keyboard.press('Alt+ArrowDown')
     await expect(page).toHaveURL(/\/rooms\/(?!welcome$)/, { timeout: 10_000 })
@@ -479,10 +513,23 @@ test.describe('Mobil', () => {
         await expect(paletteInput(page)).toBeFocused()
     })
 
-    test('Kein ⌘K-Versprechen: kein Rail-Kürzel, keine Kürzel-Zeile in der Palette', async ({ page }) => {
+    test('no ⌘K promise on a phone: nothing visible claims it, and no shortcut row in the palette', async ({ page }) => {
         await openApp(page)
 
-        await expect(page.locator('[aria-keyshortcuts="Meta+K Control+K"]')).toHaveCount(0)
+        /*
+         * **Visibility, not presence — since P6.** The command bar (D10) stands in the
+         * document with `hidden … xl:flex` and carries the ⌘K field; below `xl` it is
+         * `display:none` and therefore neither in the accessibility tree nor reachable by
+         * keyboard. That is exactly this case's promise: on a phone no key combination is
+         * claimed that does not exist there.
+         *
+         * Until P6 this was `toHaveCount(0)`. Same statement while the only ⌘K element
+         * hung in an `x-if` of the rail — now that the bar is hidden by CSS, the count
+         * measures the CONSTRUCTION instead of the promise.
+         */
+        const kuerzel = page.locator('[aria-keyshortcuts="Meta+K Control+K"]')
+        const sichtbar = await kuerzel.evaluateAll((els) => els.filter((el) => el.checkVisibility()).length)
+        expect(sichtbar, 'auf 390 px darf kein Element ⌘K versprechen').toBe(0)
 
         await page.locator('[data-palette-open]').click()
         await expect(paletteDialog(page)).toBeVisible({ timeout: 10_000 })
@@ -541,13 +588,13 @@ async function paletteBackgroundColors(page: Page): Promise<{ card: string; item
 
 /** Theme über die Einstellungen setzen (wie `theme.spec.ts`), dann zur Palette. */
 async function setThemeAndOpenPalette(page: Page, radioLabel: 'Hell' | 'Dunkel' | 'Automatisch'): Promise<void> {
-    await page.goto('/settings/space')
+    await page.goto('/ich/einstellungen')
     await expect(page.getByRole('heading', { name: 'Darstellung' })).toBeVisible({ timeout: 15_000 })
     await page.locator(`ui-radio[aria-label="${radioLabel}"]`).click()
 
     // Persistiert über `flux.appearance` (localStorage) + flackerfreies Head-Skript
     // (`@fluxAppearance`) — ein voller Seitenwechsel reicht, kein Reload nötig.
-    await page.goto('/spaces')
+    await page.goto('/bereich/chat')
     await expect(page.getByText('Zooid Test Space').first()).toBeVisible({ timeout: 15_000 })
     await openPaletteViaKeyboard(page)
 }

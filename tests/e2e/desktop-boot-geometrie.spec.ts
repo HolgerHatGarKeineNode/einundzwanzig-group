@@ -212,8 +212,8 @@ const BUEHNE_PX = BREITE - RAIL_SPUR_PX
 type Mass = {
     mainX: number
     mainW: number
-    karteW: number
-    gekuerzt: boolean
+    /** The content cap inside the stage (`xl:max-w-[62rem]`) — the second, derived width. */
+    inhaltW: number
     railKnoten: number
     skelettKnoten: number
 }
@@ -221,9 +221,21 @@ type Mass = {
 /**
  * Der Zustand der Bühne, aus dem LEBENDEN DOM.
  *
- * **Fail-closed:** fehlt die Bühne oder die Ortskarten-Leiste, wirft die Sonde. Ein
- * Test, der „nicht gekürzt" meldet, weil er gar keine Beschriftung gefunden hat, prüft
- * die leere Menge — die Bauform, die in diesem Haus schon Beweise ausgehöhlt hat.
+ * **Fail-closed:** without the stage or its content cap the probe throws. A test reporting
+ * "nothing moved" because it found nothing at all measures the empty set — the shape that
+ * has hollowed out proofs in this house before.
+ *
+ * ── What this probe measured until P2, and why that half is gone ────────────────────
+ * The second size was the Ortskarten strip: its width and whether its label was clipped
+ * ("C…" in the screenshot that started all this). **The Ortskarten were deleted with P2**
+ * (D2) and `[data-ortskarte]` exists in no markup any more — so the probe would have thrown
+ * unconditionally and this case would have been red on every run without saying anything
+ * about the stage.
+ *
+ * Its place is taken by the stage's **content cap** (`xl:max-w-[62rem]` in
+ * `app-shell.blade.php`): a server-rendered child of `#buehne` that stands on every surface
+ * and whose width is DERIVED from the stage width. It does what the card did — it collapses
+ * in the failure case — and it hangs on no relay data.
  *
  * `sichtbar()` statt bloßer Existenz: der Platzhalter bleibt nach dem Boot im DOM und
  * wird nur per `x-show` auf `display:none` gesetzt. Ein Zählen der KNOTEN meldete ihn
@@ -235,13 +247,9 @@ async function messen(page: Page): Promise<Mass> {
         if (!main) {
             throw new Error('Keine Bühne (#buehne) im DOM — die Sonde misst nichts.')
         }
-        const karte = document.querySelector('[data-ortskarte]') as HTMLElement | null
-        if (!karte) {
-            throw new Error('Keine Ortskarten-Leiste im DOM — die Sonde misst nichts.')
-        }
-        const name = karte.querySelector('[data-ortskarte-name]') as HTMLElement | null
-        if (!name) {
-            throw new Error('Ortskarte ohne [data-ortskarte-name] — Markup umgebaut?')
+        const deckel = main.firstElementChild as HTMLElement | null
+        if (!deckel) {
+            throw new Error('Die Bühne hat keinen Inhaltsdeckel — die Sonde misst nichts.')
         }
         const sichtbar = (wahl: string): number =>
             [...document.querySelectorAll<HTMLElement>(wahl)].filter((el) => el.offsetParent !== null).length
@@ -251,8 +259,7 @@ async function messen(page: Page): Promise<Mass> {
         return {
             mainX: Math.round(r.x * 100) / 100,
             mainW: Math.round(r.width * 100) / 100,
-            karteW: Math.round(karte.getBoundingClientRect().width * 100) / 100,
-            gekuerzt: name.scrollWidth > name.clientWidth,
+            inhaltW: Math.round(deckel.getBoundingClientRect().width * 100) / 100,
             railKnoten: sichtbar('[data-rail]'),
             skelettKnoten: sichtbar('[data-rail-skelett]'),
         }
@@ -261,7 +268,15 @@ async function messen(page: Page): Promise<Mass> {
 
 type Kasten = { y: number; h: number; w: number }
 
-/** Die vier Blöcke einer Spalte-1-Fläche (Kopf · Suchfeld · Liste · Fußzeile). */
+/**
+ * The THREE blocks of a column-1 surface (head · search field · list).
+ *
+ * **Until P6 there were four** — the fourth was the footer, which went with the command bar
+ * (the reasoning stands where it stood, in `desktop-rail.blade.php`). The number stays EXACT
+ * and does not become an upper bound: a column with a fourth block is a different column,
+ * and the placeholder would have to bring it along — otherwise the difference is a jump at
+ * boot.
+ */
 async function bloecke(page: Page, wahl: string): Promise<Kasten[]> {
     return page.evaluate((w) => {
         const el = document.querySelector(w) as HTMLElement | null
@@ -269,8 +284,8 @@ async function bloecke(page: Page, wahl: string): Promise<Kasten[]> {
             throw new Error(`${w} fehlt — die Sonde misst nichts.`)
         }
         const kinder = [...el.children]
-        if (kinder.length !== 4) {
-            throw new Error(`${w} hat ${kinder.length} Blöcke statt 4 — Aufbau geändert, der Vergleich wäre sinnlos.`)
+        if (kinder.length !== 3) {
+            throw new Error(`${w} hat ${kinder.length} Blöcke statt 3 — Aufbau geändert, der Vergleich wäre sinnlos.`)
         }
 
         return kinder.map((k) => {
@@ -303,7 +318,7 @@ async function vorDemBoot(page: Page, { verzugMs = 2500, ohneSpaceMetadaten = fa
         await new Promise((r) => setTimeout(r, verzugMs))
         await route.continue()
     })
-    await page.goto('/articles', { waitUntil: 'commit' })
+    await page.goto('/bereich/artikel', { waitUntil: 'commit' })
 }
 
 // ── Der Kernbeweis ──────────────────────────────────────────────────────────────────
@@ -324,8 +339,10 @@ test('KERNBEWEIS: die Bühne hat vor dem Alpine-Boot dieselbe Geometrie wie dana
     expect(vorher.mainW).toBe(1120)
     expect(vorher.mainX).toBe(RAIL_SPUR_PX)
     expect(vorher.mainW).toBe(BUEHNE_PX)
-    // Die Beschriftung der Ortskarte passt — genau sie war im Screenshot „C…".
-    expect(vorher.gekuerzt).toBe(false)
+    // And the derived size: the stage's content cap stands on its own width, not on that of a
+    // 320 px track. The value is held against the state AFTER the boot below and against the
+    // failure case in the negative control — the number itself stands there.
+    expect(vorher.inhaltW).toBeGreaterThan(900)
 
     // NACH dem Boot: die Rail ersetzt den Platzhalter, und NICHTS bewegt sich.
     await page.waitForSelector('[data-rail]')
@@ -337,8 +354,7 @@ test('KERNBEWEIS: die Bühne hat vor dem Alpine-Boot dieselbe Geometrie wie dana
     // Zahlengleich, nicht „ungefähr". Ein halber Pixel Unterschied wäre ein Sprung.
     expect(nachher.mainX).toBe(vorher.mainX)
     expect(nachher.mainW).toBe(vorher.mainW)
-    expect(nachher.karteW).toBe(vorher.karteW)
-    expect(nachher.gekuerzt).toBe(false)
+    expect(nachher.inhaltW).toBe(vorher.inhaltW)
 })
 
 test('NEGATIVKONTROLLE: dieselbe Sonde sieht den Fehler, wenn man das alte Markup wiederherstellt', async ({
@@ -354,7 +370,12 @@ test('NEGATIVKONTROLLE: dieselbe Sonde sieht den Fehler, wenn man das alte Marku
 
     const wirkung = await page.evaluate(() => {
         const skelett = document.querySelector('[data-rail-skelett]')
-        const buehne = document.querySelector('#buehne')?.parentElement
+        // The TRACK-bearing wrapper, addressed by its class and not by `parentElement`: since
+        // P6 there is one wrapper more between `#buehne` and the grid item (it gives the
+        // remaining height to the pages, see `app-frame.blade.php`), and a hop count would
+        // silently grab the wrong node — the mutation would then miss and this control would
+        // report a hole that is not there.
+        const buehne = document.querySelector('#buehne')?.closest('[class*="xl:col-start-2"]')
         if (!skelett || !buehne) {
             throw new Error('Vorzustand nicht herstellbar — Platzhalter oder Bühnen-Hülle fehlt.')
         }
@@ -371,26 +392,23 @@ test('NEGATIVKONTROLLE: dieselbe Sonde sieht den Fehler, wenn man das alte Marku
 
     const kaputt = await messen(page)
 
-    // Genau der gemeldete Zustand: Bühne in der Rail-Spur, Text gekürzt.
+    // Exactly the reported state: the stage sits in the rail's track.
     expect(kaputt.mainX).toBe(0)
     expect(kaputt.mainW).toBe(320)
-    expect(kaputt.gekuerzt).toBe(true)
-    // ── Die Kartenbreite: 80 → 77,33 (P2, 2026-08-26) ────────────────────────
-    // Diese Zahl beschreibt NICHT den Fehler, sondern eine FOLGE der Bühnen-
-    // Polsterung, und die ist mit P2 stetig geworden: `xl:px-8` (feste 32 px) ist
-    // `xl:px-[clamp(2rem,2.5vw,3rem)]` gewichen, weil die alte zweite Stufe
-    // `2xl:px-12` den Inhaltsdeckel bei 1536 px um 31 px FALLEN liess.
+    // ── And the derived size falls with it ───────────────────────────────────
+    // Until P2 that was the Ortskarten width (80 → 77.33 px, derivation in this
+    // file's history); the cards are deleted, what is measured now is the stage's
+    // content cap.
     //
-    // Nachgerechnet bei den 1440 px dieses Laufs: 2,5 vw sind 36 px je Seite, die
-    // Bühne im kaputten Zustand ist 320 px breit → 320 − 72 = 248 px Inhalt,
-    // geteilt auf drei Karten mit 8 px Rinne: (248 − 16) / 3 = 77,33.
-    // Vorher mit 32 px Polster: (320 − 64 − 16) / 3 = 80.
+    // Recomputed at this run's 1440 px: the stage padding is
+    // `clamp(2rem, 2.5vw, 3rem)` = 36 px per side, the stage in the broken state is
+    // 320 px wide → 320 − 72 = **248 px** of content. In the correct state the cap
+    // binds somewhere at or below 1048 px (1120 − 72), which is what the core proof
+    // above asserts as `> 900`.
     //
-    // Die Zusage dieser Kontrolle ist unberührt — sie lautet „dieselbe Sonde sieht
-    // den Fehler", und das tun die drei Assertions darüber unverändert. Die Zahl
-    // wird trotzdem exakt festgehalten statt auf ein `< 100` aufgeweicht: eine
-    // Schwelle hier verlöre die Fähigkeit, eine ZWEITE Layout-Änderung zu melden.
-    expect(kaputt.karteW).toBe(77.33)
+    // The number is pinned exactly rather than softened to a `< 300`: a threshold
+    // here would lose the ability to report a SECOND layout change.
+    expect(kaputt.inhaltW).toBe(248)
 })
 
 /**
@@ -441,7 +459,25 @@ async function vergleich(
     return { platzhalter, rail }
 }
 
-test('Platzhalter und echte Rail sind Block für Block dimensionsgleich — MIT Workspace', async ({ page }) => {
+/**
+ * **The dead port has to be declared, and this is why.**
+ *
+ * `ohneSpaceMetadaten: true` puts the space relay on `ws://localhost:39999` — a port nothing
+ * listens on, which is exactly the state these two cases need: while the metadata are
+ * missing, `space?.description` is falsy and the rail's head has the height the server can
+ * predict. The relay guard sees that socket and counts it as a connection outside the
+ * worker's own ports, which is its job: a run against a foreign relay proves nothing.
+ *
+ * Measured on this branch and NOT caused by P6: with the old, unmodified spec the same
+ * violation appears (`Verstöße: ws://localhost:39999/`), next to the block-count failure that
+ * IS P6's. The guard's own message names the remedy — declare the socket in the test.
+ */
+const erlaubeToterPort = (waechter: { erlaube: (...urls: string[]) => void }): void => {
+    waechter.erlaube('ws://localhost:39999/')
+}
+
+test('Platzhalter und echte Rail sind Block für Block dimensionsgleich — MIT Workspace', async ({ page, relayWaechter }) => {
+    erlaubeToterPort(relayWaechter)
     // Die Bühne stünde auch dann richtig, wenn der Platzhalter innen ganz anders aussähe
     // — die Spur ist ja fest. Diese Zusage ist eine andere: beim Austausch soll sich auch
     // INNERHALB der Spalte nichts verschieben, sondern nur Balken zu Schrift werden.
@@ -451,14 +487,17 @@ test('Platzhalter und echte Rail sind Block für Block dimensionsgleich — MIT 
 
     expect(rail).toEqual(platzhalter)
     // Und die Zahlen selbst, damit ein gemeinsamer Umbau beider Seiten auffällt statt
-    // stillschweigend „gleich" zu bleiben. Kopf 60 · Suchfeld 36 · Liste 456 · Fußzeile
-    // 340 (vier Flächenzeilen, drei Nav-Zeilen, Profilzeile).
-    expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 456, 340])
+    // stillschweigend „gleich" zu bleiben. Head 60 · search field 36 · list the rest.
+    // **Since P6 there are three blocks** (the footer carried 340 px until then, see the head
+    // of this file): the list is the only surface with `flex-1`, so it takes everything the
+    // footer gave up — 900 − 60 − 36 − 8 (`mb-2`) = 796.
+    expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 796])
 })
 
 testOhneWorkspace(
     'Platzhalter und echte Rail sind Block für Block dimensionsgleich — OHNE Workspace',
-    async ({ page }) => {
+    async ({ page, relayWaechter }) => {
+        erlaubeToterPort(relayWaechter)
         // Der Mangel, den diese Zusage festnagelt: der Platzhalter schrieb die
         // Forge-Zeile der Fußzeile unbedingt hin, `desktop-rail.blade.php` gated sie mit
         // `@if (config('group.workspace_url'))`. In einer Installation ohne Workspace war
@@ -474,151 +513,101 @@ testOhneWorkspace(
         const { platzhalter, rail } = await vergleich(page)
 
         expect(rail).toEqual(platzhalter)
-        // 302 = 340 − 36 (`min-h-9`) − 2 (`mt-0.5`): genau die fehlende Forge-Zeile.
-        // Die Liste bekommt die 38 px, weil sie die einzige Fläche mit `flex-1` ist.
-        expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 494, 302])
+        // **Since P6 this configuration is numerically identical to the one above**, and that
+        // is no loss of statement: the configuration dependency sat in the FOOTER (its forge
+        // row hung on `workspace_url`), and the footer is gone. What is still measured here is
+        // exactly that — the column has the same block structure WITHOUT a workspace, a
+        // promise a configuration can only move again once somebody introduces a conditional
+        // block. Then this case goes red and the one above does not.
+        expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 796])
     },
 )
 
 /**
  * Die Fensterhöhe, ab der die Liste die 4 px des gewachsenen Kopfes VOLLSTÄNDIG federt.
  *
- * As ONE constant, because it stood as the literal `418` in three places — the case list,
- * the `teilweise` branch and the prose — and the footer has now moved it twice. Three
- * copies of a number that moves with every footer row are two copies too many.
+ * **P6 pulled it from 456 px down to 116 px, and the reason is the deleted footer.** The
+ * boundary is the space the column needs at least once the head has grown:
  *
- * The value is not asserted from this constant alone: the two cases straddling it
- * (`FEDER_GRENZE_PX` = alles, `FEDER_GRENZE_PX - 1` = teilweise) only both pass at the
- * TRUE boundary, so the run measures it rather than trusting the arithmetic.
+ *     64 (head WITH description) + 36 (search field) + 8 (`mb-2`) + 8 (the list's `pb-2`)
+ *   = **116 px**
+ *
+ * That sum used to carry the footer's 340 px as well. The RULE is unchanged — the list is the
+ * only surface with `flex-1`, it springs as long as it has play — and that it survived two
+ * rebuilds untouched is the reason it is written as a formula rather than as a table of
+ * heights.
+ *
+ * The value is not claimed from this constant: the two cases straddling it
+ * (`FEDER_GRENZE_PX` = everything, `FEDER_GRENZE_PX - 1` = partly) only both pass at the TRUE
+ * boundary, so every run re-measures it.
+ *
+ * ── What went with the footer, in terms of what can be observed ─────────────────────
+ * The third configuration ("nothing": more than 4 px are missing, the list stands on its
+ * floor) hung on a movable block BELOW the list. Without a footer there is nothing below the
+ * list that could travel — what is left is the list itself, which stops shrinking, and an
+ * overflow the column clips. That configuration therefore stands below as a case of its own,
+ * with the promise that holds today: the list stays on its floor and the column overflows
+ * instead of squeezing.
  */
-const FEDER_GRENZE_PX = 456
+const FEDER_GRENZE_PX = 116
 
 for (const { hoehe, gibtDieListeAb } of [
     { hoehe: 900, gibtDieListeAb: 'alles' },
     { hoehe: FEDER_GRENZE_PX, gibtDieListeAb: 'alles' },
     { hoehe: FEDER_GRENZE_PX - 1, gibtDieListeAb: 'teilweise' },
-    { hoehe: 360, gibtDieListeAb: 'nichts' },
 ] as const) {
     test(`die Space-Beschreibung ist die eine Höhe, die der Server nicht kennt — 1440×${hoehe}`, async ({ page }) => {
-        // `x-show="space?.description"` hängt an einem Relay-Datum. Kein
-        // server-gerenderter Platzhalter kann das vorhersagen, und deshalb reserviert er
-        // die sichere UNTERGRENZE statt zu raten. Was bleibt, ist eine Bewegung — und
-        // die Richtung ist die Zusage: der Kopf darf wachsen, wenn die Beschreibung
-        // eintrifft, aber nie schrumpfen.
+        // `x-show="space?.description"` hangs on relay data. No server-rendered placeholder
+        // can predict that, which is why it reserves the safe LOWER BOUND instead of guessing.
+        // What is left is a movement — and its direction is the promise: the head may grow
+        // when the description arrives, never shrink.
         //
-        // ── WOHIN die 4 px gehen, hängt an der Fensterhöhe ──────────────────────────
-        // NACHGEZOGEN 2026-08-26 (P4, Typo-Leiter): der Betrag war **4,8 px** und ist
-        // jetzt **4,0**. Die Beschreibungszeile der Rail trug `text-[0.7rem]`
-        // (Zeilenbox 16,8 px) und trägt seit der Zusammenlegung auf vier Schriftstufen
-        // `text-xs` (16 px). Dadurch verschwindet die Nachkommastelle aus ALLEN Zahlen
-        // dieses Tests — und mit ihr der Grund, warum 1440×380 einmal der Teil-Fall war:
-        // die Grenze lag bei 380,8 px und liegt jetzt bei glatt 380. Bei 380 federt die
-        // Liste seither VOLLSTÄNDIG. Der Teil-Fall ist nicht verschwunden, er ist einen
-        // Pixel gewandert; damit die Abdeckung nicht still verlorengeht, läuft er hier
-        // als 1440×379 weiter (gemessen: 376 und tiefer = „nichts", 377–379 = Teil-Fall,
-        // 380 und höher = „alles").
+        // ── WHERE the 4 px go depends on the window height ─────────────────────────
+        // The amount was 4.8 px once (the description line in `text-[0.7rem]`) and has been a
+        // flat 4.0 since P4's type scale. The BOUNDARY, by contrast, has moved three times,
+        // every time with the footer: 380 → 418 (the bookmarks row, P2 of this plan) → 456
+        // (the "Verschlüsselt" row) → **116** (P6: the footer is gone altogether). The rule
+        // survived all three moves untouched, which is why it stands as a formula at
+        // `FEDER_GRENZE_PX` and not as a table.
         //
-        // MOVED AGAIN 2026-09-04, and this time not by a fraction: the boundary was at
-        // **418 px**, because the footer grew by 38 px (the bookmarks row of P2, see the
-        // head of this file). The 380 in the paragraph above is history — what carries
-        // the number today is the formula and the measured series below. The four cases
-        // moved with it: 418 was the boundary, 417 the partial case, 360 stays the deep
-        // one. Nothing about the RULE changed, only the height at which it kicks in.
+        // The measured series of 2026-09-04 (twelve heights around the 418 boundary of the
+        // day) stood here and lost its subject with P6: every height in it now lies far above
+        // the boundary and springs fully. It is deliberately NOT rebased — a shifted table
+        // would claim a measurement nobody ran. What pins the boundary today are the two
+        // cases straddling it in this very loop.
         //
-        // AND AGAIN 2026-09-05, by the same 38 px and for the same kind of reason: the
-        // „Verschlüsselt" row is the fourth area row of the footer. The boundary is now
-        // **456 px**, and it lives in `FEDER_GRENZE_PX` instead of as a literal in three
-        // places. That the rule survived two moves untouched is the point of writing it
-        // as a formula rather than as a table of heights.
-        //
-        // Zwei Fassungen dieses Absatzes waren vorher falsch, und beide auf dieselbe
-        // Weise: sie behaupteten mehr, als gemessen war.
-        //
-        // Zuerst stand hier „die Fußzeile hängt am unteren Rand einer `h-dvh`-Spalte,
-        // ihre y-Position ist von der Kopfhöhe unabhängig" — unbedingt, und damit
-        // falsch. Dann eine Grenze von `60 + 36 + 264 + 8 = 368 px`, GERECHNET statt
-        // gemessen, und sie hält nicht: die Rechnung nimmt die Kopfhöhe VOR dem
-        // Wachsen und vergisst das `mb-2` des Suchfelds.
-        //
-        // Was wirklich gilt: die Liste ist die einzige Fläche mit `flex-1`, sie federt,
-        // SOLANGE sie Spiel hat, und ihr Boden ist das eigene `pb-2` (8 px). Der Platz,
-        // den die Spalte im gewachsenen Zustand braucht, ist
-        //
-        //     64 (Kopf MIT Beschreibung) + 36 (Suchfeld) + 8 (mb-2) + 340 (Fußzeile)
-        //   +  8 (pb-2 der Liste)                                         = **456 px**
-        //
-        // Ab da federt die Liste vollständig, darunter teilt sie sich die 4 px mit der
-        // Fußzeile, und sobald mehr als 4 px fehlen, wandert die Fußzeile ganz.
-        //
-        // Am gerenderten Element gemessen (2026-09-04, Sonde über zwölf Höhen; die Reihe
-        // vom 2026-08-21 stand bis dahin hier und lag um dieselben 38 px tiefer):
-        // IT STANDS AS HISTORY: every height in it is 38 px too low since 2026-09-05, and
-        // the series is deliberately NOT rebased. A shifted table would claim a
-        // measurement nobody ran.
-        //   1440×900  Kopf +4 · Liste −4 · Fußzeile-y ±0
-        //   1440×424  Kopf +4 · Liste −4 · Fußzeile-y ±0
-        //   1440×418  Kopf +4 · Liste −4 · Fußzeile-y ±0     ← die Grenze VON DAMALS
-        //   1440×417  Kopf +4 · Liste −3 · Fußzeile-y **+1**
-        //   1440×416  Kopf +4 · Liste −2 · Fußzeile-y **+2**
-        //   1440×415  Kopf +4 · Liste −1 · Fußzeile-y **+3**
-        //   1440×414  Kopf +4 · Liste ±0 · Fußzeile-y **+4**
-        //   1440×360  Kopf +4 · Liste ±0 · Fußzeile-y **+4**
-        //
-        // Der Rest bei 415–417 ist kein Rauschen, sondern genau der fehlende Betrag —
-        // das ist die Probe auf die Formel. Alle drei Lagen laufen hier als eigener
-        // Fall: eine Regel, die nur an einer Stelle geprüft ist, ist keine Regel,
-        // sondern ein Messpunkt, und zwei Stellen haben den Teilbereich dazwischen
-        // gerade übersehen.
-        //
-        // What pins the boundary TODAY is not that table but the two cases straddling
-        // `FEDER_GRENZE_PX` in this very loop: 456 asserts `fussWandert === 0`, 455
-        // asserts `fussWandert === 1`. Both hold only if the boundary is exactly 456, so
-        // every run re-measures it — that is why the constant may be written down at all.
-        //
-        // DIE ZUSAGE, die in ALLEN drei Lagen gilt und deshalb unten zuerst steht:
-        // was der Kopf gewinnt, geben Liste und Fußzeile zusammen ab. Nichts leckt
-        // woandershin, und keine Lage ist ein Sonderfall — nur die Aufteilung wandert.
+        // THE PROMISE that holds in both configurations, which is why it comes first below:
+        // what the head gains, the list gives up. Nothing leaks anywhere else.
         await page.setViewportSize({ width: BREITE, height: hoehe })
         await vorDemBoot(page)
         const { platzhalter, rail } = await vergleich(page, { wartetAufBeschreibung: true })
 
-        // Kopf: +4 px, in beiden Lagen. Der Wert steht als Literal da, damit stilles
-        // Wachsen auffällt. `toBeCloseTo` bleibt, obwohl der Betrag seit P4 ganzzahlig
-        // ist: die Toleranz von zwei Nachkommastellen ist eine Zehntel-Subpixel-Grenze
-        // und kostet nichts — sie hat vorher 64,8 − 60 = 4,799999999999997 aufgefangen,
-        // und der nächste Typo-Schritt kann die Nachkommastelle zurückbringen.
+        // Head: +4 px, in both configurations. The value stands as a literal so that silent
+        // growth shows up. `toBeCloseTo` stays although the amount has been integral since P4:
+        // a tolerance of two decimals is a tenth-of-a-subpixel bound and costs nothing — it
+        // used to catch 64.8 − 60 = 4.799999999999997, and the next step of the type scale can
+        // bring the decimal back.
         expect(rail[0].h - platzhalter[0].h).toBeCloseTo(4, 2)
         expect(rail[0].h).toBe(64)
-        // Das Suchfeld behält seine Höhe immer — es ist `shrink-0`.
+        // The search field always keeps its height — it is `shrink-0`.
         expect(rail[1].h).toBe(platzhalter[1].h)
-        // Und die Fußzeile ebenfalls: sie wird verschoben, nie gestaucht.
-        expect(rail[3].h).toBe(platzhalter[3].h)
 
-        // ERHALTUNG, in allen drei Lagen dieselbe Zeile: was der Kopf gewinnt, geben
-        // Liste und Fußzeile ZUSAMMEN ab. Vorher standen hier zwei Zweige mit je einer
-        // eigenen Zusage — und genau zwischen ihnen lag der Teilbereich, den keiner
-        // abdeckte. (Noch früher stand „kein Block wird kleiner"; auch das war falsch
-        // und wurde von der eigenen Messung widerlegt: die Liste MUSS abgeben.)
         const gewinnt = rail[0].h - platzhalter[0].h
         const listeGibtAb = platzhalter[2].h - rail[2].h
-        const fussWandert = rail[3].y - platzhalter[3].y
-        expect(listeGibtAb + fussWandert).toBeCloseTo(gewinnt, 2)
 
-        // Und die Aufteilung je Lage — das ist der Teil, der von der Fensterhöhe
-        // abhängt. Jede Lage nennt ihre Erwartung als Literal, damit ein stilles
-        // Verschieben zwischen den Lagen auffällt.
         if (gibtDieListeAb === 'alles') {
+            // CONSERVATION: the head gains exactly what the list gives up. Since P6 that is a
+            // SINGLE equation — before it the list and the footer shared the amount, and the
+            // range in between was the case two versions of this test had missed.
+            expect(listeGibtAb).toBeCloseTo(gewinnt, 2)
             expect(listeGibtAb).toBeCloseTo(4, 2)
-            expect(fussWandert).toBe(0)
-        } else if (gibtDieListeAb === 'teilweise') {
-            // 456 − 455 = 1 px fehlt der Spalte, genau der wandert.
-            expect(fussWandert).toBeCloseTo(FEDER_GRENZE_PX - hoehe, 2)
-            expect(listeGibtAb).toBeCloseTo(4 - (FEDER_GRENZE_PX - hoehe), 2)
         } else {
-            // Mehr als 4 px fehlen: die Liste steht auf ihrem Boden, die Fußzeile
-            // nimmt alles.
-            expect(rail[2].h).toBe(platzhalter[2].h)
-            expect(fussWandert).toBeCloseTo(4, 2)
+            // One pixel below the boundary: the list stands on its floor (`pb-2`) and can only
+            // give up 3 px. The fourth is missing from the column — it overflows, and the
+            // chassis clips that overflow (`xl:overflow-hidden` on the grid). That is the right
+            // failure direction: clipped at the bottom, not squeezed in the middle.
+            expect(listeGibtAb).toBeCloseTo(4 - (FEDER_GRENZE_PX - hoehe), 2)
+            expect(listeGibtAb).toBeLessThan(gewinnt)
         }
     })
 }
@@ -634,7 +623,8 @@ test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht',
     // `40 + 8 + 44 + 12` aus der Skala, ohne Nachkommastelle. Die 0,4 px waren
     // Animationsrauschen. Die y-Werte selbst stehen deshalb nicht mehr da: absolute
     // Höhen sind auf dieser Fläche keine belastbare Größe, und genau deshalb misst
-    // dieser Test gegen die Ortskarten-Leiste.
+    // this test measures against an anchor INSIDE the same transformed subtree — the
+    // Ortskarten strip until P2, the page header since they were deleted.
     //
     // Dieser Test braucht als einziger echte Artikel: ohne Bestand bleibt `isEmpty()`
     // wahr, der Filterkopf erscheint nie und der Vergleich hätte keinen zweiten Wert.
@@ -652,7 +642,7 @@ test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht',
     await page.setViewportSize({ width: BREITE, height: 900 })
     await useZooid(page)
     await loginNsec(page, NSEC)
-    await page.goto('/articles')
+    await page.goto('/bereich/artikel')
     await page.waitForSelector('[data-rail]')
 
     const lade = await page.evaluate(() => {
@@ -662,9 +652,14 @@ test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht',
         if (!gitter) {
             throw new Error('Kein sichtbares Lade-Skelett — die Sonde misst nichts.')
         }
-        const nav = document.querySelector('[data-ortskarte]')?.closest('nav') as HTMLElement | null
+        // The page header of this surface — inside the SAME `.page-enter` subtree as the
+        // list, which is the whole point of the anchor (see the reasoning at the bottom of
+        // this case). Until P2 the anchor was the Ortskarten nav; those are deleted (D2), so
+        // the probe would have thrown unconditionally and this case would have been red
+        // without saying anything about the list.
+        const nav = document.querySelector('#buehne header') as HTMLElement | null
         if (!nav) {
-            throw new Error('Kein Ortskarten-nav als Anker — die Sonde misst nichts.')
+            throw new Error('Kein Seitenkopf als Anker — die Sonde misst nichts.')
         }
 
         return {
@@ -680,9 +675,14 @@ test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht',
         if (!liste || liste.offsetParent === null) {
             throw new Error('Kein sichtbares Artikelraster — die Sonde misst nichts.')
         }
-        const nav = document.querySelector('[data-ortskarte]')?.closest('nav') as HTMLElement | null
+        // The page header of this surface — inside the SAME `.page-enter` subtree as the
+        // list, which is the whole point of the anchor (see the reasoning at the bottom of
+        // this case). Until P2 the anchor was the Ortskarten nav; those are deleted (D2), so
+        // the probe would have thrown unconditionally and this case would have been red
+        // without saying anything about the list.
+        const nav = document.querySelector('#buehne header') as HTMLElement | null
         if (!nav) {
-            throw new Error('Kein Ortskarten-nav als Anker — die Sonde misst nichts.')
+            throw new Error('Kein Seitenkopf als Anker — die Sonde misst nichts.')
         }
 
         return {
@@ -697,9 +697,9 @@ test('das Lade-Skelett der Artikelliste steht dort, wo die fertige Liste steht',
 
     // ── Warum hier ein ANKER-VERSATZ steht und keine Viewport-Höhe ──────────────────
     //
-    // Gemessen wird der Abstand zur Ortskarten-Leiste, nicht `getBoundingClientRect().y`.
-    // Der Grund ist `.page-enter` (`theme.css`): die ganze Insel — Überschrift,
-    // Ortskarten, Liste — läuft beim Seitenaufbau durch
+    // What is measured is the distance to the page header, not `getBoundingClientRect().y`.
+    // The reason is `.page-enter` (`theme.css`): the whole island — header, filter head,
+    // list — runs on page load through
     // `@keyframes page-in { from { transform: translateY(8px) } }` über 0,3 s. Eine
     // Viewport-Höhe misst also mit, WO in dieser Animation der Messpunkt gerade liegt,
     // und beide Messungen liegen zwangsläufig an verschiedenen Stellen: die erste kurz

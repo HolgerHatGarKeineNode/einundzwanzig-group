@@ -166,7 +166,7 @@ async function useWorkspace(page: Page): Promise<void> {
 }
 
 async function openRepo(page: Page): Promise<void> {
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
     await page.getByRole('tab', { name: 'Repositories' }).click()
     await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
     await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })

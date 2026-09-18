@@ -79,7 +79,7 @@ test('Liste: ein normaler Artikel UND ein Artikel mit d=draft-<ts> erscheinen BE
     })
 
     await loginToBoard(page)
-    await page.goto('/articles')
+    await page.goto('/bereich/artikel')
 
     await expect(page.getByRole('heading', { name: normalTitle, exact: true })).toBeVisible({ timeout: 20_000 })
     await expect(page.getByRole('heading', { name: draftTitle, exact: true })).toBeVisible({ timeout: 20_000 })
@@ -172,7 +172,7 @@ test('KERNBEWEIS P2: ein Wort NUR im Titel findet den Artikel — und es geht KE
 
     const artikelReqs = zaehleArtikelReqs(page)
     await loginToBoard(page)
-    await page.goto('/articles')
+    await page.goto('/bereich/artikel')
 
     const treffer = page.getByRole('heading', { name: trefferTitel, exact: true })
     const rest = page.getByRole('heading', { name: restTitel, exact: true })
@@ -238,7 +238,7 @@ test('Liste: eine Audio-Episode bekommt Plakette und Player aus dem imeta, ein B
     })
 
     await loginToBoard(page)
-    await page.goto('/articles')
+    await page.goto('/bereich/artikel')
 
     const folge = page.locator('article').filter({ has: page.getByRole('heading', { name: folgeTitel, exact: true }) })
     const galerie = page.locator('article').filter({ has: page.getByRole('heading', { name: bildTitel, exact: true }) })
@@ -822,34 +822,41 @@ test('Reader: „Erneut laden" wählt den Relay neu an — am Verbindungszähler
     console.log(`[p7-retry] Sockets=${probe.dials()} REQs=${probe.reqs()} (vor dem Retry: REQs=${before})`)
 })
 
-// ── Einstiege: /spaces-Zeile, Rail (Desktop), Befehlspalette ────────────────────────
+// ── Einstiege: Start-Kachel (mobil + Desktop), Befehlspalette ───────────────────────
+//
+// **P7: the same three promises, different carriers.** Until P2 the „Artikel lesen" row of
+// the discovery block on `/spaces` led here, and from `xl` the rail's footer did too — D2
+// and D10 deleted both. The entry is now the area tile on Start
+// (`data-start-bereich="artikel"`), the same surface at both widths, plus the palette.
+// What is measured is unchanged: that there is a CLICKABLE way and not only a route.
 
-test('Einstieg: /spaces zeigt die Zeile "Artikel lesen" und führt zu /articles', async ({ page }) => {
+test('entry: the area tile on Start leads to /bereich/artikel', async ({ page }) => {
     await loginToBoard(page)
-    await page.goto('/spaces')
+    await page.goto('/start')
 
-    const entry = page.getByRole('link', { name: 'Artikel lesen' })
+    const entry = page.locator('[data-start-bereich="artikel"]')
     await expect(entry).toBeVisible({ timeout: 20_000 })
     await entry.click()
-    await expect(page).toHaveURL(/\/articles$/)
+    await expect(page).toHaveURL(/\/bereich\/artikel$/)
 })
 
-test('Einstieg: die Desktop-Rail-Fußzeile trägt "Artikel" und führt zu /articles', async ({ page }) => {
+test('entry: the same tile carries from xl, where the rail footer used to stand', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await loginToBoard(page)
-    await page.goto('/spaces')
+    await page.goto('/start')
 
-    const rail = page.locator('[data-rail]')
-    await expect(rail).toBeVisible({ timeout: 20_000 })
-    const entry = rail.getByRole('link', { name: 'Artikel', exact: true })
+    // The bar stands — at this width it exists, and the tile next to it. The old version
+    // clicked into its footer; that footer is gone since P6 (three children).
+    await expect(page.locator('[data-rail]')).toBeVisible({ timeout: 20_000 })
+    const entry = page.locator('[data-start-bereich="artikel"]')
     await expect(entry).toBeVisible()
     await entry.click()
-    await expect(page).toHaveURL(/\/articles$/)
+    await expect(page).toHaveURL(/\/bereich\/artikel$/)
 })
 
-test('Einstieg: die Befehlspalette findet "Artikel" unter Aktionen und führt zu /articles', async ({ page }) => {
+test('entry: the command palette finds "Artikel" under actions and leads to /bereich/artikel', async ({ page }) => {
     await loginToBoard(page)
-    await page.goto('/spaces')
+    await page.goto('/bereich/chat')
     await expect(page.getByText('Zooid Test Space').first()).toBeVisible({ timeout: 15_000 })
 
     await page.keyboard.press('Meta+K')
@@ -862,5 +869,5 @@ test('Einstieg: die Befehlspalette findet "Artikel" unter Aktionen und führt zu
     await row.click()
 
     await expect(dialog).toBeHidden({ timeout: 10_000 })
-    await expect(page).toHaveURL(/\/articles$/)
+    await expect(page).toHaveURL(/\/bereich\/artikel$/)
 })

@@ -23,9 +23,9 @@ new #[Layout('group::einundzwanzig')] #[Title('EINUNDZWANZIG')] class extends Co
         <template x-if="pubkey">
             <div class="mt-8 space-y-2">
                 <div class="truncate rounded-tile bg-zinc-100 p-2 font-mono text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400" x-text="npub"></div>
-                <flux:button variant="primary" class="w-full" icon="arrow-right" :href="route('group.spaces')" wire:navigate>{{ __('Zu deinem Space') }}</flux:button>
+                <flux:button variant="primary" class="w-full" icon="arrow-right" :href="route('group.bereich.chat')" wire:navigate>{{ __('Zu deinem Space') }}</flux:button>
                 <div class="flex gap-2">
-                    <flux:button variant="ghost" size="sm" class="flex-1" :href="route('group.settings')" wire:navigate>{{ __('Einstellungen') }}</flux:button>
+                    <flux:button variant="ghost" size="sm" class="flex-1" :href="route('group.ich.einstellungen')" wire:navigate>{{ __('Einstellungen') }}</flux:button>
                     <flux:button variant="ghost" size="sm" class="flex-1" x-on:click="doLogout()">{{ __('Abmelden') }}</flux:button>
                 </div>
             </div>

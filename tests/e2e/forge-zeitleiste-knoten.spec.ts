@@ -100,7 +100,7 @@ async function melde(page: Page, groesse: { width: number; height: number }): Pr
 /** Die Übersicht mit ihrer Aktivitätsspur. */
 async function oeffneUebersicht(page: Page, groesse: { width: number; height: number }): Promise<void> {
     await melde(page, groesse)
-    await page.goto('/forge?tab=activity')
+    await page.goto('/bereich/forge?tab=activity')
     await expect(page.locator('[data-forge-activity]').first()).toBeVisible({ timeout: 30_000 })
 }
 

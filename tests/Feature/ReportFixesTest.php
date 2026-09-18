@@ -24,7 +24,7 @@ function authedSession(): array
 }
 
 test('🔴 @js(__(Space)) leakt nicht mehr roh in die Alpine-Expression (/spaces)', function () {
-    $html = $this->withSession(authedSession())->get(route('group.spaces'))->assertOk()->getContent();
+    $html = $this->withSession(authedSession())->get(route('group.bereich.chat'))->assertOk()->getContent();
 
     // Der Header-Titel bindet reaktiv den Space-Label mit lokalisiertem Fallback …
     expect($html)->toContain('space?.label');
@@ -57,7 +57,7 @@ test('🟠 Nav-Tab-Label wird zur Render-Zeit lokalisiert (Bug „Mehr" statt �
     // echter Client sie schickt — hier per Cookie (das sticht `Accept-Language`).
     $html = $this->withSession(authedSession())
         ->withUnencryptedCookie(SetLocale::COOKIE, 'en')
-        ->get(route('group.spaces'))->assertOk()->getContent();
+        ->get(route('group.bereich.chat'))->assertOk()->getContent();
 
     // Der Tab zeigt die ÜBERSETZUNG (nav-tab rendert {{ __($label) }}) …
     expect($html)->toContain('Settings');
@@ -72,7 +72,7 @@ test('🔴 Profiles-Endpunkt liefert CORS-Header für den Native-WebView-Origin'
 });
 
 test('🟡 Wallet „Nicht gesetzt" ist hinter profileReady gegated (kein Lade-Flash)', function () {
-    $html = $this->withSession(authedSession())->get(route('group.wallet'))->assertOk()->getContent();
+    $html = $this->withSession(authedSession())->get(route('group.bereich.wallet'))->assertOk()->getContent();
 
     // Der „Nicht gesetzt"-Hinweis erscheint erst nach aufgelöstem Profil, nicht
     // während des async Nachladens (sonst blitzt er kurz auf).

@@ -86,7 +86,7 @@ async function forge(page: Page, breite?: number): Promise<void> {
         await page.setViewportSize({ width: breite, height: 1000 })
     }
     await loginNsec(page, NSEC)
-    await page.goto('/forge')
+    await page.goto('/bereich/forge')
     // Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `loading` steht,
     // sind die Regionen per `x-show` aus und jede Messung liefe gegen 0 — grün,
     // ohne irgendetwas geprüft zu haben.

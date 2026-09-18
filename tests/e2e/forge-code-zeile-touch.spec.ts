@@ -94,7 +94,7 @@ async function ladeBaum(page: Page): Promise<void> {
         ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
     }, `${ZOOID_WS}/`)
     await loginNsec(page, NSEC)
-    await page.goto('/forge?tab=repos')
+    await page.goto('/bereich/forge?tab=repos')
     await page.waitForFunction(
         () => {
             const el = document.querySelector('[x-data^="nostrForge"]')

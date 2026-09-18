@@ -105,7 +105,7 @@ function alsMitgliedAufSeite(TestCase $t, string $route): TestResponse
 // ── Der Kernbeweis ──────────────────────────────────────────────────────────────────
 
 test('KERNBEWEIS: der Platzhalter steht genau einmal, VOR der Rail, und die Bühne nennt ihre Spur', function () {
-    $res = alsMitgliedAufSeite($this, 'group.articles')->assertOk();
+    $res = alsMitgliedAufSeite($this, 'group.bereich.artikel')->assertOk();
     $html = $res->getContent();
 
     // 1. Genau EINMAL. Zweimal wären zwei Grid-Items in derselben Zelle, und die
@@ -136,7 +136,7 @@ test('KERNBEWEIS: der Platzhalter steht genau einmal, VOR der Rail, und die Büh
 });
 
 test('der Platzhalter trägt kein bedienbares Element und ist für Hilfstechnik unsichtbar', function () {
-    $block = railSkelettHtml(alsMitgliedAufSeite($this, 'group.articles')->assertOk());
+    $block = railSkelettHtml(alsMitgliedAufSeite($this, 'group.bereich.artikel')->assertOk());
 
     // Für 250 ms zwanzig leere Tab-Stopps vor dem Inhalt wären schlimmer als der
     // Sprung, den der Platzhalter behebt (WCAG 2.4.3).
@@ -154,7 +154,7 @@ test('der Platzhalter trägt kein bedienbares Element und ist für Hilfstechnik 
 test('der Platzhalter steht auf jeder Fläche mit Chassis — nicht nur auf /articles', function () {
     // Eine Zusage über EINEN Ort ist keine: das Chassis ist `app-frame`, und das
     // trägt jede Fläche hinter dem Gate.
-    foreach (['group.articles', 'group.spaces', 'group.directory'] as $route) {
+    foreach (['group.bereich.artikel', 'group.bereich.chat', 'group.bereich.leute'] as $route) {
         $html = alsMitgliedAufSeite($this, $route)->assertOk()->getContent();
         expect(substr_count((string) $html, 'data-rail-skelett'))->toBe(1);
     }
@@ -191,90 +191,115 @@ test('auf dem Gerät (NativePHP) gibt es keinen Platzhalter', function () {
     // Breite. Ein iPad quer misst 1366 px und bekäme sonst eine Desktop-Spur.
     config(['nativephp-internal.running' => true]);
 
-    $html = alsMitgliedAufSeite($this, 'group.articles')->assertOk()->getContent();
+    $html = alsMitgliedAufSeite($this, 'group.bereich.artikel')->assertOk()->getContent();
 
     expect($html)->not->toContain('data-rail-skelett');
 });
 
-test('die Zeilen des Platzhalters folgen der KONFIGURATION, nicht einer Zahl', function () {
-    // ── Warum drei Längen und nicht die heutige Drei ────────────────────────────────
+test('both sides carry the SAME three layout blocks — coupled, not claimed twice', function () {
+    // ── What this case has measured, phase by phase ────────────────────────────────
     //
-    // Die Nav-Zeilen kamen als feste 3 im Markup und hängen jetzt an
-    // `config('group.nav')`. Eine Zusicherung `toBe(3)` wäre exakt so viel wert wie die
-    // feste 3 selbst: sie stimmte heute und bliebe grün, wenn jemand die Kopplung
-    // zurückdreht. Geprüft wird deshalb die KOPPLUNG — mehrere Längen, und je Länge
-    // muss der Platzhalter genau so viele Zeilen tragen wie die echte Rail.
+    // Until P2 it compared the NAV rows and the four AREA rows of the footer; P2 removed
+    // both and left it comparing the one row the footer still had, the identity. P6 removes
+    // the footer itself — the avatar sits in the command bar now
+    // (`command-bar.blade.php`) — so what is left to compare is the block structure.
     //
-    // `gap-2.5 rounded-tile px-2` ist der Fingerabdruck einer Nav-Zeile: die
-    // Flächenzeilen darüber (Artikel/Forge) tragen `gap-2`, der Space-Kopf trägt zwar
-    // `gap-2.5`, aber kein `rounded-tile`.
-    $zeile = fn (string $html): int => substr_count($html, 'gap-2.5 rounded-tile px-2');
+    // The PROMISE is unchanged and is still measured against the rail rather than against a
+    // second literal: what the rail renders in column 1, the placeholder reserves. Whoever
+    // adds a fourth block adds it on both sides in the same edit, otherwise the difference
+    // is a jump at boot (the most expensive one here was 38 px).
+    config(['nativephp-internal.running' => false]);
+    config(['group.workspace_url' => 'wss://buzz.test/']);
 
-    foreach ([2, 3, 5] as $anzahl) {
-        config(['group.nav' => array_fill(0, $anzahl, [
-            'key' => 'chat', 'route' => 'group.spaces', 'match' => 'group.spaces',
-            'icon' => 'chat-bubble-left-right', 'label' => 'Räume', 'gate' => 'nostr',
-        ])]);
-        config(['nativephp-internal.running' => false]);
+    $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+    $platzhalter = railSkelettHtmlAus($ganz);
+    $rail = str_replace($platzhalter, '', $ganz);
 
-        $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
-        $platzhalter = railSkelettHtmlAus($ganz);
-        $rail = str_replace($platzhalter, '', $ganz);
+    // The three blocks, counted by the class signature each of them carries in BOTH files —
+    // header (`pt-4 pb-3`), search field (`mx-3 mb-2`), scroller (`min-h-0 flex-1`). Not by
+    // counting direct children: that needs a parser in the server test, and the geometry
+    // half is measured in the browser anyway (`desktop-boot-geometrie.spec.ts` compares the
+    // rendered children block for block and throws on any count other than three).
+    $bloecke = fn (string $html): array => [
+        'kopf' => substr_count($html, 'shrink-0 items-center gap-2.5 px-4 pt-4 pb-3'),
+        'feld' => substr_count($html, 'mx-3 mb-2 flex shrink-0 items-center gap-1.5 rounded-tile'),
+        'liste' => substr_count($html, 'min-h-0 flex-1 overflow-'),
+    ];
 
-        // Beide Seiten lesen dieselbe Config — und zwar für JEDE geprüfte Länge.
-        expect($zeile($platzhalter))->toBe($anzahl);
-        expect($zeile($rail))->toBe($anzahl);
+    // Calibrated: every one of the three FINDS something on the rail side, so the equality
+    // below is not "0 === 0" three times over.
+    expect($bloecke($rail))->toBe(['kopf' => 1, 'feld' => 1, 'liste' => 1]);
+    expect($bloecke($platzhalter))->toBe($bloecke($rail));
+
+    // And the structure hangs on NO configuration. It used to do so twice (`workspace_url`
+    // for the forge row, `nav` for the tabs) — which is why this case runs through the very
+    // switch that used to move it.
+    foreach (['wss://buzz.test/', null] as $workspace) {
+        config(['group.workspace_url' => $workspace]);
+
+        $erneut = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+        $platzhalterErneut = railSkelettHtmlAus($erneut);
+
+        expect($bloecke($platzhalterErneut))->toBe(['kopf' => 1, 'feld' => 1, 'liste' => 1]);
+        expect($bloecke(str_replace($platzhalterErneut, '', $erneut)))->toBe(['kopf' => 1, 'feld' => 1, 'liste' => 1]);
     }
 });
 
-test('the placeholder reserves exactly as many footer area rows as the rail carries anchors', function () {
-    // The contract `rail-skelett.blade.php` states in prose and `desktop-boot-geometrie`
-    // measures in pixels: whoever adds a row to the rail footer adds it to the placeholder
-    // too. It has broken once already — the bookmarks row of P2 stood in the rail and not
-    // in the placeholder, worth a 38 px jump at boot (302 px vs. 264 px at 1440×900).
-    //
-    // Latched here as well as in the browser because the count is a SERVER decision
-    // (`@php($flaechen = config('group.workspace_url') ? … )`), so a Pest run catches it
-    // before an E2E run has to. Same principle as the nav-row test above: measure the
-    // COUPLING, not today's number — hence both configurations.
-    //
-    // The two sides are counted with DIFFERENT probes on purpose, because neither probe
-    // works on both sides:
-    //   · placeholder → the class fingerprint. It has no anchors, it is decoration.
-    //   · rail → `data-rail-fuss`. The fingerprint is NOT unique in the rail: the „Alle
-    //     Räume & Entdecken" link at the foot of the scroller carries the same class list
-    //     and is not a footer row. Counting it would have made this test read 5 and 4.
-    $flaechenzeilen = fn (string $html): int => substr_count($html, 'min-h-9 items-center gap-2 rounded-tile px-2');
-    $anker = fn (string $html): int => substr_count($html, 'data-rail-fuss="');
+test('the removed blocks stand on NEITHER of the two sides any more', function () {
+    // D2 is a hard cut, and a hard cut needs a latch: without one, one of these blocks would
+    // come back at the next opportunity, because "the rail has room after all".
+    config(['nativephp-internal.running' => false]);
+    config(['group.workspace_url' => 'wss://buzz.test/']);
 
-    foreach ([['wss://buzz.test/', 4], [null, 3]] as [$workspace, $erwartet]) {
-        config(['group.workspace_url' => $workspace]);
-        config(['nativephp-internal.running' => false]);
+    $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
+    $platzhalter = railSkelettHtmlAus($ganz);
+    $rail = str_replace($platzhalter, '', $ganz);
+    $railQuelle = (string) file_get_contents(
+        dirname(__DIR__, 2).'/packages/einundzwanzig-group/resources/views/components/desktop-rail.blade.php'
+    );
+    $skelettQuelle = (string) file_get_contents(
+        dirname(__DIR__, 2).'/packages/einundzwanzig-group/resources/views/components/rail-skelett.blade.php'
+    );
 
-        $ganz = Blade::render('<x-group::app-frame :rail="true">Inhalt</x-group::app-frame>');
-        $platzhalter = railSkelettHtmlAus($ganz);
-        $rail = str_replace($platzhalter, '', $ganz);
+    // 1. The four area rows of the old footer. Their anchor is unambiguous — that is exactly
+    //    why it was introduced (the labels occur several times on the same page).
+    expect(substr_count($rail, 'data-rail-fuss="'))->toBe(0);
 
-        $inDerRail = $anker($rail);
-        $imPlatzhalter = $flaechenzeilen($platzhalter);
+    // 2. The vertical set of nav tabs. Measured on the class signature of the rail form of
+    //    `nav-tab.blade.php` — and ADDITIONALLY at the source, because a missing CALL is the
+    //    only cause that counts here: the component may keep its rail form as long as nobody
+    //    calls it any more.
+    expect(substr_count($rail, 'gap-2.5 rounded-tile px-2'))->toBe(0);
+    expect(substr_count($platzhalter, 'gap-2.5 rounded-tile px-2'))->toBe(0);
+    expect($railQuelle)->not->toContain('<x-group::bottom-nav');
 
-        // CALIBRATION first, and only on the side that is the source of truth. Without
-        // it the promise below is satisfiable by two probes that both find nothing —
-        // `0 === 0` is an equality, not a measurement.
-        expect($inDerRail)
-            ->toBe($erwartet, "the rail renders {$inDerRail} footer anchors, expected {$erwartet}");
+    // 3. The bell. It led to `/updates`; the Postfach is a slot of the bottom bar and an icon
+    //    of the command bar now.
+    expect($rail)->not->toContain('flux:icon.bell');
+    expect($railQuelle)->not->toContain('icon.bell');
 
-        // THE PROMISE: the placeholder is measured AGAINST the rail, not against the same
-        // literal a second time. Two literals compared to a third are a constant checked
-        // against itself: they fall together when the row disappears, but they say
-        // nothing about the COUPLING that `rail-skelett.blade.php` promises in prose and
-        // `desktop-boot-geometrie.spec.ts` pays for in pixels.
-        expect($imPlatzhalter)->toBe(
-            $inDerRail,
-            "the placeholder reserves {$imPlatzhalter} area rows while the rail renders {$inDerRail} — that difference is a boot jump of ".
-            (abs($imPlatzhalter - $inDerRail) * 38).' px'
-        );
-    }
+    // 4. P6 — the footer itself, with the identity row that was its last content. Both
+    //    anchors are checked, because the row and its block died together and either one
+    //    coming back alone would be the same mistake.
+    expect(substr_count($rail, 'data-rail-fuss-profil'))->toBe(0);
+    expect(substr_count($platzhalter, 'data-rail-fuss-profil'))->toBe(0);
+    expect(substr_count($rail, 'border-t border-zinc-200 px-3 py-2'))->toBe(0);
+    expect(substr_count($platzhalter, 'border-t border-zinc-200 px-3 py-2'))->toBe(0);
+    // At the SOURCE as well, and in both files: a footer that renders only under a condition
+    // would be invisible to the rendered check above.
+    expect($railQuelle)->not->toContain('data-rail-fuss-profil');
+    expect($skelettQuelle)->not->toContain('data-rail-fuss-profil');
+    // The identity island is what made the footer expensive — it is gone from this column
+    // with it. Measured at the SOURCE and not in `$rail`: that string is the whole frame
+    // minus the placeholder, and the command bar in it carries the avatar legitimately
+    // (`me-avatar.blade.php` mounts `nostrAuth` there, as it does in every app header).
+    expect($railQuelle)->not->toContain('nostrAuth');
+
+    // POSITIVE CONTROL for the searches above: the class-signature style of measurement does
+    // see things in this rail. The row "Alle Räume & Entdecken" at the foot of the SCROLLER
+    // carries the same geometry class as the removed area rows and still stands there — so
+    // the measurement finds something, it only does not find the footer.
+    expect(substr_count($rail, 'min-h-9 items-center gap-2 rounded-tile px-2'))->toBeGreaterThan(0);
 });
 
 test('der Platzhalter bleibt unter einem Kilobyte auf der Leitung', function () {
@@ -294,7 +319,7 @@ test('der Platzhalter bleibt unter einem Kilobyte auf der Leitung', function () 
     // roh", und die Zahl war schon eine Runde später falsch (12.639), ohne dass sich an
     // der Aussage etwas geändert hätte. Was den Wert festhält, ist die Schranke
     // darunter, nicht der Kommentar.
-    $mit = (string) alsMitgliedAufSeite($this, 'group.articles')->assertOk()->getContent();
+    $mit = (string) alsMitgliedAufSeite($this, 'group.bereich.artikel')->assertOk()->getContent();
     $ohne = str_replace(railSkelettHtmlAus($mit), '', $mit);
 
     $aufDerLeitung = strlen((string) gzencode($mit, 6)) - strlen((string) gzencode($ohne, 6));
@@ -305,7 +330,7 @@ test('der Platzhalter bleibt unter einem Kilobyte auf der Leitung', function () 
 });
 
 test('das Lade-Skelett der Artikelliste trägt die Spaltenzahl der fertigen Liste', function () {
-    $html = (string) alsMitgliedAufSeite($this, 'group.articles')->assertOk()->getContent();
+    $html = (string) alsMitgliedAufSeite($this, 'group.bereich.artikel')->assertOk()->getContent();
 
     // Die Klassenliste steht ZWEIMAL in der Antwort: einmal am Lade-Skelett, einmal
     // am fertigen Raster. Genau das ist die Zusage — wechselte eines die Spurenzahl

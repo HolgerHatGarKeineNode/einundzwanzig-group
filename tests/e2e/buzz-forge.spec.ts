@@ -303,7 +303,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
 
     test('die Übersicht zeigt Kacheln, das Repo und eine Aktivitätszeile', async ({ page }) => {
         await useWorkspace(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
 
         // Die Kacheln erscheinen erst, wenn der Relay geantwortet hat — vorher
         // wäre eine `0` eine Falschaussage.
@@ -373,7 +373,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
      */
     test('der Projekte-Tab ist vollständig fort — Tab, Kachel und Panel', async ({ page }) => {
         await useWorkspace(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await expect(page.locator('[data-forge-tile="repos"]')).toBeVisible({ timeout: 30_000 })
 
         // Drei Tabs, und keiner davon heisst „Projekte".
@@ -404,7 +404,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         // Gemessen unter vierfacher Parallellast (vier gleichzeitige Docker-Stacks).
         test.setTimeout(90_000)
         await useWorkspace(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
 
@@ -475,7 +475,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
 
     test('ein Repository ohne Inhalt zeigt für Issues UND Pull Requests eine Leermeldung', async ({ page }) => {
         await useWorkspace(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: EMPTY_REPO_D }).first().click()
 
@@ -519,7 +519,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         test.setTimeout(120_000)
         await context.grantPermissions(['clipboard-read', 'clipboard-write'])
         await useWorkspace(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
@@ -563,7 +563,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
             ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = relay
             Object.defineProperty(navigator, 'clipboard', { configurable: true, get: () => undefined })
         }, BUZZ_URL)
-        await ohne.goto('/forge')
+        await ohne.goto('/bereich/forge')
         await ohne.getByRole('tab', { name: 'Repositories' }).click()
         await ohne.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(ohne.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
@@ -585,7 +585,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         const marke = `E2E Live ${randomUUID().slice(0, 8)}`
 
         await useWorkspace(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
@@ -650,7 +650,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
         const marke = `E2E Grab ${randomUUID().slice(0, 8)}`
 
         await useWorkspace(page)
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
@@ -725,7 +725,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
                 return send.call(this, data)
             }
         })
-        await page.goto('/forge')
+        await page.goto('/bereich/forge')
         await page.getByRole('tab', { name: 'Repositories' }).click()
         await page.locator('[data-forge-repo]').filter({ hasText: REPO_D }).first().click()
         await expect(page.getByRole('heading', { level: 1, name: REPO_D, exact: true })).toBeVisible({ timeout: 30_000 })
