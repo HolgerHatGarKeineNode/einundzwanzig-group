@@ -97,6 +97,18 @@
         ],
         "pre-package-uninstall": [
             "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"
+        ],
+        "test:feature": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan test tests/Feature"
+        ],
+        "test:unit": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan test tests/Unit"
+        ],
+        "test:browser": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan test tests/Browser"
         ]
     },
     "scripts-descriptions": {
