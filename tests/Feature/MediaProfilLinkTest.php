@@ -208,7 +208,9 @@ test('BEIDE head-Partials tragen __nostrMedia — sonst tut der Verweis auf eine
      */
     foreach ([
         'resources/views/partials/head.blade.php',
-        'packages/einundzwanzig-group/resources/views/partials/head.blade.php',
+        // The package head takes its boot globals from this partial, which host layouts
+        // include as well (twenty-one-companion's `layouts::mobile`).
+        'packages/einundzwanzig-group/resources/views/partials/globals.blade.php',
     ] as $partial) {
         $src = medienQuelle($partial);
 

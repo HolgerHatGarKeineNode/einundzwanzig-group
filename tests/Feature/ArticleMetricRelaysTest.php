@@ -121,7 +121,9 @@ test('BEIDE head-Partials tragen die Zeile — sonst tut P6 auf einem der zwei W
      */
     $pfade = [
         base_path('resources/views/partials/head.blade.php'),
-        base_path('packages/einundzwanzig-group/resources/views/partials/head.blade.php'),
+        // The package head takes its boot globals from this partial, which host layouts
+        // include as well (twenty-one-companion's `layouts::mobile`).
+        base_path('packages/einundzwanzig-group/resources/views/partials/globals.blade.php'),
     ];
 
     foreach ($pfade as $pfad) {

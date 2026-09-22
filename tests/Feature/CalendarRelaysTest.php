@@ -131,7 +131,9 @@ test('BOTH head partials carry the lines — otherwise P2 silently does nothing 
      */
     $paths = [
         base_path('resources/views/partials/head.blade.php'),
-        base_path('packages/einundzwanzig-group/resources/views/partials/head.blade.php'),
+        // The package head takes its boot globals from this partial, which host layouts
+        // include as well (twenty-one-companion's `layouts::mobile`).
+        base_path('packages/einundzwanzig-group/resources/views/partials/globals.blade.php'),
     ];
 
     foreach ($paths as $path) {
