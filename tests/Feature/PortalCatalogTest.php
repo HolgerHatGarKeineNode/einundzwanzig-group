@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\Http;
 beforeEach(function (): void {
     config(['group.portal_url' => 'https://portal.test']);
     Cache::flush();
+    $this->travelTo(portalFakesStand());
 });
 
 test('the web host resolves the package default catalog', function () {

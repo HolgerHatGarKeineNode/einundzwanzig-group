@@ -49,6 +49,7 @@ beforeEach(function (): void {
         'group.portal_rsvp_view' => null,
     ]);
     Cache::flush();
+    $this->travelTo(portalFakesStand());
     portalFakes();
 });
 

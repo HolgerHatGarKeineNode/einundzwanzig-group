@@ -29,6 +29,7 @@ use Livewire\Livewire;
 beforeEach(function (): void {
     config(['group.portal_url' => 'https://portal.test']);
     Cache::flush();
+    $this->travelTo(portalFakesStand());
     portalFakes();
 });
 

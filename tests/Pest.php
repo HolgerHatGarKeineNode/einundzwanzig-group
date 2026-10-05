@@ -284,6 +284,22 @@ function ensureHostChromium(): void
 */
 
 /**
+ * The instant the Portal fixtures below were measured at — and the only `now()` they are
+ * valid for.
+ *
+ * The catalog filters its dates against the clock (`indexEventWindow()` is „today plus the
+ * next month", `meetup()` reads its dates from that window), while the fixtures carry
+ * hard-coded dates around 2026-09-18/21. Left on the real clock, every Portal test went
+ * red the day those dates slipped into the past (2026-10-05: nine cases, no product change).
+ * A test that renders these fixtures freezes the clock here, in its `beforeEach`:
+ * `$this->travelTo(portalFakesStand())`. Morning of the measuring day, before the 14:00 date.
+ */
+function portalFakesStand(): string
+{
+    return '2026-09-18 08:00:00';
+}
+
+/**
  * Forget every Portal stub registered so far.
  *
  * `Http::fake()` MERGES its stubs and the FIRST matching one wins — a second `fake()` with
