@@ -36,6 +36,7 @@ class ImageProxyController extends Controller
      */
     private const PRESETS = [
         'avatar' => ['w' => 96, 'h' => 96, 'fit' => 'cover'],
+        'avatar-lg' => ['w' => 192, 'h' => 192, 'fit' => 'cover'],
         'banner' => ['w' => 1200, 'h' => 400, 'fit' => 'cover'],
         'og' => ['w' => 1200, 'h' => 630, 'fit' => 'cover'],
         'msg' => ['w' => 600, 'h' => 600, 'fit' => 'scale'],

@@ -61,6 +61,19 @@ it('proxies content presets (banner/msg/full) to webp', function () {
     }
 });
 
+it('crops the avatar presets to their square size', function (string $preset, int $size) {
+    Http::fake(['*' => Http::response(fakePng(), 200, ['Content-Type' => 'image/png'])]);
+
+    $response = $this->get('/img/'.$preset.'?src='.urlencode('https://1.1.1.1/face.png'));
+
+    $response->assertOk()->assertHeader('Content-Type', 'image/webp');
+    [$width, $height] = getimagesizefromstring((string) $response->getContent()) ?: [0, 0];
+    expect([$width, $height])->toBe([$size, $size]);
+})->with([
+    'avatar' => ['avatar', 96],
+    'avatar-lg' => ['avatar-lg', 192],
+]);
+
 it('keeps a gif as gif (animation), not webp', function () {
     $img = imagecreatetruecolor(20, 20);
     ob_start();

@@ -108,7 +108,7 @@ it('keeps the image presets the app requests', function (string $preset) {
     $this->get('/img/'.$preset.'?src='.urlencode('https://127.0.0.1/a.png'))->assertStatus(400);
 
     Http::assertNothingSent();
-})->with(['avatar', 'banner', 'og', 'msg', 'full']);
+})->with(['avatar', 'avatar-lg', 'banner', 'og', 'msg', 'full']);
 
 it('answers every /api/app/verein route with JSON 503 and no network when unconfigured', function (string $method, string $uri) {
     Http::fake();
