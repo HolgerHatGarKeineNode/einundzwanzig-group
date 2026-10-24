@@ -83,7 +83,8 @@ test('the bottom nav dot no longer feeds on decrypted messages', function () {
     );
     $ohneKommentare = (string) preg_replace('/\{\{--[\s\S]*?--\}\}/', '', $navTab);
 
-    expect($ohneKommentare)->toContain("\$punkt = '\$store.unread?.any'");
+    // Rail: `any`; bottom bar: `any` while its Postfach pill is empty — both read only `unread`.
+    expect($ohneKommentare)->toContain("\$punkt = \$rail ? '\$store.unread?.any' : '\$store.unread?.any && !((\$store.unread?.postfach ?? 0) > 0)'");
     expect($ohneKommentare)->not->toContain('privateMessages');
     // CONTROL: the stripper strips — the name stands in this file's prose exactly once.
     expect($navTab)->toContain('privateMessages');
