@@ -19,7 +19,7 @@
         "@tailwindcss/vite": "^4.1.11",
         "@welshman/net": "0.13.1",
         "@welshman/util": "0.13.1",
-        "concurrently": "^9.0.1",
+        "concurrently": "^10.0.6",
         "isomorphic-git": "^1.41.4",
         "laravel-vite-plugin": "^3.1",
         "playwright": "^1.59.1",
