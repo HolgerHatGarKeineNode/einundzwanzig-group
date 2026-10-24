@@ -10,10 +10,10 @@
  * Relay-Zugang ist NICHT erforderlich — „Existenz prüfen" ist eine andere
  * Frage als „URL umbiegen".
  *
- * `fakeSessionPubkey()` kommt als globale Funktion aus
- * `EmptyStatesAndA11yTest.php` (dasselbe Muster wie `LongformReaderTest.php`):
- * Pest lädt alle Feature-Dateien in EINEN Prozess — eine zweite Deklaration
- * wäre ein Fatal Error.
+ * `fakeSessionPubkey()` comes from `tests/Pest.php` (shared helpers): Pest loads the Feature
+ * files into ONE process in no fixed order, and declaring the function in another test file
+ * was exactly the case that went red here with "Call to undefined function" (2026-10-24,
+ * seven cases).
  */
 const NADDR = 'naddr1qvzqqqr4xgypqy2z6m4qc9tchk6qjlpxkm6m3v0ukv2rn8wfn8rsz3qhc4sdxl4c';
 

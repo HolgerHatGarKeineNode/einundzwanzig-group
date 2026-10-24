@@ -1,8 +1,6 @@
 <?php
 
 declare(strict_types=1);
-use Illuminate\Testing\TestResponse;
-use Symfony\Component\HttpFoundation\Response;
 
 /**
  * P3 (Leerzustände, Einstieg, Fokusführung) — Sicherheitsnetz für die
@@ -23,36 +21,6 @@ use Symfony\Component\HttpFoundation\Response;
  * nicht zu einem literalen `<flux:button`-Tag — Blöcke werden deshalb über
  * `data-flux-button=` gezählt, nicht über den Komponentennamen.
  */
-
-/** Beliebiger 64-hex-Pubkey für eine "angemeldete" Session (Server-Gate, nicht Signer). */
-function fakeSessionPubkey(): string
-{
-    return str_repeat('a', 64);
-}
-
-/**
- * `TestResponse::getContent()` delegiert (via `__call`) an Symfonys
- * `Response::getContent(): string|false` — `false`, wenn die Antwort nie einen
- * Body gesetzt bekam. Für eine normal ausgelieferte 200er-Seite kommt das in
- * der Praxis nicht vor, aber genau deshalb darf ein Test es nicht kommentarlos
- * annehmen: würde `false` ungeprüft weitergereicht, prüfte die nachgelagerte
- * Assertion `false` gegen einen erwarteten String-Ausschnitt — der Test schlüge
- * dann an einer zufälligen Stelle mit einer irreführenden Meldung fehl, statt
- * klar zu sagen, dass die Antwort gar keinen Body hatte. Ein nicht lesbares
- * Prüfstück ist ein Testfehler, keiner, den eine Assertion einfangen sollte.
- *
- * @param  TestResponse<Response>  $res
- */
-function responseHtml(TestResponse $res): string
-{
-    $content = $res->getContent();
-
-    if ($content === false) {
-        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
-    }
-
-    return $content;
-}
 
 // ─── 1. Fünf Leerzustände: genau eine Handlung (oder bewusst keine) ──────────
 

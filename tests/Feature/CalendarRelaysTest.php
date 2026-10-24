@@ -33,12 +33,6 @@ use Symfony\Component\HttpFoundation\Response;
  * shape as `ArticleMetricRelaysTest.php`).
  */
 
-/** Any 64-hex pubkey for a "logged in" session (server gate, no signer). */
-function calendarFakeSessionPubkey(): string
-{
-    return str_repeat('d', 64);
-}
-
 /**
  * @param  TestResponse<Response>  $res
  */
@@ -57,7 +51,7 @@ test('without a configured calendar source NEITHER variable is in the document',
     config()->set('group.calendar_relay_urls', null);
     config()->set('group.calendar_authors', null);
 
-    $res = $this->withSession(['nostr_pubkey' => calendarFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.room', ['h' => 'anyroom']))
         ->assertOk();
 
@@ -76,7 +70,7 @@ test('with a configured calendar source the server hands BOTH values through ver
     config()->set('group.calendar_relay_urls', 'wss://nos.lol, wss://relay.damus.io');
     config()->set('group.calendar_authors', 'daf83d92768b5d0005373f83e30d4203c0b747c170449e02fea611a0da125ee6');
 
-    $res = $this->withSession(['nostr_pubkey' => calendarFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.room', ['h' => 'anyroom']))
         ->assertOk();
     $html = calendarHtml($res);
@@ -101,7 +95,7 @@ test('the two halves are switched INDEPENDENTLY — one alone is not enough for 
     config()->set('group.calendar_authors', null);
 
     $html = calendarHtml(
-        $this->withSession(['nostr_pubkey' => calendarFakeSessionPubkey()])
+        $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
             ->get(route('group.room', ['h' => 'anyroom']))
             ->assertOk()
     );

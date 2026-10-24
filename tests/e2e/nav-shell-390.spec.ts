@@ -134,10 +134,23 @@ test.describe('Shell at 390 × 844 — the measurement of the P2 definition of d
             expect(Math.round(s.width * 100) / 100, `slot ${i} is under 44 px wide`).toBeGreaterThanOrEqual(44)
         }
 
-        // The three slots fill the bar without stacking: same y, and their combined width is
-        // the grid's width. A wrapped grid would still pass "three children".
-        const ys = new Set(slots.map((s) => Math.round(s.y)))
-        expect(ys.size, 'the three slots do not sit on one row').toBe(1)
+        // The three slots fill the bar without stacking: Start and Postfach sit on ONE row
+        // (same y), and the search button between them is the tab-bar FAB (P2, 2026-09-18) —
+        // 64 × 64 and RAISED, its centre 19.5 px above the row's (measured 2026-10-24: centres
+        // 814.5 / 795 / 814.5). The old check ("all three share one `y`") read the raised
+        // button as a wrapped grid and was red on every run, so it now says what the design
+        // says: the outer two on one row, the FAB on that row's centre line or above it, still
+        // reaching into the row (a wrapped button would sit BELOW, or clear of it), and three
+        // columns in left-to-right order without overlap.
+        const [start, fab, postfach] = slots as [Box, Box, Box]
+        const rowCentre = start.y + start.height / 2
+        expect(Math.round(start.y), 'Start and Postfach do not sit on one row').toBe(Math.round(postfach.y))
+        expect(fab.y + fab.height / 2, `the search button sits BELOW the row (centres ${rowCentre} / ${fab.y + fab.height / 2})`).toBeLessThanOrEqual(rowCentre + 1)
+        expect(fab.y + fab.height, 'the search button does not reach into the row of its neighbours').toBeGreaterThan(start.y)
+        expect(
+            slots.every((s, i) => i === 0 || s.x >= slots[i - 1]!.x + slots[i - 1]!.width - 0.5),
+            'the three slots overlap horizontally — they are not three columns of one row',
+        ).toBe(true)
 
         // ── The three destinations, by role and name rather than by class.
         await expect(slot(page, /^Start/)).toBeVisible()

@@ -9,6 +9,8 @@ use Illuminate\Testing\TestResponse;
 use swentel\nostr\Event\Event;
 use swentel\nostr\Key\Key;
 use swentel\nostr\Sign\Sign;
+use Symfony\Component\HttpFoundation\Response;
+use Tests\TestCase;
 
 /*
 |--------------------------------------------------------------------------
@@ -52,24 +54,40 @@ beforeEach(function () {
     Http::fake([BUDGET_BASE.'/*' => Http::response('{}', 200)]);
 });
 
-/** Web proxy `/config` under a fresh session pubkey (its own 10/min bucket stays out of the way). */
-function budgetWebConfig(int $i): TestResponse
+/**
+ * Web proxy `/config` under a fresh session pubkey (its own 10/min bucket stays out of the way).
+ *
+ * The test case comes in as a parameter, not from `test()`: that is typed
+ * `TestCall|HigherOrderTapProxy`, which has neither `withSession()` nor `call()` for static
+ * analysis, and a helper whose calls the analyser cannot see is one nobody can rename safely.
+ *
+ * @return TestResponse<Response>
+ */
+function budgetWebConfig(TestCase $test, int $i): TestResponse
 {
-    return test()->withSession(['nostr_pubkey' => str_pad(dechex($i), 64, '0', STR_PAD_LEFT)])
+    return $test->withSession(['nostr_pubkey' => str_pad(dechex($i), 64, '0', STR_PAD_LEFT)])
         ->getJson('/api/verein/config');
 }
 
-/** App proxy `/config` from a fresh IP. */
-function budgetAppConfig(int $i): TestResponse
+/**
+ * App proxy `/config` from a fresh IP.
+ *
+ * @return TestResponse<Response>
+ */
+function budgetAppConfig(TestCase $test, int $i): TestResponse
 {
-    return test()->withServerVariables(['REMOTE_ADDR' => '192.0.2.'.(1 + $i)])
+    return $test->withServerVariables(['REMOTE_ADDR' => '192.0.2.'.(1 + $i)])
         ->getJson('/api/app/verein/config');
 }
 
-/** Signed app read with a fresh key from a fresh IP. */
-function budgetAppRead(int $i): TestResponse
+/**
+ * Signed app read with a fresh key from a fresh IP.
+ *
+ * @return TestResponse<Response>
+ */
+function budgetAppRead(TestCase $test, int $i): TestResponse
 {
-    return test()->call('GET', '/api/app/verein/me', [], [], [], [
+    return $test->call('GET', '/api/app/verein/me', [], [], [], [
         'HTTP_ACCEPT' => 'application/json',
         'HTTP_AUTHORIZATION' => budgetSignedReadHeader(BUDGET_BASE.'/api/v1/membership/me'),
         'REMOTE_ADDR' => '198.18.0.'.(1 + $i),
@@ -80,15 +98,15 @@ it('is one budget shared by web proxy, app proxy and signed app reads', function
     expect(VereinUpstreamBudget::MAX_PER_MINUTE)->toBe(30);
 
     for ($i = 0; $i < 10; $i++) {
-        budgetWebConfig($i)->assertOk();
-        budgetAppConfig($i)->assertOk();
-        budgetAppRead($i)->assertOk();
+        budgetWebConfig($this, $i)->assertOk();
+        budgetAppConfig($this, $i)->assertOk();
+        budgetAppRead($this, $i)->assertOk();
     }
 
     Http::assertSentCount(30);
 
     // Exhausted: every branch refuses with 429 + Retry-After, none calls out.
-    foreach ([budgetWebConfig(100), budgetAppConfig(100), budgetAppRead(100)] as $refused) {
+    foreach ([budgetWebConfig($this, 100), budgetAppConfig($this, 100), budgetAppRead($this, 100)] as $refused) {
         $refused->assertStatus(429);
         expect((int) $refused->headers->get('Retry-After'))->toBeGreaterThan(0);
     }
@@ -124,9 +142,9 @@ it('is not consumed by requests refused in a local pre-check', function () {
 
     Http::fake([BUDGET_BASE.'/*' => Http::response('{}', 200)]);
 
-    budgetAppRead(200)->assertOk();
-    budgetAppConfig(200)->assertOk();
-    budgetWebConfig(200)->assertOk();
+    budgetAppRead($this, 200)->assertOk();
+    budgetAppConfig($this, 200)->assertOk();
+    budgetWebConfig($this, 200)->assertOk();
 });
 
 it('caps the unsigned app routes at 10 per minute while web and signed reads keep working', function () {
@@ -143,32 +161,32 @@ it('caps the unsigned app routes at 10 per minute while web and signed reads kee
 
     Http::assertSentCount(10);
 
-    $refused = budgetAppConfig(99)->assertStatus(429);
+    $refused = budgetAppConfig($this, 99)->assertStatus(429);
     expect((int) $refused->headers->get('Retry-After'))->toBeGreaterThan(0);
 
     Http::assertSentCount(10);
 
     // The remaining 20 of the shared budget stay available to the verified branches.
     for ($i = 0; $i < 10; $i++) {
-        budgetWebConfig($i)->assertOk();
-        budgetAppRead($i)->assertOk();
+        budgetWebConfig($this, $i)->assertOk();
+        budgetAppRead($this, $i)->assertOk();
     }
 
     Http::assertSentCount(30);
 
     // … and the shared cap still holds for them.
-    budgetWebConfig(100)->assertStatus(429);
-    budgetAppRead(100)->assertStatus(429);
+    budgetWebConfig($this, 100)->assertStatus(429);
+    budgetAppRead($this, 100)->assertStatus(429);
 
     Http::assertSentCount(30);
 });
 
 it('refuses an unsigned call when the shared budget is full even if the sub-budget has room', function () {
     for ($i = 0; $i < 30; $i++) {
-        ($i % 2 === 0 ? budgetWebConfig($i) : budgetAppRead($i))->assertOk();
+        ($i % 2 === 0 ? budgetWebConfig($this, $i) : budgetAppRead($this, $i))->assertOk();
     }
 
-    budgetAppConfig(1)->assertStatus(429);
+    budgetAppConfig($this, 1)->assertStatus(429);
 
     Http::assertSentCount(30);
     // Refused by the cheap pre-read: the sub-budget was not touched.
@@ -177,7 +195,7 @@ it('refuses an unsigned call when the shared budget is full even if the sub-budg
 
 it('decides by the count the hit returned, not by the earlier read', function () {
     for ($i = 0; $i < 30; $i++) {
-        budgetWebConfig($i)->assertOk();
+        budgetWebConfig($this, $i)->assertOk();
     }
 
     // Simulate the race the pre-read cannot see: another worker took the last

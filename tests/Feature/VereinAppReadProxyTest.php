@@ -110,6 +110,9 @@ it('rejects an unfit credential with 401 before any network call', function (str
         'not base64' => 'Nostr %%%not-base64%%%',
         'base64 of non-JSON' => 'Nostr '.base64_encode('not json'),
         'JSON missing fields' => 'Nostr '.base64_encode('{"kind":27235}'),
+        // A case added to the dataset below but not here must fail LOUDLY and by name — and
+        // not fall through to some other header that happens to be refused too.
+        default => throw new InvalidArgumentException("No header builder for the case \"{$case}\"."),
     };
 
     $this->call('GET', $route, [], [], [], [

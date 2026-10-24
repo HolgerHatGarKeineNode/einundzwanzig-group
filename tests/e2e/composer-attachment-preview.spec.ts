@@ -124,7 +124,11 @@ test.describe('Anhang-Vorschau im Composer', () => {
         // Der Rueckfall bleibt: ohne Vorschau-Bytes entscheidet weiterhin `$img()` —
         // fuer den Vereins-Blossom der Proxy, fuer das Workspace-Relay nichts.
         expect(nach('ohne_vorschau_blossom')).toContain('/img/msg?src=')
-        expect(nach('ohne_vorschau_workspace'), 'ohne Vorschau bleibt es leer — aber es geht nichts raus').toBe('')
+        // "Empty" is a state, not a spelling: Alpine removes the attribute for an empty
+        // expression (measured with the current Alpine: `src` is then `null`), older versions
+        // wrote `src=""`. Both mean "the tile has no source" — and neither triggers a request
+        // (see below). A test that pins the spelling went red without any change in behaviour.
+        expect(nach('ohne_vorschau_workspace') ?? '', 'ohne Vorschau bleibt es leer — aber es geht nichts raus').toBe('')
 
         // Und nichts davon hat den Relay beruehrt, weder roh noch ueber den Proxy.
         expect(angefragt.filter((u) => u.includes('buzz.test.invalid'))).toEqual([])

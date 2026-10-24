@@ -1,8 +1,6 @@
 <?php
 
 declare(strict_types=1);
-use Illuminate\Testing\TestResponse;
-use Symfony\Component\HttpFoundation\Response;
 
 /**
  * P6 — die serverseitige Weiche für die Relays der ARTIKEL-SOZIALSIGNALE.
@@ -29,31 +27,10 @@ use Symfony\Component\HttpFoundation\Response;
  * billigere Schicht: kein Browser, kein Alpine, kein Relay (dasselbe Muster wie
  * `LongformReaderTest.php`).
  */
-
-/** Beliebiger 64-hex-Pubkey für eine „angemeldete" Session (Server-Gate, kein Signer). */
-function articleMetricsFakeSessionPubkey(): string
-{
-    return str_repeat('c', 64);
-}
-
-/**
- * @param  TestResponse<Response>  $res
- */
-function articleMetricsHtml(TestResponse $res): string
-{
-    $content = $res->getContent();
-
-    if ($content === false) {
-        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
-    }
-
-    return $content;
-}
-
 test('Ohne konfigurierte Signal-Relays steht KEIN __nostrArticleRelays im Dokument', function () {
     config()->set('group.article_relay_urls', null);
 
-    $res = $this->withSession(['nostr_pubkey' => articleMetricsFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.bereich.artikel'))
         ->assertOk();
 
@@ -61,7 +38,7 @@ test('Ohne konfigurierte Signal-Relays steht KEIN __nostrArticleRelays im Dokume
     // das Symbol gegen sich selbst: benennt jemand `window.__nostrArticleRelays` um,
     // ohne `js/longformFeed.ts` mitzuziehen, liest die Insel dauerhaft `undefined` und
     // fragt still nur noch den Board — sichtbar wären dann bloß kleinere Zahlen.
-    expect(articleMetricsHtml($res))->not->toContain('__nostrArticleRelays');
+    expect(responseHtml($res))->not->toContain('__nostrArticleRelays');
 });
 
 test('Mit konfigurierten Signal-Relays reicht der Server sie WÖRTLICH in die Insel', function () {
@@ -70,10 +47,10 @@ test('Mit konfigurierten Signal-Relays reicht der Server sie WÖRTLICH in die In
     // Normalisieren macht `leseRelayListe` in `js/articleMetrics.ts` (dort geprüft).
     config()->set('group.article_relay_urls', 'wss://nos.lol, wss://relay.damus.io');
 
-    $res = $this->withSession(['nostr_pubkey' => articleMetricsFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.bereich.artikel'))
         ->assertOk();
-    $html = articleMetricsHtml($res);
+    $html = responseHtml($res);
 
     expect($html)->toContain('__nostrArticleRelays');
     // `@js()` escaped die Schrägstriche (`wss:\/\/…`) — die Erwartung steht deshalb in
@@ -92,10 +69,10 @@ test('Die Artikel-QUELLE bleibt davon unberührt — die Kuratierungsregel gilt 
     config()->set('group.board_relay_url', null);
     config()->set('group.article_relay_urls', 'wss://nos.lol');
 
-    $res = $this->withSession(['nostr_pubkey' => articleMetricsFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.bereich.artikel'))
         ->assertOk();
-    $html = articleMetricsHtml($res);
+    $html = responseHtml($res);
 
     // Ohne Board bleibt es beim ehrlichen „keine Quelle"-Leerzustand — Signal-Relays
     // machen daraus keine Artikelliste.

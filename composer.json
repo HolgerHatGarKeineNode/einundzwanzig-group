@@ -106,9 +106,13 @@
             "Composer\\Config::disableProcessTimeout",
             "@php artisan test tests/Unit"
         ],
+        "test:all": [
+            "Composer\\Config::disableProcessTimeout",
+            "bash scripts/run-all-tests.sh"
+        ],
         "test:browser": [
             "Composer\\Config::disableProcessTimeout",
-            "@php artisan test tests/Browser"
+            "php artisan config:clear --ansi && php vendor/bin/pest -c phpunit.browser.xml"
         ]
     },
     "scripts-descriptions": {

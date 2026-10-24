@@ -32,26 +32,6 @@ use Tests\TestCase;
  * Unit-Test sieht.
  */
 
-/** Beliebiger 64-hex-Pubkey für eine „angemeldete" Session (Server-Gate, kein Signer). */
-function vereinFakeSessionPubkey(): string
-{
-    return str_repeat('c', 64);
-}
-
-/**
- * @param  TestResponse<Response>  $res
- */
-function vereinHtml(TestResponse $res): string
-{
-    $content = $res->getContent();
-
-    if ($content === false) {
-        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
-    }
-
-    return $content;
-}
-
 /**
  * Ein Aufruf als „angemeldeter" Nutzer.
  *
@@ -65,7 +45,7 @@ function vereinHtml(TestResponse $res): string
  */
 function vereinGet(TestCase $test, string $url, bool $follow = false, array $headers = [], ?string $locale = null): TestResponse
 {
-    $pending = $test->withSession(['nostr_pubkey' => vereinFakeSessionPubkey()]);
+    $pending = $test->withSession(['nostr_pubkey' => fakeSessionPubkey()]);
 
     // Die Sprache kommt ueber das `locale`-Cookie, nicht ueber `Accept-Language`:
     // seit dem 2026-08-13 entscheidet der Browser-Header NICHT mehr (Entscheidung
@@ -108,7 +88,7 @@ beforeEach(function () {
 // ── 1. Gate: Weg nach innen statt Link nach aussen ───────────────────────────
 
 test('mit konfigurierter Vereins-API führt das Gate in den Flow, nicht nach draussen', function () {
-    $html = vereinHtml(vereinGet($this, route('group.bereich.chat'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.bereich.chat'))->assertOk());
 
     expect($html)->toContain('data-testid="verein-gate-beitreten"')
         ->and($html)->toContain(route('group.verein.join'))
@@ -121,7 +101,7 @@ test('ohne konfigurierte Vereins-API bleibt der ehrliche Weg nach draussen', fun
     // scheitert, wäre schlechter als der Link, der funktioniert.
     config()->set('group.verein_api_url', '');
 
-    $html = vereinHtml(vereinGet($this, route('group.bereich.chat'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.bereich.chat'))->assertOk());
 
     expect($html)->toContain('data-testid="verein-gate-extern"')
         ->and($html)->not->toContain('data-testid="verein-gate-beitreten"');
@@ -131,7 +111,7 @@ test('beide bestehenden Einbindungen des Gates tragen den neuen Weg', function (
     // Das Gate steht auf `/spaces` UND `/directory`. Eine Änderung an der
     // Komponente, die nur eine der beiden bedient, wäre ein halber Umbau.
     foreach ([route('group.bereich.chat'), route('group.bereich.leute')] as $url) {
-        expect(vereinHtml(vereinGet($this, $url)->assertOk()))
+        expect(responseHtml(vereinGet($this, $url)->assertOk()))
             ->toContain('data-testid="verein-gate-beitreten"');
     }
 });
@@ -147,7 +127,7 @@ test('der Rücksprung setzt die Insel im Wartezustand ab, nicht am Anfang', func
     // warten. Ohne das sähe der Nutzer nach der Zahlung für einen Moment wieder
     // den Zahlschritt — mit einem Knopf, der eine zweite Rechnung aus einem
     // Kontingent von drei pro Tag zöge.
-    $html = vereinHtml(vereinGet($this, '/verein/zurueck', follow: true)->assertOk());
+    $html = responseHtml(vereinGet($this, '/verein/zurueck', follow: true)->assertOk());
 
     expect($html)->toContain('nostrVerein(true)');
 });
@@ -155,7 +135,7 @@ test('der Rücksprung setzt die Insel im Wartezustand ab, nicht am Anfang', func
 test('der normale Einstieg startet NICHT im Wartezustand', function () {
     // Gegenprobe zum Fall darüber: ohne den Parameter darf die Insel nicht
     // behaupten, es sei bereits gezahlt worden.
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     expect($html)->toContain('nostrVerein(false)')
         ->and($html)->not->toContain('nostrVerein(true)');
@@ -171,7 +151,7 @@ test('Flow und Rücksprung liegen hinter dem Nostr-Gate', function () {
 // ── 3. Ein Lesefehler ist kein „kein Mitglied" ───────────────────────────────
 
 test('die Aussage über die Mitgliedschaft hängt AUSSCHLIESSLICH an der Stufe mit gelesener Liste', function () {
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     $satz = 'Du bist noch nicht freigeschaltet.';
 
@@ -201,7 +181,7 @@ test('die Aussage über die Mitgliedschaft hängt AUSSCHLIESSLICH an der Stufe m
 });
 
 test('ein gescheiterter Lesevorgang bekommt einen eigenen Zweig — mit Ausweg statt Behauptung', function () {
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     expect($html)->toContain("stage === 'lesefehler'")
         ->and($html)->toContain('data-testid="verein-warten-lesefehler"')
@@ -215,7 +195,7 @@ test('ein gescheiterter Lesevorgang bekommt einen eigenen Zweig — mit Ausweg s
 test('ein noch laufender Lesevorgang bekommt ebenfalls einen eigenen Zweig', function () {
     // Die dritte Möglichkeit neben „gelesen" und „gescheitert": noch unterwegs.
     // Ohne sie fiele „noch nicht gelesen" mit einer der beiden anderen zusammen.
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     expect($html)->toContain("stage === 'zugang-pruefen'")
         ->and($html)->toContain('data-testid="verein-warten-pruefen"')
@@ -226,7 +206,7 @@ test('der Flow behauptet an keiner Stelle unbedingt „kein Vereinsmitglied"', f
     // Die Formulierung des GATES darf auf dem Flow-Screen nicht auftauchen: dort
     // ist sie an `isVereinGatedOut` gebunden (das `ready` verlangt), hier hätte
     // sie diese Bindung nicht.
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     expect($html)->not->toContain('Noch kein Vereinsmitglied');
 });
@@ -234,7 +214,7 @@ test('der Flow behauptet an keiner Stelle unbedingt „kein Vereinsmitglied"', f
 // ── 4. Wartezeit: ein konfigurierter Wert, kein Text im Markup ───────────────
 
 test('die Wartezeit steht als Zahl im Dokument und nirgends als Satz im Markup', function () {
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     expect($html)->toContain(vereinIslandConfig())
         // Kein literaler Zeitraum im Markup — sonst müsste nach P1 ein Text
@@ -247,14 +227,14 @@ test('ein anderer konfigurierter Wert schlägt ohne Markup-Änderung durch', fun
     // Das ist die eigentliche Zusicherung: nach P1 wird EIN Wert umgestellt.
     config()->set('group.verein_activation_minutes', 15);
 
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     expect($html)->toContain(vereinIslandConfig(['activationMinutes' => 15]))
         ->and($html)->not->toContain(vereinIslandConfig(['activationMinutes' => 1440]));
 });
 
 test('der Wartezustand nennt bei jedem Übergang eine Dauer und die Zusage ohne offene App', function () {
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     // Der Dauer-Block liegt im Wartezustand ausserhalb der Stufen-Zweige und
     // gilt damit für jede Stufe.
@@ -269,7 +249,7 @@ test('der Wartezustand nennt bei jedem Übergang eine Dauer und die Zusage ohne 
 test('das Dokument trägt die Vereins-Basis-URL, aber niemals den Client-Schlüssel', function () {
     config()->set('verein.api_key', 'streng-geheimes-testsekret');
 
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     expect($html)->toContain(vereinIslandConfig())
         ->and($html)->toContain('verein.example.test')
@@ -287,7 +267,7 @@ test('die Texte des Flows laufen durch __() und nicht als Literale ins Markup', 
     // Texte, die noch durch die Gestaltung gehen.
     //
     // Die Sprache kommt über das `locale`-Cookie — siehe Kopf von `vereinGet()`.
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'), locale: 'en')->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'), locale: 'en')->assertOk());
 
     expect($html)->toContain('Cancel')
         ->and($html)->toContain('To the rooms')
@@ -314,7 +294,7 @@ test('die vier reaktiven Sätze stehen als GANZER Satz in der Insel, nicht als F
      * tiefer geprüft (`js/vereinFlow.test.ts`), die Kataloge in
      * `GroupI18nTest.php`.
      */
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     // Die Fläche fragt nach dem fertigen Satz …
     foreach (['retryLine()', 'charCountLine()'] as $call) {
@@ -382,7 +362,7 @@ test('der ganze Satz kommt auch wirklich im Browser an — im Katalog der aktive
      * Das `locale`-Cookie statt `app()->setLocale()`: `SetLocale` läuft in der
      * `web`-Gruppe und überschreibt die Locale bei jedem Request.
      */
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'), locale: 'en')->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'), locale: 'en')->assertOk());
 
     /*
      * Der Zeichenzähler wird ohne seinen Schrägstrich geprüft: `@js` schreibt
@@ -414,7 +394,7 @@ test('die Zahlweg-Weiche steht nur EINMAL — im geprüften Reduzierer, nicht im
      * wieder eingesetztes `bolt11 && hasWallet` wäre sofort rot — und zwar hier,
      * in der billigsten Schicht, nicht erst im Browser.
      */
-    $html = vereinHtml(vereinGet($this, route('group.verein.join'))->assertOk());
+    $html = responseHtml(vereinGet($this, route('group.verein.join'))->assertOk());
 
     // Die Fläche fragt die Insel …
     expect(substr_count($html, 'payInApp()'))->toBe(4);

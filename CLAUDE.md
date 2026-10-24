@@ -219,3 +219,30 @@ Wochen älter als seine Quelle, antwortete auf ein unbekanntes Kind mit `OK true
 nichts. Wo eine Aussage daran hängt, dass ein Relay etwas ablehnt, entscheidet nur ein
 Schreibversuch mit anschließender **Requery**: `nak` druckt auch bei Ablehnung das signierte
 Event und endet mit 0.
+
+# Test categories and the 10-minute budget
+
+The whole suite — every category together — runs in under 10 minutes (user rule, 2026-10-23).
+`composer test:all` (`scripts/run-all-tests.sh`) runs the categories serially, prints the table
+and fails past `TEST_BUDGET_SECONDS` (600). Measured 2026-10-24, one serial run:
+
+| Category | Command | Tests | Wall |
+|---|---|---|---|
+| default (Unit + Feature) | `php artisan test --parallel` | 601 | 9 s |
+| browser (Pest, real Chromium) | `composer test:browser` | 3 | 4 s |
+| unit (node:test) | `npm run build && npm run test:unit` | 3128 | 39 s |
+| e2e (Playwright, zooid, 6 workers) | `npm run test:e2e` | 862 (145 Buzz-only skipped) | ~405–430 s |
+| types | `vendor/bin/phpstan analyse` | – | 1–4 s |
+
+`npm run test:e2e:buzz` needs the Docker stack and is NOT in the sum; it is a category of its own
+and has to be budgeted on a machine that has the stack.
+
+**No test leaves the machine.** Feature and Browser tests run behind `Http::preventStrayRequests()`
+(`tests/Pest.php`); the Playwright run is hermetic by construction (`--host-resolver-rules`, the
+WebSocket wrapper and the relay/response guards in `tests/e2e/support/hermetik.ts`).
+
+**Helpers two test files need live in `tests/Pest.php`.** Pest loads the Feature files into one
+process in no fixed order; a global function declared in one test file and called from another
+fails with "Call to undefined function" as soon as the declaring file loads second.
+
+**`->beforeEach()` twice in one Pest chain replaces the first.** Put both in one closure.

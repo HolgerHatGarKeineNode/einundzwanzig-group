@@ -2,9 +2,6 @@
 
 declare(strict_types=1);
 
-use Illuminate\Testing\TestResponse;
-use Symfony\Component\HttpFoundation\Response;
-
 /**
  * Die Profil-Querverlinkung nach `media.einundzwanzig.space` — **was der Server
  * entscheidet.**
@@ -32,7 +29,7 @@ use Symfony\Component\HttpFoundation\Response;
  * Nachbarschaft: `tests/Feature/ArticleAuthorRouteTest.php`,
  * `tests/Feature/ArticleMetricRelaysTest.php`.
  *
- * Eigene `medienFakeSessionPubkey()` statt einer geteilten: Pest garantiert keine feste
+ * Eigene `fakeSessionPubkey()` statt einer geteilten: Pest garantiert keine feste
  * Lade-/Namensraum-Reihenfolge zwischen Testdateien (gleiche Begründung wie dort).
  *
  * ── Mutationsproben (von Hand gefahren, 2026-08-21, jede per `sha256sum` zurückgebaut,
@@ -70,26 +67,6 @@ use Symfony\Component\HttpFoundation\Response;
  * (drei gesetzte plus „gar nicht gesetzt" → Default) kamen unterscheidbar an. Ohne diese
  * Kontrolle hätten drei identische grüne Läufe genauso ausgesehen.
  */
-
-/** Beliebiger 64-hex-Pubkey für eine „angemeldete" Session (Server-Gate, kein Signer). */
-function medienFakeSessionPubkey(): string
-{
-    return str_repeat('c', 64);
-}
-
-/**
- * @param  TestResponse<Response>  $res
- */
-function medienHtml(TestResponse $res): string
-{
-    $content = $res->getContent();
-
-    if ($content === false) {
-        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
-    }
-
-    return $content;
-}
 
 /** Quelltext einer Datei relativ zur Anwendungswurzel — **werfend**, wenn leer oder weg. */
 function medienQuelle(string $relativ): string
@@ -138,11 +115,11 @@ test('Eine LEERE .env-Zeile schaltet den Verweis ab — der Default greift dann 
      */
     config()->set('group.media_public_url', '');
 
-    $res = $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.bereich.artikel'))
         ->assertOk();
 
-    expect(medienHtml($res))->not->toContain('__nostrMedia');
+    expect(responseHtml($res))->not->toContain('__nostrMedia');
 });
 
 test('Die Konfigurationszeile benutzt env(k, default) und NICHT `?:`', function () {
@@ -223,10 +200,10 @@ test('BEIDE head-Partials tragen __nostrMedia — sonst tut der Verweis auf eine
 test('Mit konfigurierter Basis reicht der Server sie WÖRTLICH in die Insel', function () {
     config()->set('group.media_public_url', 'https://media.example.test/#');
 
-    $res = $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.bereich.artikel'))
         ->assertOk();
-    $html = medienHtml($res);
+    $html = responseHtml($res);
 
     // `@js()` escaped die Schrägstriche — die Erwartung steht in der Form, die im
     // Dokument ankommt, nicht in der, die in der `.env` steht.
@@ -240,10 +217,10 @@ test('Die Autorenseite trägt die Verweis-Zeile — mit dem Host aus der KONFIGU
     config()->set('group.board_relay_url', 'wss://relay.example.test');
     config()->set('group.media_public_url', 'https://media.example.test/#');
 
-    $res = $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get('/articles/autor/'.str_repeat('a', 63).'b')
         ->assertOk();
-    $html = medienHtml($res);
+    $html = responseHtml($res);
 
     /*
      * **Der Anker trägt einen WERT je Fläche, und das ist der ganze Punkt hier.**
@@ -267,10 +244,10 @@ test('Die Profilkarte trägt sie ebenfalls — sie ist die Fläche, die BISHER k
     config()->set('group.media_public_url', 'https://media.example.test/#');
 
     // Die Karte hängt in `app-frame` und steht damit auf jeder Fläche der Shell.
-    $res = $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])
+    $res = $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])
         ->get(route('group.bereich.artikel'))
         ->assertOk();
-    $html = medienHtml($res);
+    $html = responseHtml($res);
 
     expect($html)->toContain('data-medien-profil="karte"');
     expect($html)->toContain('media.example.test');
@@ -281,8 +258,8 @@ test('OHNE Konfiguration steht auf beiden Flächen KEINE Verweis-Zeile', functio
     config()->set('group.media_public_url', '');
 
     foreach ([route('group.bereich.artikel'), '/articles/autor/'.str_repeat('a', 63).'b'] as $url) {
-        $html = medienHtml(
-            $this->withSession(['nostr_pubkey' => medienFakeSessionPubkey()])->get($url)->assertOk()
+        $html = responseHtml(
+            $this->withSession(['nostr_pubkey' => fakeSessionPubkey()])->get($url)->assertOk()
         );
 
         expect($html)->not->toContain('data-medien-profil');

@@ -59,6 +59,22 @@
  * | ohne `workspace_url`, Space ungeladen | 60 | 36 | 494 | **302** |
  * | mit `workspace_url`, Space MIT Beschreibung | **64** | 36 | **452** | 340 |
  *
+ * RE-MEASURED 2026-10-24 (the table above is the state BEFORE Concept C and is kept as
+ * history): the three pins of this file had been red since the redesign of 2026-09-18, while
+ * the promise they sit next to — `expect(rail).toEqual(platzhalter)`, no jump at boot — held on
+ * every run. What moved is the design, measured on both sides at 1440 × 900:
+ *
+ * | | before | now | where it comes from |
+ * |---|---|---|---|
+ * | search field | 36 | **38** | the command-bar field of P6 |
+ * | list (no footer) | 796 | **794** | 900 − 60 − 38 − 8 (`mb-2`) |
+ * | feather boundary `FEDER_GRENZE_PX` (below it the list stops giving up the head's 4 px) | 116 | **118** | 64 + 38 + 8 + 8 — only the search field grew |
+ * | stage content width in the broken-state control | 248 | **264** | the stage padding is `xl:px-[clamp(1.5rem,2vw,1.75rem)]`, 28 px per side at 1440 (was 36): 320 − 56 |
+ *
+ * The head's growth is unchanged at 4 px (60 → 64). The boundary moved by the search field's
+ * 2 px, and the two cases that straddle it re-measure it on every run: at 116 px the list gave
+ * up only 2 of the 4 (measured), so the old value was one the rule no longer reached.
+ *
  * RE-MEASURED 2026-09-05: another 38 px moved from the list into the footer (302 → 340
  * with a workspace, 264 → 302 without). The cause is a FOURTH area row, „Verschlüsselt"
  * — the fixed place in the chrome for `/messages`, added next to „Lesezeichen" because
@@ -400,15 +416,15 @@ test('NEGATIVKONTROLLE: dieselbe Sonde sieht den Fehler, wenn man das alte Marku
     // file's history); the cards are deleted, what is measured now is the stage's
     // content cap.
     //
-    // Recomputed at this run's 1440 px: the stage padding is
-    // `clamp(2rem, 2.5vw, 3rem)` = 36 px per side, the stage in the broken state is
-    // 320 px wide → 320 − 72 = **248 px** of content. In the correct state the cap
-    // binds somewhere at or below 1048 px (1120 − 72), which is what the core proof
-    // above asserts as `> 900`.
+    // Recomputed at this run's 1440 px (2026-10-24): the stage padding is
+    // `clamp(1.5rem, 2vw, 1.75rem)` = 28 px per side (it was `clamp(2rem, 2.5vw, 3rem)` = 36
+    // before Concept C), the stage in the broken state is 320 px wide → 320 − 56 =
+    // **264 px** of content. In the correct state the cap binds somewhere far above, which is
+    // what the core proof above asserts as `> 900`.
     //
     // The number is pinned exactly rather than softened to a `< 300`: a threshold
     // here would lose the ability to report a SECOND layout change.
-    expect(kaputt.inhaltW).toBe(248)
+    expect(kaputt.inhaltW).toBe(264)
 })
 
 /**
@@ -487,11 +503,11 @@ test('Platzhalter und echte Rail sind Block für Block dimensionsgleich — MIT 
 
     expect(rail).toEqual(platzhalter)
     // Und die Zahlen selbst, damit ein gemeinsamer Umbau beider Seiten auffällt statt
-    // stillschweigend „gleich" zu bleiben. Head 60 · search field 36 · list the rest.
+    // stillschweigend „gleich" zu bleiben. Head 60 · search field 38 · list the rest.
     // **Since P6 there are three blocks** (the footer carried 340 px until then, see the head
     // of this file): the list is the only surface with `flex-1`, so it takes everything the
-    // footer gave up — 900 − 60 − 36 − 8 (`mb-2`) = 796.
-    expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 796])
+    // footer gave up — 900 − 60 − 38 − 8 (`mb-2`) = 794 (re-measured 2026-10-24, see the table).
+    expect(platzhalter.map((b) => b.h)).toEqual([60, 38, 794])
 })
 
 testOhneWorkspace(
@@ -519,7 +535,7 @@ testOhneWorkspace(
         // exactly that — the column has the same block structure WITHOUT a workspace, a
         // promise a configuration can only move again once somebody introduces a conditional
         // block. Then this case goes red and the one above does not.
-        expect(platzhalter.map((b) => b.h)).toEqual([60, 36, 796])
+        expect(platzhalter.map((b) => b.h)).toEqual([60, 38, 794])
     },
 )
 
@@ -529,8 +545,8 @@ testOhneWorkspace(
  * **P6 pulled it from 456 px down to 116 px, and the reason is the deleted footer.** The
  * boundary is the space the column needs at least once the head has grown:
  *
- *     64 (head WITH description) + 36 (search field) + 8 (`mb-2`) + 8 (the list's `pb-2`)
- *   = **116 px**
+ *     64 (head WITH description) + 38 (search field) + 8 (`mb-2`) + 8 (the list's `pb-2`)
+ *   = **118 px**   (64 + 36 + 8 + 8 = 116 until 2026-10-24, see the head of this file)
  *
  * That sum used to carry the footer's 340 px as well. The RULE is unchanged — the list is the
  * only surface with `flex-1`, it springs as long as it has play — and that it survived two
@@ -549,7 +565,10 @@ testOhneWorkspace(
  * with the promise that holds today: the list stays on its floor and the column overflows
  * instead of squeezing.
  */
-const FEDER_GRENZE_PX = 116
+const FEDER_GRENZE_PX = 118
+
+/** What the head gains when the space description arrives (60 → 64). */
+const HEAD_GAIN_PX = 4
 
 for (const { hoehe, gibtDieListeAb } of [
     { hoehe: 900, gibtDieListeAb: 'alles' },
@@ -587,7 +606,7 @@ for (const { hoehe, gibtDieListeAb } of [
         // a tolerance of two decimals is a tenth-of-a-subpixel bound and costs nothing — it
         // used to catch 64.8 − 60 = 4.799999999999997, and the next step of the type scale can
         // bring the decimal back.
-        expect(rail[0].h - platzhalter[0].h).toBeCloseTo(4, 2)
+        expect(rail[0].h - platzhalter[0].h).toBeCloseTo(HEAD_GAIN_PX, 2)
         expect(rail[0].h).toBe(64)
         // The search field always keeps its height — it is `shrink-0`.
         expect(rail[1].h).toBe(platzhalter[1].h)
@@ -600,13 +619,13 @@ for (const { hoehe, gibtDieListeAb } of [
             // SINGLE equation — before it the list and the footer shared the amount, and the
             // range in between was the case two versions of this test had missed.
             expect(listeGibtAb).toBeCloseTo(gewinnt, 2)
-            expect(listeGibtAb).toBeCloseTo(4, 2)
+            expect(listeGibtAb).toBeCloseTo(HEAD_GAIN_PX, 2)
         } else {
             // One pixel below the boundary: the list stands on its floor (`pb-2`) and can only
             // give up 3 px. The fourth is missing from the column — it overflows, and the
             // chassis clips that overflow (`xl:overflow-hidden` on the grid). That is the right
             // failure direction: clipped at the bottom, not squeezed in the middle.
-            expect(listeGibtAb).toBeCloseTo(4 - (FEDER_GRENZE_PX - hoehe), 2)
+            expect(listeGibtAb).toBeCloseTo(HEAD_GAIN_PX - (FEDER_GRENZE_PX - hoehe), 2)
             expect(listeGibtAb).toBeLessThan(gewinnt)
         }
     })

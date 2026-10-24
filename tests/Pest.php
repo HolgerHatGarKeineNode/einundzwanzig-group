@@ -3,6 +3,8 @@
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Tests\TestCase;
 
 /*
@@ -18,6 +20,12 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)
  // ->use(RefreshDatabase::class)
+    // No test leaves the machine: an HTTP request without a fake throws. The guard lives on the
+    // app's factory, a new instance per test, so it goes in `beforeEach`. (Not `Process::`:
+    // `preventStrayProcesses()` only acts once a fake is set, so on its own it guards nothing —
+    // measured; the one process that dials out, `nak` in `BotAnnounce`, never starts in
+    // `BotAnnounceTest`: it only runs `--dry` and the missing-key path.)
+    ->beforeEach(fn () => Http::preventStrayRequests())
     ->in('Feature');
 
 /*
@@ -34,7 +42,11 @@ pest()->extend(TestCase::class)
 |
 */
 pest()->extend(TestCase::class)
-    ->beforeEach(fn () => ensureHostChromium())
+    // ONE closure: a second `->beforeEach()` in the same chain replaces the first.
+    ->beforeEach(function () {
+        Http::preventStrayRequests();
+        ensureHostChromium();
+    })
     ->in('Browser');
 
 /*
@@ -193,6 +205,51 @@ expect()->extend('toBeOne', function () {
 | global functions to help you to reduce the number of lines of code in your test files.
 |
 */
+
+/*
+|--------------------------------------------------------------------------
+| Shared helpers for the Feature files
+|--------------------------------------------------------------------------
+|
+| Pest loads every Feature file into ONE process and gives no order between them, so a
+| global function declared in one test file and called from another is a coin toss: it
+| worked as long as the declaring file happened to load first and raised "Call to undefined
+| function" in ForgeEinzelansichtTest as soon as it did not (2026-10-24, seven cases). Three
+| files had answered that with their own prefixed copy (`autorFakeSessionPubkey`,
+| `longformResponseHtml`, …). What more than one file needs lives here, where Pest loads it
+| before any test file, and a helper that only ONE file needs stays in that file.
+|
+*/
+
+/** Beliebiger 64-hex-Pubkey für eine "angemeldete" Session (Server-Gate, nicht Signer). */
+function fakeSessionPubkey(): string
+{
+    return str_repeat('a', 64);
+}
+
+/**
+ * `TestResponse::getContent()` delegiert (via `__call`) an Symfonys
+ * `Response::getContent(): string|false` — `false`, wenn die Antwort nie einen
+ * Body gesetzt bekam. Für eine normal ausgelieferte 200er-Seite kommt das in
+ * der Praxis nicht vor, aber genau deshalb darf ein Test es nicht kommentarlos
+ * annehmen: würde `false` ungeprüft weitergereicht, prüfte die nachgelagerte
+ * Assertion `false` gegen einen erwarteten String-Ausschnitt — der Test schlüge
+ * dann an einer zufälligen Stelle mit einer irreführenden Meldung fehl, statt
+ * klar zu sagen, dass die Antwort gar keinen Body hatte. Ein nicht lesbares
+ * Prüfstück ist ein Testfehler, keiner, den eine Assertion einfangen sollte.
+ *
+ * @param  TestResponse<Response>  $res
+ */
+function responseHtml(TestResponse $res): string
+{
+    $content = $res->getContent();
+
+    if ($content === false) {
+        throw new RuntimeException('Response::getContent() lieferte false — die Antwort hat keinen Body.');
+    }
+
+    return $content;
+}
 
 /**
  * Liest die von playwright-core mitgelieferte Browser-Registry typisiert ein.

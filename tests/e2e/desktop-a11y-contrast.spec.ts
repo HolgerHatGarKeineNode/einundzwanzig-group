@@ -104,13 +104,50 @@ for (const theme of ['light', 'dark'] as const) {
         ).toBeDefined()
         expect(label?.min, 'Marken-Textträger wird nicht gegen die TEXT-Schwelle geprüft').toBe(4.5)
 
-        // Der Aktiv-Balken der Raum-Zeile: Informationstragende Fläche (1.4.11) —
-        // heute zinc-Text + brand-700-Balken; fällt der Balken aus der bg-brand-700-
-        // Regel, sagt genau diese Zeile es (Kalibrierung siehe Anker-Hauptdatei).
-        expect(
-            aktivMessung.some((m) => m.kind === 'graphic' && m.label === 'Nav-Indikator'),
-            'Aktiv-Balken der Rail-Zeile nicht gemessen — keine Zeile aktiv, oder der Balken trägt die bg-brand-700-Klasse nicht mehr',
-        ).toBe(true)
+        // The active state of the room row — and why no bar is measured here any more.
+        //
+        // Until Concept C (P3, 2026-09-18) the active row carried a `bg-brand-700` bar, and this
+        // line demanded it as „Nav-Indikator" (1.4.11, graphic). The bar went with the design on
+        // purpose (`rail-room-row.blade.php`: "the wash IS the surface, the weight the second
+        // cue; a third would be decoration") — afterwards the test demanded an element that is
+        // not supposed to exist and was red on every run.
+        //
+        // What is measured now is what carries the active state today: surface, colour AND
+        // weight, never colour alone (WCAG 1.4.1). The label colour in light goes through the
+        // sweep below (`text-brand-800`); the weight is the cue that works without colour, and
+        // this assertion holds exactly that.
+        // The pointer is still on the row it just clicked, and `hover:bg-zinc-100` then paints the
+        // row instead of the active wash (measured: rgb(245, 245, 245) / rgb(31, 31, 34) hovered,
+        // the wash rgb(250, 246, 241) / rgb(33, 29, 24)…rgb(36, 26, 13) at rest). Park it outside.
+        await page.mouse.move(1, 1)
+        const aktiv = await rail(page).locator('[aria-current="page"]').first().evaluate(async (el) => {
+            // `transition-colors` sits on the row: read mid-transition the colours are a blend of
+            // the old and the new state (measured: dark wash rgb(33, 29, 24) while running,
+            // rgb(36, 26, 13) once settled), and a ratio computed on a blend is invented. Wait
+            // for the row's own animations — a transition IS a CSS animation to getAnimations().
+            await Promise.all(el.getAnimations().map((animation) => animation.finished.catch(() => undefined)))
+            const stil = getComputedStyle(el)
+
+            return { gewicht: Number(stil.fontWeight), grund: stil.backgroundColor, farbe: stil.color }
+        })
+        console.log(`KONTRAST[${theme}:rail-aktiv] ` + JSON.stringify(aktiv))
+        expect(aktiv.gewicht, 'die aktive Rail-Zeile trägt kein Gewicht ≥ 800 — der Zustand hinge an der Farbe allein (1.4.1)').toBeGreaterThanOrEqual(800)
+        expect(aktiv.grund, 'die aktive Rail-Zeile hat keine eigene Fläche (accent-wash) mehr').not.toBe('rgba(0, 0, 0, 0)')
+        // And its label against exactly this surface, computed directly: in dark it carries
+        // `text-accent` (not `text-brand-*`), so the sweep does not see it there.
+        const kanaele = (farbe: string): number[] => (farbe.match(/[\d.]+/g) ?? []).map(Number)
+        const leuchtdichte = ([r, g, b]: number[]): number => {
+            const lin = (c: number): number => (c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4)
+
+            return 0.2126 * lin(r!) + 0.7152 * lin(g!) + 0.0722 * lin(b!)
+        }
+        const text = kanaele(aktiv.farbe)
+        const flaeche = kanaele(aktiv.grund)
+        expect(text.length === 3 || text[3] === 1, `Beschriftung der aktiven Zeile ist nicht deckend: ${aktiv.farbe}`).toBe(true)
+        expect(flaeche.length === 3 || flaeche[3] === 1, `Fläche der aktiven Zeile ist nicht deckend: ${aktiv.grund}`).toBe(true)
+        const hell = Math.max(leuchtdichte(text), leuchtdichte(flaeche))
+        const dunkel = Math.min(leuchtdichte(text), leuchtdichte(flaeche))
+        expect((hell + 0.05) / (dunkel + 0.05), `aktive Rail-Zeile [${theme}]: ${aktiv.farbe} auf ${aktiv.grund}`).toBeGreaterThanOrEqual(4.5)
 
         expect(measured.length, 'keine Rail-Farbträger gefunden — Messung wertlos').toBeGreaterThan(0)
         for (const m of measured) {
