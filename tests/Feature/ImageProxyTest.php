@@ -166,3 +166,43 @@ it('serves the body itself when no X-Accel prefix is configured', function () {
     $hit->assertOk()->assertHeaderMissing('X-Accel-Redirect');
     expect($hit->getContent())->not->toBe('');
 });
+
+/*
+ * Every refusal must be consumable by a cross-origin <img>: Chromium's Opaque Response
+ * Blocking drops a `text/html` error page with `net::ERR_BLOCKED_BY_ORB` (measured on the
+ * companion app, origin 127.0.0.1). The body stays empty so `onerror` still fires and the
+ * client falls back to its initials.
+ */
+it('answers every refusal with an empty image-typed body, never an HTML page', function (string $preset, string $src, int $status, ?string $upstreamBody, ?string $upstreamType) {
+    config()->set('group.workspace_url', 'wss://workspace.example/');
+    if ($upstreamBody !== null) {
+        Http::fake(['*' => Http::response($upstreamBody, $upstreamBody === '' ? 404 : 200, ['Content-Type' => (string) $upstreamType])]);
+    }
+
+    $response = $this->get('/img/'.$preset.'?src='.urlencode($src));
+
+    $response->assertStatus($status)
+        ->assertHeader('Content-Type', 'image/webp')
+        ->assertHeader('X-Content-Type-Options', 'nosniff');
+    expect($response->getContent())->toBe('');
+})->with([
+    'unknown preset' => ['nope', 'https://1.1.1.1/a.png', 404, null, null],
+    'empty src' => ['avatar', '', 400, null, null],
+    'http src' => ['avatar', 'http://1.1.1.1/a.png', 400, null, null],
+    'private host' => ['avatar', 'https://127.0.0.1/a.png', 400, null, null],
+    'relay-hosted media' => ['avatar', 'https://workspace.example/media/a.jpg', 403, null, null],
+    'upstream 404' => ['avatar', 'https://1.1.1.1/gone.png', 502, '', 'text/html'],
+    'upstream html' => ['avatar', 'https://1.1.1.1/page.png', 502, '<html>nope</html>', 'text/html'],
+    // An SVG stays blocked (script-capable, no magic bytes in the allowlist) — and its
+    // markup must not be echoed back through our origin either.
+    'upstream svg' => ['avatar', 'https://1.1.1.1/logo.svg', 502, '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'image/svg+xml'],
+]);
+
+it('lets the browser cache an upstream failure briefly and a policy rejection longer', function () {
+    Http::fake(['*' => Http::response('', 404)]);
+
+    expect($this->get('/img/avatar?src='.urlencode('https://1.1.1.1/gone.png'))->headers->get('Cache-Control'))
+        ->toContain('max-age=600');
+    expect($this->get('/img/avatar?src='.urlencode('http://1.1.1.1/a.png'))->headers->get('Cache-Control'))
+        ->toContain('max-age=86400');
+});

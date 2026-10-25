@@ -47,16 +47,22 @@ class ImageProxyController extends Controller
 
     private const FETCH_TIMEOUT = 6;
 
+    /** Browser cache for an upstream failure (dead host, 404, not an image), seconds. */
+    private const UPSTREAM_FAILURE_MAX_AGE = 600;
+
+    /** Browser cache for a policy rejection (preset, scheme, private host, relay media), seconds. */
+    private const REJECTION_MAX_AGE = 86400;
+
     public function __invoke(Request $request, string $preset): Response
     {
         $spec = self::PRESETS[$preset] ?? null;
         if ($spec === null) {
-            abort(404);
+            return $this->imageFailure(404, self::REJECTION_MAX_AGE);
         }
 
         $src = (string) $request->query('src', '');
         if ($src === '') {
-            abort(400);
+            return $this->imageFailure(400, self::REJECTION_MAX_AGE);
         }
 
         // ── DER MEDIEN-RIEGEL — bewusst VOR ETag, Cache-Lookup und SSRF-Prüfung ──
@@ -88,7 +94,7 @@ class ImageProxyController extends Controller
         // Deshalb steht die Regel zweimal da, client- UND serverseitig; die
         // serverseitige ist die tragende.
         if ($this->isRelayHostedMedia($src)) {
-            abort(403);
+            return $this->imageFailure(403, self::REJECTION_MAX_AGE);
         }
 
         $etag = '"'.sha1($preset.'|'.$src).'"';
@@ -111,12 +117,12 @@ class ImageProxyController extends Controller
 
         // Cache-Miss → erst jetzt (vor dem ausgehenden Fetch) SSRF prüfen.
         if (! $this->isSafeUrl($src)) {
-            abort(400);
+            return $this->imageFailure(400, self::REJECTION_MAX_AGE);
         }
 
         $encoded = $this->fetchAndEncode($src, $spec);
         if ($encoded === null) {
-            abort(502);
+            return $this->imageFailure(502, self::UPSTREAM_FAILURE_MAX_AGE);
         }
         [$bytes, $mime] = $encoded;
         $disk->put($base.($mime === 'image/gif' ? '.gif' : '.webp'), $bytes);
@@ -146,6 +152,35 @@ class ImageProxyController extends Controller
             'Cache-Control' => 'public, max-age=31536000, immutable',
             'ETag' => $etag,
             'X-Accel-Redirect' => $prefix.'/'.$path,
+        ]);
+    }
+
+    /**
+     * Every refusal of this endpoint, shaped for the `<img>` that asked for it.
+     *
+     * The status stays honest (404 unknown preset, 400 policy, 403 relay media, 502
+     * upstream), only the body changes: `abort()` rendered Laravel's HTML error page, and
+     * a cross-origin `<img>` that receives `text/html` is blocked by Chromium's Opaque
+     * Response Blocking. The companion app loads this proxy from origin `127.0.0.1`, so
+     * every dead avatar there surfaced as `net::ERR_BLOCKED_BY_ORB` (measured 2026-10-25
+     * on /bereich/leute, /directory, /events). Measured in Chromium against a local pair
+     * of origins: `502 text/html` → `ERR_BLOCKED_BY_ORB`; `502 image/webp` with an empty
+     * body → no ORB, and `onerror` fires exactly as before, so the client's fallback
+     * chain (`$imgFallback`, initials) is unchanged.
+     *
+     * Empty body on purpose: a decodable placeholder would be painted by the browser and
+     * `onerror` would never fire — the initials fallback would silently disappear.
+     *
+     * The short `max-age` on an upstream failure keeps one client from asking the same
+     * dead host on every page; a policy rejection is deterministic and may be cached
+     * longer.
+     */
+    private function imageFailure(int $status, int $maxAge): Response
+    {
+        return response('', $status, [
+            'Content-Type' => 'image/webp',
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'public, max-age='.$maxAge,
         ]);
     }
 
