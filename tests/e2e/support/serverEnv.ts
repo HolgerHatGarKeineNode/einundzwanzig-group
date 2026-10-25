@@ -188,6 +188,6 @@ export const testServerEnv = ({ slot, mitBoard = false, ohneWorkspace = false }:
         // `.well-known/nostr.json` with `page.route`, which cannot see a request the SERVER
         // makes — and that request would leave the machine. Production asks through the
         // server (`/nostr/nip05`, `Nip05Resolver`), covered by `Nip05ProxyTest`.
-        GROUP_NIP05_PROXY: 'false',
+        GROUP_HANDLE_PROXY: 'false',
     }
 }

@@ -28,7 +28,7 @@ function nip05Url(array $handles): string
 
 beforeEach(function () {
     Cache::flush();
-    config()->set('group.nip05_proxy', true);
+    config()->set('group.handle_proxy', true);
     nip05Dns(['primal.net' => ['93.184.216.34'], 'example.org' => ['93.184.216.35']]);
 });
 
@@ -139,7 +139,7 @@ it('answers at most MAX_HANDLES per call', function () {
 });
 
 it('makes no outbound request at all when the proxy is switched off', function () {
-    config()->set('group.nip05_proxy', false);
+    config()->set('group.handle_proxy', false);
     Http::fake();
 
     $this->get(nip05Url(['alice@primal.net']))->assertJsonPath('data.0.status', 'disabled');
