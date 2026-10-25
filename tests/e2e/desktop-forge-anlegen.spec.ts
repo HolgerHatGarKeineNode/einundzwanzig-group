@@ -362,6 +362,19 @@ test.describe('Forge: der Anlege-Knopf steht in zwei Bauformen', () => {
         await expect(knopf).toHaveAttribute('aria-expanded', 'true')
         await expect(page.locator('[data-forge-issue-form]')).toHaveCount(1)
 
+        // Wait until the focus trap HAS the focus. The Escape handler sits on the sheet itself
+        // (`x-on:keydown.escape` on `[data-forge-issue-blatt]`), so it only hears a key press
+        // while focus is inside; Alpine's focus plugin moves it in after a `setTimeout` and the
+        // sheet's own 300 ms transition. Pressed earlier — which a busy machine makes likely —
+        // Escape goes to the button behind and the sheet stays open (red in the 2026-10-25
+        // load run). `desktop-forge-feinschliff.spec.ts` waits for the same thing.
+        await expect
+            .poll(() => page.evaluate(() => document.activeElement?.closest('[data-forge-issue-blatt]') !== null), {
+                message: 'the focus never moved into the sheet',
+                timeout: 15_000,
+            })
+            .toBe(true)
+
         await page.keyboard.press('Escape')
         await expect(blatt).toBeHidden()
         await expect(page.locator('[data-forge-issue-form]')).toHaveCount(0)

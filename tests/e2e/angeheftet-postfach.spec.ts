@@ -59,7 +59,7 @@ type PinEntry = { on: boolean; at: number; pos: number }
  * single call waiting on a slow relay under contention would otherwise swallow a whole poll
  * window before the outer loop gets its second attempt.
  */
-function nak(args: readonly string[], attempts = 3, timeoutMs = 5_000): string {
+function nak(args: readonly string[], attempts = 3, timeoutMs = 20_000): string {
     let last: unknown
     for (let i = 0; i < attempts; i++) {
         try {
@@ -186,7 +186,16 @@ test('P3/D7: a pin round trip against the relay — published, requeried, and re
     expect(nachPin[key].at, 'a pinned entry carries a real timestamp, not the seeded 0').toBeGreaterThan(0)
     // The default seed of D8 is LOCAL: it may travel with a real change, but it must not be
     // the only thing in the payload — that case is measured in `js/pinSet.test.ts`.
-    expect(Object.keys(nachPin).length).toBeGreaterThanOrEqual(Object.keys(vorher).length + 1)
+    expect(nachPin[key].on, 'the pin did not arrive as an ON entry').toBe(true)
+    // „More than the seed alone" counted as `keys after >= keys before + 1`, and that is wrong
+    // whenever `key` was ALREADY in the map as a tombstone (`on: false`) — which it is when a
+    // sibling case of this file (or `pin-room.spec.ts`) pinned and unpinned `general` earlier in
+    // the same worker: the pin then flips the old entry and the key count does not move. The
+    // payload is one addressable event of the SHARED test identity per relay, so what an earlier
+    // case left in it depends on which cases the dispatcher gave this worker (1 of 14 repeat
+    // runs, idle machine, 2026-10-25). The claim that survives is the union: everything that was
+    // there plus `key`.
+    expect(Object.keys(nachPin).length).toBeGreaterThanOrEqual(new Set([...Object.keys(vorher), key]).size)
 
     // ══ 2. Unpin — from the CHIP on Start (the touch surface), and the removal has to be
     //     an ENTRY, not a missing key ═══════════════════════════════════════════════════
@@ -301,7 +310,12 @@ test('P3/D5: the five segments at 390x844 — measured, and Direkt is the only o
     await leiste.getByText('Direkt', { exact: false }).first().click()
     await expect(page).toHaveURL(/ansicht=direkt/, { timeout: 15_000 })
     await expect(page.locator('[data-pm-liste]'), 'the Direkt surface never appeared').toBeVisible({ timeout: 25_000 })
-    expect(await istGemountet(), 'Direkt is open and the wrap store is still not there').toBe(true)
+    // Polled: the surface is in the DOM before the store behind it is registered (the module is
+    // loaded on demand), and a single read right after `[data-pm-liste]` appeared caught the gap
+    // in a plain full run on an idle machine (2026-10-25, 1.6 s into the case).
+    await expect
+        .poll(istGemountet, { message: 'Direkt is open and the wrap store is still not there', timeout: 15_000 })
+        .toBe(true)
 
     // Back to „Alle": the store STAYS registered (an Alpine store cannot be removed), but its
     // mount counter falls to 0 and with it the wrap subscription and the unpacking gate. That

@@ -114,6 +114,45 @@ async function expectFollowLabel(page: Page, label: string, timeout = 40_000): P
 }
 
 /**
+ * Wait for the button to be ARMED (`Folgen`), asking again when the arming read came back
+ * without an answer.
+ *
+ * `READ_TIMEOUT_MS` (`follows.ts`) bounds the arming read at 6 s, and a read that overruns it
+ * ends in `listReadFailed: true` — a final state that this card, unlike the bulk bar, does not
+ * offer to leave (see {@link expectFollowLabel}). On a machine with the CPU busy even the local
+ * test relay overruns 6 s now and then (seen 2026-10-25 in 1 of 4 full runs: `listSeen: false,
+ * listReadFailed: true` and 40 s of waiting for a label that can no longer arrive). Waiting
+ * longer cannot help, so the only move that matches what a reader does is the one the product
+ * allows: reload and open the card again, which starts a new arming read. Bounded at 3 tries,
+ * and ONLY for that exact state — any other reason the label is missing still fails at once.
+ */
+async function expectFollowArmed(page: Page, person: string): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            await expectFollowLabel(page, 'Folgen', attempt < 3 ? 20_000 : 40_000)
+
+            return
+        } catch (e) {
+            const failed = await page
+                .evaluate(
+                    () =>
+                        (window as unknown as { Alpine: { store(n: string): { listReadFailed?: boolean } } }).Alpine?.store(
+                            'follows',
+                        )?.listReadFailed === true,
+                )
+                .catch(() => false)
+            if (!failed || attempt >= 3) {
+                throw e
+            }
+            console.log(`[follow] arming read overran its bound (attempt ${attempt}) — reload and open the card again`)
+            await page.reload()
+            await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 20_000 })
+            await openProfileCard(page, person)
+        }
+    }
+}
+
+/**
  * **Wait until the RELAY is holding a different kind 3 than `previousId`** — the barrier
  * for a write whose effect on the BUTTON is a coin flip.
  *
@@ -223,7 +262,7 @@ test('CORE: a declared relay that never answers stops the write — the relay ke
         await page.reload()
         await expect(page.locator('.list-stagger').getByText('Relay Admin')).toBeVisible({ timeout: 20_000 })
         await openProfileCard(page, person)
-        await expectFollowLabel(page, 'Folgen')
+        await expectFollowArmed(page, person)
         await page.locator('[data-person-follow]').click()
         await expectFollowLabel(page, 'Entfolgen')
         await expect(page.locator('[data-person-follow-fehler]')).toBeHidden()
@@ -270,7 +309,7 @@ test('the follow and the unfollow land on the relay, and the base keeps its colu
 
     await openDirectory(page, reader)
     await openProfileCard(page, person)
-    await expectFollowLabel(page, 'Folgen')
+    await expectFollowArmed(page, person)
 
     await page.locator('[data-person-follow]').click()
     await expectFollowLabel(page, 'Entfolgen')
@@ -329,7 +368,7 @@ test('the follow flow makes no console noise, and the channel that says so is li
 
     await openDirectory(page, reader)
     await openProfileCard(page, person)
-    await expectFollowLabel(page, 'Folgen')
+    await expectFollowArmed(page, person)
     await page.locator('[data-person-follow]').click()
     await expectFollowLabel(page, 'Entfolgen')
     // The other direction of the same handler, because one that only ever runs one way is

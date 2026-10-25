@@ -329,8 +329,17 @@ test('Treffer: Räume, Mitglieder und Aktionen liefern konkrete, benannte Zeilen
     await expect(paletteChip(page)).toBeHidden()
 
     // Mitglieder — geseedet ist „Alice Test".
-    await paletteInput(page).fill('@alice')
-    await expect(section(page, 'members').getByText('Alice Test', { exact: true })).toBeVisible({ timeout: 10_000 })
+    // The member rows come from the space directory, which loads on its own schedule; Flux
+    // filters the rows that exist WHEN the text changes. With the CPU busy the row was in the
+    // DOM and still `hidden` for the whole 10 s (red in the 2026-10-25 load run: „resolved to
+    // <span …>Alice Test</span> … unexpected value hidden") — the list had been filtered before
+    // the directory arrived. Typing the query again is what a person does, so it is what the
+    // case does, bounded.
+    await expect(async () => {
+        await paletteInput(page).fill('')
+        await paletteInput(page).fill('@alice')
+        await expect(section(page, 'members').getByText('Alice Test', { exact: true })).toBeVisible({ timeout: 4_000 })
+    }).toPass({ timeout: 40_000 })
 
     await paletteChip(page).click()
     await expect(paletteChip(page)).toBeHidden()

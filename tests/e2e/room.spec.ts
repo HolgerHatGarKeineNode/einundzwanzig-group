@@ -296,7 +296,7 @@ test('M4c: leerer Netz-Load bei warmem Cache löst Resync aus (Notification-Kalt
     // Suite-Parallelität (6 Worker, viele gleichzeitige Chromium-Boots) reicht Playwrights
     // Default-Testtimeout (30s) sonst knapp nicht, obwohl die einzelnen `expect`-Timeouts unten
     // eingehalten werden (das Gesamt-Testtimeout deckelt sie sonst vorzeitig).
-    test.setTimeout(60_000)
+    test.setTimeout(120_000)
     await openRoom(page)
     await expect(page.getByText('Willkommen im Space! 👋')).toBeVisible({ timeout: 15_000 })
     await waitForCachePersisted(page, 'Willkommen im Space!')
@@ -1808,7 +1808,11 @@ test('C4: @-Mention fügt nostr:npub ein, trägt p-Tag, rendert beide Erwähnung
     // Adressiert über die Klasse `.mention`, nicht über das Tag — geprüft ist, dass
     // der Name im Text steht, nicht welches Element ihn trägt.
     const rendered = page.locator('div.group', { hasText: marker })
-    await expect(rendered.locator('.chat-content .mention')).toHaveText(['@Relay Admin', '@Relay Admin'], { timeout: 15_000 })
+    // 45 s and not 15: the second mention shows the short npub until the author's profile has
+    // been resolved, and that is a relay round trip of its own — with the CPU busy it was still
+    // „@npub1cra…lhwml" after 15 s (full run under load, 2026-10-25). The wait is on the name
+    // appearing, so a longer bound costs nothing when it appears at once.
+    await expect(rendered.locator('.chat-content .mention')).toHaveText(['@Relay Admin', '@Relay Admin'], { timeout: 45_000 })
     // Und keine Fläche über dem Text: die Randmarke `$quoteRail` (chat-row.blade.php)
     // trägt jede Referenz-Karte — Antwort-Vorschau, Zitat und der frühere Chip. Zwei
     // Signale ODER-verknüpft, Begründung bei `kartenFlaechen` in quote-card.spec.ts:

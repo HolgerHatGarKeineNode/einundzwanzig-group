@@ -62,7 +62,7 @@ type RelayEvent = { id: string; pubkey: string; kind: number; content: string; t
 type PinEntry = { on: boolean; at: number; pos: number }
 
 /** `nak` with bounded retries — the shape `angeheftet-postfach.spec.ts` established. */
-function nak(args: readonly string[], attempts = 3, timeoutMs = 5_000): string {
+function nak(args: readonly string[], attempts = 3, timeoutMs = 20_000): string {
     let last: unknown
     for (let i = 0; i < attempts; i++) {
         try {

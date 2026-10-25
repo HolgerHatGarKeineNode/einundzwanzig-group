@@ -148,15 +148,29 @@ const mutedAtRelay = (pk: string, nsec: string): string[] => {
  * — same shape and same reason as `clickRowMenuItem` in `bookmarks.spec.ts`: a streamed
  * message or a late profile re-renders the row and takes the dialog with it.
  */
-async function togglePersonFromRow(page: Page, message: string): Promise<void> {
+async function openProfileCard(page: Page, message: string): Promise<void> {
     const button = page.locator('[data-person-mute]')
+    const row = page.locator('div.chat-row', { hasText: message }).first()
+    // One attempt = click the row's profile button and give the card TIME to open. This used
+    // to wait 2 s and then click the profile button AGAIN; with the CPU busy the card needs
+    // longer than that, and the second click landed on a modal that was still opening and
+    // toggled it shut — so no attempt ever saw the button (reproduced 2026-10-25 under 14 CPU
+    // hogs: person-mute :187, :260 and :309 all fell at once). The retry stays because the
+    // history re-renders while it loads and can swallow the first click — but only after an
+    // attempt has had a load-proof window, not after 2 s. The window is a bound on a condition
+    // that is awaited anyway, so it costs nothing when the card opens at once.
     await expect(async () => {
         if (!(await button.isVisible())) {
-            const row = page.locator('div.chat-row', { hasText: message }).first()
-            await row.getByRole('button', { name: 'Profil anzeigen' }).first().click()
+            await row.getByRole('button', { name: 'Profil anzeigen' }).first().click({ timeout: 10_000 })
         }
-        await button.click({ timeout: 2_000 })
-    }).toPass({ timeout: 20_000 })
+        await expect(button).toBeVisible({ timeout: 10_000 })
+    }).toPass({ timeout: 60_000 })
+}
+
+async function togglePersonFromRow(page: Page, message: string): Promise<void> {
+    await openProfileCard(page, message)
+    // The modal enters with a scale transition; `click` waits for the button to be stable.
+    await page.locator('[data-person-mute]').click({ timeout: 15_000 })
 }
 
 /**
@@ -273,13 +287,7 @@ test('P6 LAYOUT (touch): the hide action reaches 44 px on a coarse pointer at 37
         const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches)
         expect(coarse, 'the context does not report a coarse pointer — the rule under test never applies here').toBe(true)
 
-        const row = page.locator('div.chat-row', { hasText: MESSAGE_OF_HIDDEN }).first()
-        await expect(async () => {
-            if (!(await page.locator('[data-person-mute]').isVisible())) {
-                await row.getByRole('button', { name: 'Profil anzeigen' }).first().click()
-            }
-            await expect(page.locator('[data-person-mute]')).toBeVisible({ timeout: 2_000 })
-        }).toPass({ timeout: 20_000 })
+        await openProfileCard(page, MESSAGE_OF_HIDDEN)
 
         // Settled, not read once: the Flux modal enters with a scale transition, and a
         // single read lands mid-animation. Measured on 2026-09-05 during the enter:
@@ -322,13 +330,7 @@ test('P6 LAYOUT: the hide action and the management list at 375 px and 1280 px �
         await expect(page.getByText(MESSAGE_OF_HIDDEN).first()).toBeVisible({ timeout: 20_000 })
 
         // ── The action on the profile card ──────────────────────────────────
-        const row = page.locator('div.chat-row', { hasText: MESSAGE_OF_HIDDEN }).first()
-        await expect(async () => {
-            if (!(await page.locator('[data-person-mute]').isVisible())) {
-                await row.getByRole('button', { name: 'Profil anzeigen' }).first().click()
-            }
-            await expect(page.locator('[data-person-mute]')).toBeVisible({ timeout: 2_000 })
-        }).toPass({ timeout: 20_000 })
+        await openProfileCard(page, MESSAGE_OF_HIDDEN)
 
         // Settled first — the modal enters with a scale transition, so a single read
         // measures a shrunken control. "Two consecutive reads agree" rather than a

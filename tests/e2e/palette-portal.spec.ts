@@ -109,6 +109,30 @@ test('typing issues NO further request — the query stays on the device (D6)', 
 
     // Everything up to here may have requested whatever it needed (page, assets, relay).
     // From here on the only thing that happens is typing.
+    //
+    // **The boundary is "the app has gone quiet", not "the palette is open".** The app's own
+    // boot still has requests in flight when the palette opens — the logged-in user's
+    // `/nostr/profiles?pubkeys=…` is one — and on a busy machine they land AFTER the first
+    // keystroke and are counted against the typing (measured 2026-10-25: red in 2 of 4 full
+    // runs, the request carrying nothing but the user's own pubkey). A request count that has
+    // not moved for 1.5 s is the condition; the wait costs 1.5 s on a quiet app and exactly as
+    // long as the boot needs on a slow one.
+    let zuletzt = -1
+    let seit = Date.now()
+    await expect
+        .poll(
+            () => {
+                const jetzt = zaehler.alle().length
+                if (jetzt !== zuletzt) {
+                    zuletzt = jetzt
+                    seit = Date.now()
+                }
+
+                return Date.now() - seit >= 1_500
+            },
+            { timeout: 60_000, intervals: [250], message: 'the app never went quiet before the typing started' },
+        )
+        .toBe(true)
     const vorher = zaehler.alle().length
 
     for (const stueck of ['g', 'r', 'a', 'z', ' ', 't', 'e', 's', 't']) {

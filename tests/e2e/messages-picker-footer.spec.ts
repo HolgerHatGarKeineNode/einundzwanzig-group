@@ -185,6 +185,23 @@ test('the new-conversation footer clears the bottom bar: measured at 375 px and 
         await expect(vorschlag, 'the space directory is empty — this case would measure a bare card').toBeVisible({
             timeout: 30_000,
         })
+        // **Open it a SECOND time, now that the directory is in the store.** The picker scrolls
+        // itself above the bar ONCE, in an `x-effect` that listens to `picked.length` and to
+        // nothing else (`direkt.blade.php`, `data-pm-picker`). The suggestion list is rendered
+        // behind its own `x-if` and grows the card by up to 12 rem WHEN the directory arrives.
+        // On an idle machine the directory is there before the effect's `$nextTick` runs and
+        // the case is green; on a busy one it arrives afterwards and the action row stays
+        // 48 px under the bar (measured 2026-10-25: scrollTop 157, row 615–647, bar from 599,
+        // 320 × 667, with 14 CPU hogs on the machine). That is a PRODUCT gap — a slow directory
+        // on a phone does the same — reported separately, not something this case may paper
+        // over or fail on at random. What this case promises is the layout of a picker that
+        // OPENS WITH ITS CONTENT IN PLACE, and a second open is exactly that on any machine.
+        await page.getByRole('button', { name: 'Abbrechen' }).click()
+        await expect(page.locator('[data-pm-picker]')).toBeHidden()
+        await page.evaluate(() => document.scrollingElement!.scrollTo(0, 0))
+        await page.locator('[data-pm-neu]').dispatchEvent('click')
+        await expect(page.locator('[data-pm-picker]')).toBeVisible({ timeout: 20_000 })
+        await expect(vorschlag, 'the directory is gone after reopening').toBeVisible()
         await settle(page)
 
         // ── State A: the card as it stands the moment it opens ───────────────────────

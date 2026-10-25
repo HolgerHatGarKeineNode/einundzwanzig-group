@@ -384,7 +384,7 @@ test.describe('Forge: der PR-Diff und die Datenlücken des Steckbriefs (P7b)', (
         // Zwei komplette Einzelseiten-Ladezyklen (Login + Navigation + Relay-
         // Bestand) passen nicht in die 30-s-Norm — hier zählt die Aussage über
         // drei Sätze, nicht die Geschwindigkeit.
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         await oeffnePull(page, prIds[PR_OHNE])
 
         const beide = prBlock(page, PR_OHNE)

@@ -3,7 +3,7 @@ import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { nsecEncode } from 'nostr-tools/nip19'
-import { openedUrls, routeVerein, stubVereinDocument, vereinConfigBody, vereinMeBody } from './support/verein'
+import { openedUrls, routeVerein, stimmeStatutenZu, stubVereinDocument, vereinConfigBody, vereinMeBody } from './support/verein'
 
 /**
  * Regressionsnetz zu den Befunden des `security-auditor` am fertigen
@@ -70,9 +70,7 @@ test('F2: scheitert die Signatur, erscheint ein Ausweg — die Fläche bleibt ni
 
     // Statuten → Antrag.
     await expect(page.getByTestId('verein-statuten')).toBeVisible({ timeout: 15_000 })
-    await page.getByTestId('verein-statuten-zustimmung').check()
-    await page.getByTestId('verein-statuten-weiter').click()
-    await expect(page.getByTestId('verein-antrag')).toBeVisible({ timeout: 15_000 })
+    await stimmeStatutenZu(page)
 
     await breakSigning(page)
     await page.getByTestId('verein-antrag-senden').click()
@@ -258,7 +256,7 @@ test('F5: nach Ablauf des Plans fasst kein App-Wechsel mehr von selbst nach', as
     //
     // Hier gemessen wird die Ursache, nicht die Wirkung: der Plan ist durch, und
     // ein Sichtbarkeitswechsel darf keine zehnte Runde erzeugen.
-    test.setTimeout(45_000)
+    test.setTimeout(120_000)
     const { nsec } = freshNsec()
     await setupAndLogin(page, nsec)
 

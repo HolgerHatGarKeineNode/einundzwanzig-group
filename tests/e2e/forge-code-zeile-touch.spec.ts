@@ -176,7 +176,7 @@ test.afterAll(() => {
 
 test.describe('Zeigegerät Maus (Standard-Kontext)', () => {
     test('die Codezeile misst NICHT 44 px — Grundlage für den Kontrast zu coarse', async ({ page }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         await verdrahteGit(page)
         await ladeBaum(page)
 
@@ -197,7 +197,7 @@ test.describe('Zeigegerät Touch (eigener Context, hasTouch: true)', () => {
     test.use({ hasTouch: true })
 
     test('die Codezeile misst 44 px unter pointer:coarse — gerendert, nicht nur im Stylesheet', async ({ page }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         // Vorbedingung: der Context sieht wirklich `pointer: coarse`, sonst
         // misst die Zusage gleich weiter unten nichts.
         expect(

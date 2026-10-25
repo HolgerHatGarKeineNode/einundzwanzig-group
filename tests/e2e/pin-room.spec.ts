@@ -297,7 +297,7 @@ test.describe('Pin/Unpin (C, zooid)', () => {
     })
 
     test('Kaltstart: ein gesetzter Pin übersteht Reload mit geblocktem Relay (aus IndexedDB, nicht vom Netz)', async ({ page }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const h = trackRoom(`pin2${rnd()}`)
         createZooidRoomNak(h, 'Pin2')
         const marker = `P2-${rnd()}`
@@ -425,7 +425,7 @@ test.describe('Pin/Unpin (D, Buzz — nur E2E_RELAY=buzz)', () => {
     test.skip(process.env.E2E_RELAY !== 'buzz', 'nur im Buzz-Modus relevant')
 
     test('Jedes Mitglied darf pinnen (Owner) — Kaltstart übersteht geblockten Relay', async ({ page, browser, baseURL }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const marker = `PB1-${rnd()}`
         publishBuzzRaw(BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, marker)
 
@@ -495,7 +495,7 @@ test.describe('Pin/Unpin (D, Buzz — nur E2E_RELAY=buzz)', () => {
     })
 
     test('Autor löst den eigenen Pin OHNE Admin-Rolle — ein anderes Mitglied sieht "Loslösen" für einen fremden Pin gar nicht erst', async ({ page }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const marker = `PB2-${rnd()}`
         publishBuzzRaw(BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, marker)
 
@@ -525,7 +525,7 @@ test.describe('Pin/Unpin (D, Buzz — nur E2E_RELAY=buzz)', () => {
     })
 
     test('"target event not found" (Race: Pin extern bereits gelöscht) gilt als Erfolg — kein Fehler-Callout', async ({ page }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const marker = `PB3-${rnd()}`
         const targetId = publishBuzzRaw(BUZZ_ROOM_WELCOME, BUZZ_OWNER_SEC_HEX, marker)
 

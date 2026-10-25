@@ -1,6 +1,7 @@
 import { test, expect, type Page } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
+import { bisDaOderNeuLaden } from './support/laden'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -447,10 +448,29 @@ test.describe('Forge: der Code-Browser', () => {
     /** Repository laden und den Code-Reiter öffnen. */
     async function oeffneCode(page: Page): Promise<void> {
         await oeffneRepo(page, REPO_D)
-        if ((await page.locator('[data-forge-readme]').getAttribute('data-lage')) === 'bereit') {
-            await page.locator('[data-forge-readme-start]').click()
-        }
-        await expect(page.locator('[data-forge-readme]')).toHaveAttribute('data-lage', 'da', { timeout: 60_000 })
+        // The clone runs in the browser against the stubbed git endpoint and ends in `fehler` when
+        // a request of it fails — on a busy machine one did, once in a full run (2026-10-25:
+        // `laedt` → `fehler`, 120 polls of „fehler", red after 60 s). `fehler` is final for that
+        // page load, so waiting longer cannot help; starting the clone again from a fresh load
+        // can (the stub answers the same every time). Bounded at 3 attempts; see `support/laden.ts`.
+        await bisDaOderNeuLaden(
+            page,
+            'README-Klon (lage=da)',
+            async (fenster) => {
+                if ((await page.locator('[data-forge-readme]').getAttribute('data-lage')) === 'bereit') {
+                    await page.locator('[data-forge-readme-start]').click()
+                }
+                await expect(page.locator('[data-forge-readme]')).toHaveAttribute('data-lage', 'da', { timeout: fenster })
+            },
+            async () => {
+                await expect(page.locator('[data-forge-readme]')).not.toHaveAttribute('data-lage', 'pruefe', { timeout: 30_000 })
+            },
+            {
+                fenster: 40_000,
+                diagnose: async () =>
+                    ((await page.locator('[data-forge-readme]').innerText({ timeout: 2_000 })) || '').replace(/\s+/g, ' ').slice(0, 240),
+            },
+        )
         await page.getByRole('tab', { name: 'Code', exact: true }).click()
         await expect(page.locator('[data-forge-baum]')).toBeVisible({ timeout: 30_000 })
     }

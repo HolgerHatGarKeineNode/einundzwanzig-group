@@ -743,7 +743,7 @@ test('Reader: schweigender Relay zeigt Fehler-Callout und Erneut laden — NICHT
     page,
     baseURL,
 }) => {
-    test.setTimeout(60_000) // EOSE-Timeout des schwarzen Lochs (~3 s) + Login — äußerer Deckel
+    test.setTimeout(120_000) // EOSE-Timeout des schwarzen Lochs (~3 s) + Login — äußerer Deckel
 
     const ws = boardWs(baseURL as string)
     const identifier = `lf-silent-${rnd()}`
@@ -780,7 +780,7 @@ test('Reader: schweigender Relay zeigt Fehler-Callout und Erneut laden — NICHT
 })
 
 test('Reader: „Erneut laden" wählt den Relay neu an — am Verbindungszähler belegt', async ({ page, baseURL }) => {
-    test.setTimeout(60_000) // zwei EOSE-Timeouts des schwarzen Lochs + Login
+    test.setTimeout(120_000) // zwei EOSE-Timeouts des schwarzen Lochs + Login
 
     const ws = boardWs(baseURL as string)
     const identifier = `lf-retry-${rnd()}`

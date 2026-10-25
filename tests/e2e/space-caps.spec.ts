@@ -68,16 +68,34 @@ test.describe('hasNip70', () => {
 /**
  * Sichert die reale Annahme ab, auf der der Filter beruht: die beiden EINUNDZWANZIG-
  * Relays liefern ihr NIP-11 mit bzw. ohne NIP-29. Reißt, falls sich das je ändert.
+ *
+ * **OPT-IN (`E2E_LIVE_NIP11=1`), nicht Teil des Regellaufs.** Das ist ein Drift-Fühler gegen
+ * die ÖFFENTLICHEN Relays: `request` ist der Node-seitige HTTP-Client und läuft an der
+ * Chromium-Hermetik (`--host-resolver-rules`, Relay-Wächter) vorbei, der Fall verließ also
+ * bei jedem Lauf die Maschine. Das Zeitbudget- und Hermetik-Gebot dieser Suite ("kein Test
+ * verlässt die Maschine") verträgt das nicht — und der Fall hat es auch bewiesen: im
+ * Vollauf vom 2026-10-25 hingen beide Fälle 90 s (bis zum Test-Timeout), einzeln liefen sie
+ * in 0,3 s. Die LOGIK des Filters bleibt im Regellauf durch die vier Fälle oben gedeckt,
+ * die genau diese `supported_nips` als aufgezeichnete Werte tragen; was hier fehlt, ist nur
+ * der Abgleich der Aufzeichnung mit der Wirklichkeit. Er wird nicht registriert, solange
+ * niemand ihn anfordert (kein `test.skip`: ein übersprungener Fall ist ein stiller Fall).
+ *
+ *   E2E_LIVE_NIP11=1 npx playwright test tests/e2e/space-caps.spec.ts
  */
-test.describe('reale NIP-11-Annahme', () => {
-    for (const [host, expected] of [
-        ['group.einundzwanzig.space', true],
-        ['nostr.einundzwanzig.space', false],
-    ] as const) {
-        test(`${host} führt NIP-29: ${expected}`, async ({ request }) => {
-            const res = await request.get(`https://${host}/`, { headers: { Accept: 'application/nostr+json' } })
-            const nips = ((await res.json()).supported_nips ?? []).map(String)
-            expect(nips.includes('29')).toBe(expected)
-        })
-    }
-})
+if (process.env.E2E_LIVE_NIP11 === '1') {
+    test.describe('reale NIP-11-Annahme (Drift-Fühler, Netz)', () => {
+        for (const [host, expected] of [
+            ['group.einundzwanzig.space', true],
+            ['nostr.einundzwanzig.space', false],
+        ] as const) {
+            test(`${host} führt NIP-29: ${expected}`, async ({ request }) => {
+                const res = await request.get(`https://${host}/`, {
+                    headers: { Accept: 'application/nostr+json' },
+                    timeout: 15_000,
+                })
+                const nips = ((await res.json()).supported_nips ?? []).map(String)
+                expect(nips.includes('29')).toBe(expected)
+            })
+        }
+    })
+}

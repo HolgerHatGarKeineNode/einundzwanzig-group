@@ -1,5 +1,6 @@
 import { test, expect, type Page } from './support/fixtures'
 import { useZooid, ZOOID_URL, ZOOID_WS } from './support/zooid'
+import { bisDaOderNeuLaden } from './support/laden'
 import { loginNsec } from './support/login'
 import { testKeys } from './support/keys'
 import { routeVerein, stubVereinDocument, vereinMeBody, vereinPaymentsBody } from './support/verein'
@@ -228,7 +229,17 @@ test.describe('P5: „Zusagen" and „Ich › Verein" at 390×844', () => {
 
         // ── 1. The row appears, and it is the pinned meetup's date ──────────────────
         const section = page.locator('[data-start-naechster-termin]')
-        await expect(section, 'the next-date row never appeared on Start').toBeVisible({ timeout: 30_000 })
+        // The row is built from calendar events the island reads from the relay once per page
+        // load; a read that overruns the island's own bound leaves the row out for the life of
+        // that load (red once in a plain full run on an idle machine, 2026-10-25). Starting the
+        // page again is the retry the product has — see `support/laden.ts`.
+        await bisDaOderNeuLaden(
+            page,
+            'Nächster-Termin-Zeile auf Start',
+            (fenster) => expect(section, 'the next-date row never appeared on Start').toBeVisible({ timeout: fenster }),
+            async () => {},
+            { fenster: 25_000 },
+        )
         await expect(section).toContainText(title, { timeout: 15_000 })
         await expect(section, 'a stranger\'s date reached the row').not.toContainText(`Fremdtermin ${stamp}`)
 

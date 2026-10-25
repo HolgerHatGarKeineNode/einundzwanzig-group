@@ -165,7 +165,7 @@ test('Zitatkarte: im geladenen Fenster löst sofort auf, Klick springt zur zitie
 // ── 2) Außerhalb des Fensters, Selbstzitat: asynchron aufgelöst, Klick öffnet Thread warm, html stabil ──
 
 test('Zitatkarte: außerhalb des Fensters — Selbstzitat löst asynchron auf, Klick öffnet den Thread warm, das gerenderte html bleibt stabil', async ({ page }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(120_000)
     // Root lebt in einem ZWEITEN Raum, den der Browser NIE besucht — „außerhalb des
     // Fensters" damit strukturell garantiert (kein Ratespiel über die
     // Auto-Nachlade-Schwelle des Scrollers, `js/scroll.ts` threshold:3000px, die bei
@@ -501,7 +501,7 @@ test('Thread-Panel: ein Kommentar mit Profil-Referenz zeigt den Mention inline, 
 // ── 9) Thread-Panel: ein RAUMFREMDES Zitat wird nachgeladen ─────────────────────────
 
 test('Thread-Panel: ein Kommentar mit raumfremdem Zitat zeigt erst die Kennung und löst nach dem Nachladen auf', async ({ page }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(120_000)
     // Das zitierte Ereignis lebt in einem Raum, den dieser Browser NIE besucht — genau
     // wie in Test 2, aber diesmal im THREAD. Der Unterschied ist nicht kosmetisch: der
     // Raum-Feed reicht `collectRefEvents` nur seine kind-9-Nachrichten (feeds.ts:1094),

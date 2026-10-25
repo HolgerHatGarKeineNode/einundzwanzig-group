@@ -1,6 +1,7 @@
 import { test, expect, type Page } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
+import { bisDaOderNeuLaden } from './support/laden'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 
@@ -77,16 +78,8 @@ function publiziere(args: string[]): string {
 let ids: string[] = []
 let pubkey = ''
 
-async function forge(page: Page, breite?: number): Promise<void> {
-    await useZooid(page)
-    await page.addInitScript((url) => {
-        ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
-    }, `${ZOOID_WS}/`)
-    if (breite) {
-        await page.setViewportSize({ width: breite, height: 1000 })
-    }
-    await loginNsec(page, NSEC)
-    await page.goto('/bereich/forge')
+/** Wait for the Forge island to leave `loading` and show a first repo. */
+async function warteAufInsel(page: Page, fenster = 30_000): Promise<void> {
     // Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `loading` steht,
     // sind die Regionen per `x-show` aus und jede Messung liefe gegen 0 — grün,
     // ohne irgendetwas geprüft zu haben.
@@ -98,9 +91,54 @@ async function forge(page: Page, breite?: number): Promise<void> {
             return !!el && !!A && A.$data(el).loading === false
         },
         undefined,
-        { timeout: 30_000 },
+        { timeout: fenster },
     )
-    await expect(page.locator('[data-forge-repo]').first()).toBeVisible({ timeout: 30_000 })
+    await expect(page.locator('[data-forge-repo]').first()).toBeVisible({ timeout: fenster })
+}
+
+/** The two Prüfstand repos and their issue counts, as the island's overview holds them. */
+const pruefstandZaehlung = (page: Page) =>
+    page.evaluate((tags) => {
+        const el = document.querySelector('[x-data^="nostrForge"]')
+        const A = (
+            window as unknown as {
+                Alpine?: { $data(e: Element): { overview?: { repos?: { dtag: string; issueCount: number }[] } } }
+            }
+        ).Alpine
+        const repos = (el && A ? A.$data(el).overview?.repos : undefined) ?? []
+
+        return {
+            viel: repos.find((r) => r.dtag === tags[0])?.issueCount ?? -1,
+            wenig: repos.find((r) => r.dtag === tags[1])?.issueCount ?? -1,
+        }
+    }, [REPO_VIEL, REPO_WENIG])
+
+async function forge(page: Page, breite?: number): Promise<void> {
+    await useZooid(page)
+    await page.addInitScript((url) => {
+        ;(window as unknown as { __nostrWorkspace: string }).__nostrWorkspace = url
+    }, `${ZOOID_WS}/`)
+    if (breite) {
+        await page.setViewportSize({ width: breite, height: 1000 })
+    }
+    await loginNsec(page, NSEC)
+    await page.goto('/bereich/forge')
+    // The island AND the data these cases measure must be there before they start — the specs
+    // read it back from the relay in `beforeAll`, so it exists. `loading === false` only says
+    // that the first load round ended, and on a busy machine that round ends at its 3 s bound
+    // with nothing, or with the repos but not their issues ("Die Forge ist gerade nicht
+    // erreichbar."); see `support/laden.ts`. One retry unit: wait for the island, then for the counts.
+    await bisDaOderNeuLaden(
+        page,
+        'Forge-Insel mit den Prüfstand-Repos und ihren Issues',
+        async (fenster) => {
+            await warteAufInsel(page, fenster)
+            await expect
+                .poll(() => pruefstandZaehlung(page), { timeout: fenster })
+                .toEqual({ viel: 3, wenig: 1 })
+        },
+        async () => {},
+    )
 }
 
 test.describe('Forge-Feinschliff (P6)', () => {
@@ -279,7 +317,15 @@ test.describe('Forge-Feinschliff (P6)', () => {
             return true
         })
         expect(nachName).toBe(true)
-        await page.waitForTimeout(200)
+        // Polled, not slept: after the `change` event Alpine re-renders on its own schedule,
+        // and a fixed 200 ms found the list unsorted/empty on a busy machine (red in the
+        // 2026-10-25 load run: „Die Sonde findet die Prüfstands-Repos nicht").
+        await expect
+            .poll(async () => (await namen()).length, {
+                message: 'Die Sonde findet die Prüfstands-Repos nicht — sie misst nichts.',
+                timeout: 20_000,
+            })
+            .toBe(2)
         const alphabetisch = await namen()
         console.log('[P6] Reihenfolge „Nach Name":', JSON.stringify(alphabetisch))
         expect(alphabetisch.length, 'Die Sonde findet die Prüfstands-Repos nicht — sie misst nichts.').toBe(2)
@@ -323,13 +369,18 @@ test.describe('Forge-Feinschliff (P6)', () => {
                 el.dispatchEvent(new Event('change', { bubbles: true }))
             }, wert)
 
+        // „Von mir" must leave the count where it was. Nothing to wait FOR here — the
+        // assertion is that nothing changes — so the filter state is awaited instead (the
+        // select carries the value) and then the list is read twice, a frame apart.
         await setzeScope('von-mir')
-        await page.waitForTimeout(200)
+        await expect(page.locator('[data-forge-scope]')).toHaveValue('von-mir')
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
         expect(await zaehleIssues(), '„Von mir" hat die eigenen Issues weggefiltert').toBe(alle)
 
         await setzeScope('zugewiesen')
-        await page.waitForTimeout(200)
-        expect(await zaehleIssues(), '„Mir zugewiesen" zeigt Vorgänge ohne Zuweisung').toBe(0)
+        await expect
+            .poll(zaehleIssues, { message: '„Mir zugewiesen" zeigt Vorgänge ohne Zuweisung', timeout: 15_000 })
+            .toBe(0)
 
         // Die Live-Region sagt, was der Filter getan hat. Ohne sie ist eine
         // gefilterte Liste von einem leeren Workspace nicht zu unterscheiden.
@@ -338,8 +389,7 @@ test.describe('Forge-Feinschliff (P6)', () => {
         await expect(trefferzahl).not.toHaveText('')
 
         await setzeScope('alle')
-        await page.waitForTimeout(200)
-        await expect(trefferzahl, 'Ohne aktiven Filter ist „n von n" nur Lärm').toHaveText('')
+        await expect(trefferzahl, 'Ohne aktiven Filter ist „n von n" nur Lärm').toHaveText('', { timeout: 15_000 })
     })
 
     /** Balken und Gesichter — samt der Zahl, die die Aussage trägt. */
@@ -499,9 +549,19 @@ test.describe('Forge-Feinschliff (P6)', () => {
         await page.setViewportSize({ width: 390, height: 844 })
 
         const knopf = page.locator('[data-forge-fab]')
-        await expect(knopf, 'Ohne Schreibrecht gibt es den Knopf nicht — dann misst dieser Test nichts').toHaveCount(1, {
-            timeout: 30_000,
-        })
+        // The button needs the maintainer data of THIS repo page, which is its own load round
+        // (`loadRepoDetail`) with the same 3 s bound — see `support/laden.ts`.
+        await bisDaOderNeuLaden(
+            page,
+            'Handlungsknopf der Repo-Seite',
+            (fenster) =>
+                expect(knopf, 'Ohne Schreibrecht gibt es den Knopf nicht — dann misst dieser Test nichts').toHaveCount(1, {
+                    timeout: fenster,
+                }),
+            async () => {
+                await page.setViewportSize({ width: 390, height: 844 })
+            },
+        )
         await expect(knopf).toHaveAttribute('aria-expanded', 'false')
         await expect(knopf).toHaveAttribute('aria-haspopup', 'dialog')
 

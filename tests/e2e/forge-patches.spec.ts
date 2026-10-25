@@ -1,6 +1,7 @@
 import { test, expect, type Page } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
+import { bisDaOderNeuLaden } from './support/laden'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { nip19 } from 'nostr-tools'
 import { measure } from './support/contrast'
@@ -238,20 +239,31 @@ async function oeffneForge(page: Page): Promise<void> {
     // hidden"). Auf der zweispaltigen Bühne ab 56 rem ist der Parameter
     // wirkungslos; der Test läuft damit in beiden Formen.
     await page.goto('/bereich/forge?tab=repos')
-    // Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `loading` steht,
-    // ist die Werkbank per `x-show` aus, und jede Messung liefe gegen 0 — grün,
-    // ohne irgendetwas geprüft zu haben.
-    await page.waitForFunction(
-        () => {
-            const el = document.querySelector('[x-data^="nostrForge"]')
-            const A = (window as unknown as { Alpine?: { $data(e: Element): { loading?: boolean } } }).Alpine
+    // One retry unit with a reload as the fallback — on a busy machine the island's first load
+    // round ends at welshman's 3 s bound with an empty list („Die Forge ist gerade nicht
+    // erreichbar."); see `support/laden.ts`.
+    await bisDaOderNeuLaden(
+        page,
+        'Forge-Insel mit mindestens einem Repo',
+        async (fenster) => {
+            // Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `loading` steht,
+            // ist die Werkbank per `x-show` aus, und jede Messung liefe gegen 0 — grün,
+            // ohne irgendetwas geprüft zu haben.
+            await page.waitForFunction(
+                () => {
+                    const el = document.querySelector('[x-data^="nostrForge"]')
+                    const A = (window as unknown as { Alpine?: { $data(e: Element): { loading?: boolean } } }).Alpine
 
-            return !!el && !!A && A.$data(el).loading === false
+                    return !!el && !!A && A.$data(el).loading === false
+                },
+                undefined,
+                { timeout: fenster },
+            )
+            await expect(page.locator('[data-forge-repo]').first()).toBeVisible({ timeout: fenster })
         },
-        undefined,
-        { timeout: 30_000 },
+        async () => {},
+        { fenster: 20_000 },
     )
-    await expect(page.locator('[data-forge-repo]').first()).toBeVisible({ timeout: 30_000 })
 }
 
 /** Von der Übersicht in die Detailseite des Testrepos und auf den Patches-Tab. */
@@ -1037,13 +1049,13 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
                  * zwei frei laufen lassen — sie tragen dieselben Feldklassen und
                  * würden bei einem Rasterbruch genauso kippen.
                  */
-                const arten: { name: string; wurzel: string; labels: boolean; hin: () => Promise<void> }[] = [
+                const arten: { name: string; wurzel: string; labels: boolean; mitLeuten?: boolean; hin: () => Promise<void> }[] = [
                     {
-                        name: 'Issue mit Labels', wurzel: '[data-forge-issue]', labels: true,
+                        name: 'Issue mit Labels', wurzel: '[data-forge-issue]', labels: true, mitLeuten: true,
                         hin: async () => { await page.getByRole('tab', { name: /^Issues/ }).click() },
                     },
                     {
-                        name: 'Pull Request', wurzel: '[data-forge-pr]', labels: false,
+                        name: 'Pull Request', wurzel: '[data-forge-pr]', labels: false, mitLeuten: true,
                         hin: async () => { await page.getByRole('tab', { name: /^Pull Requests/ }).click() },
                     },
                     {
@@ -1062,9 +1074,22 @@ test.describe('Forge: Patches lesen und Repos durchsuchen', () => {
                 let leuteBelegt = 0
                 const gemessen: Record<string, string> = {}
 
-                for (const { name, wurzel, labels } of arten) {
+                for (const { name, wurzel, labels, mitLeuten } of arten) {
                     await arten.find((x) => x.name === name)!.hin()
                     await expect(page.locator(wurzel).first(), `${name}: keine Zeile sichtbar`).toBeVisible({ timeout: 30_000 })
+                    // The faces come from the comment events, which arrive AFTER the row itself
+                    // (separate relay query). Measured once right after the row appeared, the box
+                    // was still empty on a busy machine and the file's own fail-closed counter
+                    // below ("keine einzige Zeile trug sichtbare Gesichter") fell — red in 2 of 4
+                    // full runs on 2026-10-25. The seeded comment is the fact being awaited.
+                    if (mitLeuten) {
+                        await expect
+                            .poll(() => leuteGefuellt(page, wurzel), {
+                                timeout: 30_000,
+                                message: `${name}: die Leute-Kiste füllt sich nie, obwohl ein Kommentar gesät wurde`,
+                            })
+                            .toBe(true)
+                    }
 
                     const m = await feldmatrix(page, wurzel)
                     console.log(`[p3-matrix] ${fassung} ${name}: ${JSON.stringify(m)}`)

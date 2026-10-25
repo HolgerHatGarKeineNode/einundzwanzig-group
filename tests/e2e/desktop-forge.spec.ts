@@ -1,6 +1,7 @@
 import { test, expect, type Page } from './support/fixtures'
 import { useZooid, ZOOID_WS } from './support/zooid'
 import { loginNsec } from './support/login'
+import { bisDaOderNeuLaden } from './support/laden'
 import { execFileSync, spawnSync } from 'node:child_process'
 
 const NSEC = process.env.NOSTR_TEST_NSEC as string
@@ -201,20 +202,45 @@ async function oeffneForge(page: Page, breite: number): Promise<void> {
     await page.setViewportSize({ width: breite, height: 1000 })
     await loginNsec(page, NSEC)
     await page.goto('/bereich/forge')
-    // Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `loading` steht,
-    // sind beide Regionen per `x-show` aus, und jede Messung liefe gegen 0 —
-    // grün, ohne irgendetwas geprüft zu haben.
-    await page.waitForFunction(
-        () => {
-            const el = document.querySelector('[x-data^="nostrForge"]')
-            const daten = el && (window as unknown as { Alpine?: { $data(e: Element): { loading?: boolean } } }).Alpine
-                ? (window as unknown as { Alpine: { $data(e: Element): { loading?: boolean } } }).Alpine.$data(el)
-                : null
+    // The island must have left `loading` AND show a first repo. One retry unit with a reload as
+    // the fallback: on a busy machine the first load round ends at welshman's 3 s bound with
+    // „Die Forge ist gerade nicht erreichbar." and an empty list (seen three times in one
+    // full run, 2026-10-25), and the product offers no other way out than loading again.
+    // See `support/laden.ts`.
+    const ersteKachel = page.locator('[data-forge-repo]').first()
+    await bisDaOderNeuLaden(
+        page,
+        'Forge-Insel mit mindestens einem Repo',
+        async (fenster) => {
+            // Auf den ZUSTAND warten, nicht auf eine Wartezeit: solange `loading` steht,
+            // sind beide Regionen per `x-show` aus, und jede Messung liefe gegen 0 —
+            // grün, ohne irgendetwas geprüft zu haben.
+            await page.waitForFunction(
+                () => {
+                    const el = document.querySelector('[x-data^="nostrForge"]')
+                    const daten = el && (window as unknown as { Alpine?: { $data(e: Element): { loading?: boolean } } }).Alpine
+                        ? (window as unknown as { Alpine: { $data(e: Element): { loading?: boolean } } }).Alpine.$data(el)
+                        : null
 
-            return !!daten && daten.loading === false
+                    return !!daten && daten.loading === false
+                },
+                undefined,
+                { timeout: fenster },
+            )
+            await expect(ersteKachel).toBeVisible({ timeout: fenster })
         },
-        undefined,
-        { timeout: 30_000 },
+        async () => {},
+        {
+            fenster: 20_000,
+            diagnose: async () =>
+                page.evaluate(() => {
+                    const el = document.querySelector('[x-data^="nostrForge"]')
+                    const A = (window as unknown as { Alpine?: { $data(e: Element): Record<string, unknown> } }).Alpine
+                    const d = el && A ? A.$data(el) : {}
+
+                    return `loading=${String(d.loading)} error=${JSON.stringify(d.error ?? '')}`
+                }),
+        },
     )
     const stand = await page.evaluate(() => {
         const el = document.querySelector('[x-data^="nostrForge"]')
@@ -235,8 +261,6 @@ async function oeffneForge(page: Page, breite: number): Promise<void> {
         }
     })
     console.log(`[desktop-forge] Inselstand @${breite}px: ${JSON.stringify(stand)}`)
-    const ersteKachel = page.locator('[data-forge-repo]').first()
-    await expect(ersteKachel).toBeVisible({ timeout: 30_000 })
 
     // P7: the tile leads to `/forge/<naddr>` and NOT to `/bereich/forge/<naddr>`.
     //
@@ -548,9 +572,18 @@ test.describe('Forge: die Desktop-Bühne', () => {
         // auf, `toBeVisible()` schlug fehl). Auf `[data-forge-spur="ueber"]`
         // verankert — genau der Abschnitt, der die Beschreibung TRÄGT
         // (`aside.forge-repo-spur`, Abschnitt „1. Über").
-        await expect(
-            page.locator('[data-forge-spur="ueber"] p').filter({ hasText: /Das Chat-, Artikel- und Forge-Paket/ }).first(),
-        ).toBeVisible({ timeout: 30_000 })
+        // The repo page loads its own announcement in a round of its own (`loadRepoDetail`,
+        // welshman's 3 s bound — see `support/laden.ts`); when that round ends empty on a busy
+        // machine the „Über" lane stays without its text for good. Reload = the product's retry.
+        await bisDaOderNeuLaden(
+            page,
+            'Repo-Beschreibung auf der Detailseite',
+            (fenster) =>
+                expect(
+                    page.locator('[data-forge-spur="ueber"] p').filter({ hasText: /Das Chat-, Artikel- und Forge-Paket/ }).first(),
+                ).toBeVisible({ timeout: fenster }),
+            () => page.waitForURL(/\/forge\/naddr1/, { timeout: 30_000 }),
+        )
 
         const laengste = await laengsteZeile(page)
         console.log(`[desktop-forge] laengste Zeile auf der Detailseite @1920px: ${JSON.stringify(laengste)}`)
@@ -574,20 +607,46 @@ test.describe('Forge: die Desktop-Bühne', () => {
         await loginNsec(page, NSEC)
         await page.goto('/bereich/forge?tab=repos')
 
-        await expect
-            .poll(
-                () =>
-                    page.evaluate(() => {
-                        const aktiv = document.activeElement as HTMLElement | null
+        try {
+            await expect
+                .poll(
+                    () =>
+                        page.evaluate(() => {
+                            const aktiv = document.activeElement as HTMLElement | null
 
-                        return {
-                            titel: aktiv?.getAttribute('data-forge-region-titel') !== null,
-                            region: aktiv?.closest('[data-forge-region]')?.getAttribute('data-forge-region') ?? '',
-                        }
-                    }),
-                { timeout: 30_000, message: 'Der Fokus ist nicht auf der Werkbank-Überschrift gelandet' },
-            )
-            .toEqual({ titel: true, region: 'repos' })
+                            return {
+                                titel: aktiv?.getAttribute('data-forge-region-titel') !== null,
+                                region: aktiv?.closest('[data-forge-region]')?.getAttribute('data-forge-region') ?? '',
+                            }
+                        }),
+                    { timeout: 30_000, message: 'Der Fokus ist nicht auf der Werkbank-Überschrift gelandet' },
+                )
+                .toEqual({ titel: true, region: 'repos' })
+        } catch (e) {
+            // The island's own state at the moment the wait gave up: the jump is attempted at
+            // `init()` and once more when `loading` ends, and a red here is only explainable by
+            // WHICH of its guards (`zweispaltig`, `_gesprungen`, the title's visibility) held.
+            const zustand = await page.evaluate(() => {
+                const el = document.querySelector('[x-data^="nostrForge"]')
+                const A = (window as unknown as { Alpine?: { $data(e: Element): Record<string, unknown> } }).Alpine
+                const d = el && A ? A.$data(el) : {}
+                const titel = document.querySelector<HTMLElement>('[data-forge-region="repos"] [data-forge-region-titel]')
+
+                return JSON.stringify({
+                    zweispaltig: d.zweispaltig,
+                    gesprungen: d._gesprungen,
+                    tabAusAdresse: d._tabAusAdresse,
+                    loading: d.loading,
+                    tab: d.tab,
+                    titelDa: titel !== null,
+                    titelSichtbar: titel?.checkVisibility?.() ?? null,
+                    aktiv: document.activeElement?.tagName ?? null,
+                    breite: window.innerWidth,
+                })
+            })
+            console.log(`[desktop-forge ?tab=repos] Zustand beim Aufgeben: ${zustand}`)
+            throw e
+        }
 
         // Und die Adresse behauptet weiter, was sie gezeigt hat.
         expect(new URL(page.url()).searchParams.get('tab')).toBe('repos')

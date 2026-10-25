@@ -200,7 +200,7 @@ test.describe('Gast auf einem Raum-Link (P4)', () => {
         page,
         context,
     }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const h = `onboard1${Date.now()}`
         createRoomNak(h, 'Onboard1')
         const marker = `positivkontrolle-${h}`
@@ -233,7 +233,7 @@ test.describe('Gast auf einem Raum-Link (P4)', () => {
         //    (belegt, p4-messung.md Abschnitt 20). Dass der Guard im Markup steht,
         //    sichert `tests/Feature/EmptyStatesAndA11yTest.php` ab; dort beißt die
         //    Mutation.
-        await expect(page.locator('.skeleton:visible')).toHaveCount(0)
+        await expect(page.locator('.skeleton:visible')).toHaveCount(0, { timeout: 20_000 })
 
         // 4) Der Gast sieht die vorhandene Nachricht NICHT — das ist der Grund
         //    für den ganzen Rückbau und nicht bloß ein Nebenbefund.
@@ -278,7 +278,7 @@ test.describe('Gast auf einem Raum-Link (P4)', () => {
     test('Der Gast-Zustand hängt am Client-Signer, NICHT an der Server-Session: überlebt einen harten Reload — Kontrastprobe: mit dem Signer verschwindet das Gate wieder', async ({
         page,
     }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const h = `onboard2${Date.now()}`
         createRoomNak(h, 'Onboard2')
         const marker = `kontrastprobe-${h}`
@@ -312,7 +312,7 @@ test.describe('Beide Landeplätze (P4: Raum-Fuß und Thread)', () => {
     test('Raum UND Thread-Deep-Link tragen dieselbe Aussage; der Knopf öffnet das Login-Sheet mit Kontextzeile', async ({
         page,
     }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const h = `onboard3${Date.now()}`
         createRoomNak(h, 'Onboard3')
         const rootId = postRootMessage(h, 'Wurzel')
@@ -347,11 +347,11 @@ test.describe('Beide Landeplätze (P4: Raum-Fuß und Thread)', () => {
         // nicht zwei Karten übereinander.
         await expect(page.locator('[data-testid="verein-gate-anmelden"]:visible')).toHaveCount(1)
         await expect(alterGastComposer(page)).toHaveCount(0)
-        await expect(page.locator('.skeleton:visible')).toHaveCount(0)
+        await expect(page.locator('.skeleton:visible')).toHaveCount(0, { timeout: 20_000 })
     })
 
     test('pendingReturn: Login aus dem Gate-Sheet führt zurück in denselben Raum', async ({ page }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const h = `onboard4${Date.now()}`
         createRoomNak(h, 'Onboard4')
 
@@ -441,7 +441,7 @@ test.describe('Angemeldetes Relay-Nicht-Mitglied auf einem Raum-Link (P11)', () 
      * nicht Vereinsmitgliedschaft: keine Aussage über die Person.
      */
     test('sieht das Relay-Gate statt Leerkarte und Beitreten — eingeschwungen, nicht vor dem Kippen', async ({ page }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const h = `onboard6${Date.now()}`
         createRoomNak(h, 'Onboard6')
         const marker = `p11-positivkontrolle-${h}`
@@ -504,7 +504,7 @@ test.describe('Angemeldetes Relay-Nicht-Mitglied auf einem Raum-Link (P11)', () 
      * (sein Join geht durch — festgehalten auch im P3.1-Test oben).
      */
     test('Gegenprobe: MITGLIED im wirklich leeren Raum sieht die Leerkarte und den Beitreten-Knopf', async ({ page }) => {
-        test.setTimeout(60_000)
+        test.setTimeout(120_000)
         const h = `onboard7${Date.now()}`
         createRoomNak(h, 'Onboard7') // KEINE Nachricht — wirklich leer
 

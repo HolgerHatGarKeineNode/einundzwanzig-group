@@ -107,7 +107,7 @@ const rnd = (): number => Math.floor(Math.random() * 1e9)
  * eine hängende Antwort stattdessen nach `timeoutMs` als Fehlversuch gewertet und
  * NEU probiert.
  */
-function nak(args: readonly string[], attempts = 3, timeoutMs = 4_000): string {
+function nak(args: readonly string[], attempts = 3, timeoutMs = 20_000): string {
     let last: unknown
     for (let i = 0; i < attempts; i++) {
         try {

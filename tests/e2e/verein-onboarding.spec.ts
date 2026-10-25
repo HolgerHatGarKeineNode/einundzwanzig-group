@@ -3,7 +3,7 @@ import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { nsecEncode } from 'nostr-tools/nip19'
-import { openedUrls, routeVerein, seedWallet, stubDeadSpace, stubVereinDocument, vereinConfigBody, vereinMeBody } from './support/verein'
+import { openedUrls, routeVerein, seedWallet, stimmeStatutenZu, stubDeadSpace, stubVereinDocument, vereinConfigBody, vereinMeBody } from './support/verein'
 
 /**
  * P6 — E2E-Netz für den Onboarding-Flow (`/verein/beitritt`), das dritte Netz
@@ -58,9 +58,9 @@ test('voller Weg ohne Wallet: Statuten, Antrag und Zahlung ohne die App zu verla
     await expect(page.locator('li[data-step="antrag"]')).toHaveAttribute('data-state', 'todo')
     await expect(page.getByTestId('verein-statuten-weiter')).toBeDisabled()
 
-    await page.getByTestId('verein-statuten-zustimmung').click()
-    await expect(page.getByTestId('verein-statuten-weiter')).toBeEnabled()
-    await page.getByTestId('verein-statuten-weiter').click()
+    // The click on "Weiter" only goes through on an ENABLED button, so reaching step 2 is the
+    // proof that the tick enabled it; see `stimmeStatutenZu` for why the order is not fixed.
+    await stimmeStatutenZu(page)
 
     // Schritt 2: Antrag. Statuten-Marke ist jetzt erledigt, Antrag aktiv.
     await expect(page.getByTestId('verein-antrag')).toBeVisible({ timeout: 15_000 })
@@ -215,7 +215,7 @@ test('Rechnung abgelaufen: „Neue Rechnung erzeugen" ersetzt die Checkout-Adres
 // ── 5. Zahlung in Prüfung: Nachfass-Plan durch, immer noch nicht bestätigt ───
 
 test('Zahlung in Prüfung: nach neun erfolglosen Nachfass-Runden erklärt die Fläche „wird geprüft"', async ({ page }) => {
-    test.setTimeout(30_000)
+    test.setTimeout(120_000)
     const { nsec } = freshNsec()
     await setupAndLogin(page, nsec)
 
@@ -267,7 +267,7 @@ test('Zahlung in Prüfung: nach neun erfolglosen Nachfass-Runden erklärt die Fl
 // ── 6. Lesefehler ist kein „kein Mitglied" ───────────────────────────────────
 
 test('Lesefehler: ein nicht lesbarer Space behauptet nicht „kein Mitglied"', async ({ page, relayWaechter }) => {
-    test.setTimeout(30_000)
+    test.setTimeout(120_000)
     // The deliberately dead relay of `stubDeadSpace` (port 1, nothing listens) is declared
     // to the relay guard — it is the SUBJECT of this case, not an accident. Without the
     // declaration the guard fails the test for reaching a socket outside its worker ports,
