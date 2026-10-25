@@ -73,6 +73,12 @@
     <script>window.__nostrArticleRelays = window.__nostrArticleRelays ?? @js(config('group.article_relay_urls'));</script>
 @endif
 
+{{-- NIP-05 lookups for the verified badge through this server (`GET /nostr/nip05`,
+     `js/nip05Proxy.ts`). Empty = the island asks each `.well-known/nostr.json` itself (the
+     E2E suite runs that way, `GROUP_HANDLE_PROXY=false`). Also written by the package's
+     `partials/globals.blade.php`; `Nip05ProxyTest` holds both heads together. --}}
+<script>window.__nostrNip05Proxy = window.__nostrNip05Proxy ?? @js(config('group.handle_proxy', true) ? route('group.handle-lookup', absolute: false) : '');</script>
+
 {{-- P2 — NIP-52 calendar: the relays a meetup's dates (kind 31923) and the RSVPs
      (kind 31925) live on, comma separated, plus the pubkeys whose dates count. BOTH
      values are needed; with one missing the date card asks no relay and keeps showing

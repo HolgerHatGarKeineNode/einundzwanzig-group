@@ -152,3 +152,25 @@ it('carries no session cookie (route runs outside the web middleware group)', fu
 
     expect($this->get(nip05Url(['alice@primal.net']))->headers->getCookies())->toBeEmpty();
 });
+
+/*
+ * The island reads `window.__nostrNip05Proxy` at boot. The web host writes its own head, so
+ * the line stands there AND in the package's `partials/globals.blade.php` — measured: with
+ * it only in the package, the E2E switch below had no effect on the web host.
+ */
+it('tells the island where to ask, and an empty value when the proxy is off', function () {
+    config()->set('group.handle_proxy', true);
+    $on = responseHtml($this->get(route('group.bereich.artikel'))->assertOk());
+    expect($on)->toContain("window.__nostrNip05Proxy = window.__nostrNip05Proxy ?? '\\/nostr\\/nip05'");
+
+    config()->set('group.handle_proxy', false);
+    $off = responseHtml($this->get(route('group.bereich.artikel'))->assertOk());
+    expect($off)->toContain("window.__nostrNip05Proxy = window.__nostrNip05Proxy ?? ''");
+});
+
+it('writes the same boot global from the package head used by foreign hosts', function () {
+    config()->set('group.handle_proxy', false);
+
+    expect(view('group::partials.globals')->render())
+        ->toContain("window.__nostrNip05Proxy = window.__nostrNip05Proxy ?? ''");
+});
