@@ -22,6 +22,12 @@
 # sie gehört auf die eigenen Relays des Users; die App führt sie clientseitig.
 set -uo pipefail
 export PATH="$PATH:/home/user/go/bin"
+# Every `nak` below goes through the wrapper that re-asks a `req` whose NIP-42 round never ran
+# (see nak-resilient.sh). Exporting NAK_REAL keeps the wrapper from finding itself.
+NAK_WRAPPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nak-resilient.sh"
+export NAK_REAL="${NAK_REAL:-$(command -v nak)}"
+nak() { "$NAK_WRAPPER" "$@"; }
+SEED_BULK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/seed-bulk.ts"
 
 ZOOID_DIR=/home/user/Code/zooid
 ADMIN=b2ee09a54bedf17ee1db562bdddd75c48661d981eb52c49dc206c55ba8439414   # zooid-Admin-SECRET (= Relay-Key, self = da99fbe3…)
@@ -98,6 +104,26 @@ starte_herzschlag() { # $1 = PID des Servers
 }
 DATA=./data-test-$ZOOID_PORT
 CONFIG=./config-test-$ZOOID_PORT
+# The relay's SQLite lives in RAM when the machine has a tmpfs for it. `data-test-<port>` stays
+# the path everything else knows (this script, teardown-stack.sh, the reaper, the lifecycle
+# nodetests) and becomes a SYMLINK into /dev/shm. Why: the database is test scratch that is
+# deleted at teardown, and on a disk every event is an fsync. The repo sits on btrfs, where an
+# fsync can wait for the filesystem's transaction commit — measured 2026-10-25 with a 4 KiB
+# write+fsync probe in the zooid directory during a full run: one stall of 1.8 s (median 0.4 ms),
+# while 18 % of every second showed up as IO stall in /proc/pressure/io. All six relays share
+# that disk, so they stall TOGETHER, and the page's own bounds (welshman's 3 s load, the 6 s
+# follow read) trip in several workers at the same moment — the "Kontaktliste laden" /
+# "Die Forge ist gerade nicht erreichbar." reds, on an idle CPU. `E2E_ZOOID_DATA_ROOT=` (empty)
+# keeps the data in the repo directory as before.
+SHM_ROOT="${E2E_ZOOID_DATA_ROOT-/dev/shm}"
+if [ -n "$SHM_ROOT" ] && [ -d "$SHM_ROOT" ] && [ -w "$SHM_ROOT" ]; then
+    DATA_REAL="$SHM_ROOT/e2e-zooid-data-$ZOOID_PORT"
+    mkdir -p "$DATA_REAL"
+    if [ ! -L "$ZOOID_DIR/data-test-$ZOOID_PORT" ]; then
+        rm -rf "$ZOOID_DIR/data-test-$ZOOID_PORT"
+        ln -s "$DATA_REAL" "$ZOOID_DIR/data-test-$ZOOID_PORT"
+    fi
+fi
 LOG=/tmp/e2e-zooid-$ZOOID_PORT.log
 # welcome-Seed-Baseline: der Guard setzt frisch auf, sobald der Default-Raum „welcome"
 # über seine 3 Seed-Nachrichten hinaus wächst. Grund: die welcome-Tests (M4/M5) prüfen
@@ -349,9 +375,18 @@ nak event --auth --sec "$USER" -k 9021 -t h=edit "$R" >/dev/null 2>&1 || true
 # Room-Chat (M4): kind-9-Nachrichten in „welcome" — nur wenn noch keine da sind
 # (nak-Events sind nicht replaceable → Duplikate vermeiden).
 if [ "$(nak req -k 9 -t h=welcome --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -c '"kind":9')" -eq 0 ]; then
-    nak event --auth --sec "$USER"  -k 9 -t h=welcome -c 'Willkommen im Space! 👋' "$R" >/dev/null 2>&1 || true
-    nak event --auth --sec "$ADMIN" -k 9 -t h=welcome -c 'Schön, dass du da bist. Infos: https://einundzwanzig.space' "$R" >/dev/null 2>&1 || true
-    nak event --auth --sec "$USER"  -k 9 -t h=welcome -c 'Danke!' "$R" >/dev/null 2>&1 || true
+    # DISTINCT, increasing created_at — 10 s apart. Without `--ts` the three messages were
+    # published within a few hundred milliseconds and, on a fast moment, carried the SAME second
+    # (measured 2026-10-25 on a fresh instance: all three at 1792884864). NIP-01 leaves the order
+    # of equal timestamps to the relay and the client, so the room showed them in an order that
+    # changed from instance to instance — and in one of those orders „Willkommen im Space!" is
+    # rendered WITHOUT its author button (grouped under the neighbouring row), which made
+    # person-mute.spec.ts wait 60 s for a „Profil anzeigen" that did not exist (three workers
+    # at once, in two full runs). Which instance tied was luck of the seed's speed.
+    NOW=$(date +%s)
+    nak event --auth --sec "$USER"  -k 9 -t h=welcome --ts $((NOW - 30)) -c 'Willkommen im Space! 👋' "$R" >/dev/null 2>&1 || true
+    nak event --auth --sec "$ADMIN" -k 9 -t h=welcome --ts $((NOW - 20)) -c 'Schön, dass du da bist. Infos: https://einundzwanzig.space' "$R" >/dev/null 2>&1 || true
+    nak event --auth --sec "$USER"  -k 9 -t h=welcome --ts $((NOW - 10)) -c 'Danke!' "$R" >/dev/null 2>&1 || true
 fi
 
 # „scroll": 60 Fremd-Nachrichten (vom ADMIN, gestaffelte created_at) für die D1-
@@ -359,9 +394,9 @@ fi
 # Gestaffelte Zeitstempel, damit die `until`-Pagination echte ältere Seiten liefert.
 if [ "$(nak req -k 9 -t h=scroll --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -c '"kind":9')" -eq 0 ]; then
     NOW=$(date +%s)
-    for i in $(seq 1 60); do
-        nak event --auth --sec "$ADMIN" -k 9 -t h=scroll --ts $((NOW - 60 + i)) -c "Zeile $i" "$R" >/dev/null 2>&1 || true
-    done
+    # One connection for all 60 (seed-bulk.ts) instead of 60 `nak` process starts: under CPU
+    # contention the loop alone used up the fixture's 120 s. Same events: "Zeile <i>" at NOW-60+i.
+    node --experimental-strip-types "$SEED_BULK" "$R" "$ADMIN" scroll 60 $((NOW - 60)) "Zeile" >/dev/null || { echo "zooid:$ZOOID_PORT: seed-bulk (scroll) failed" >&2; exit 1; }
 fi
 
 # „punkt": 60 Fremd-Nachrichten mit VERGANGENEN, gestaffelten Zeitstempeln. Zwei Zwecke:
@@ -373,9 +408,7 @@ fi
 #      sonst prüfte der Test einen Zustand, den der Seed erzeugt hat, nicht die App.
 if [ "$(nak req -k 9 -t h=punkt --auth --sec "$ADMIN" "$R" 2>/dev/null | grep -c '"kind":9')" -eq 0 ]; then
     NOW=$(date +%s)
-    for i in $(seq 1 60); do
-        nak event --auth --sec "$ADMIN" -k 9 -t h=punkt --ts $((NOW - 3600 - 60 + i)) -c "Punkt Zeile $i" "$R" >/dev/null 2>&1 || true
-    done
+    node --experimental-strip-types "$SEED_BULK" "$R" "$ADMIN" punkt 60 $((NOW - 3600 - 60)) "Punkt Zeile" >/dev/null || { echo "zooid:$ZOOID_PORT: seed-bulk (punkt) failed" >&2; exit 1; }
 fi
 
 # Seed-Poll (kind 1068) im „poll"-Raum für den C5-Einfachwahl-Vote-Test (id == label).

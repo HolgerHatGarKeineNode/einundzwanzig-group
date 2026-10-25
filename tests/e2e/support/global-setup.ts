@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import type { FullConfig } from '@playwright/test'
 import { ownedRunMarkerPaths } from './runMarkers'
 import { SOURCES_STAMP, sourcesHash } from './sourcesStamp'
@@ -108,6 +108,40 @@ export default function globalSetup(config: FullConfig): void {
         rmSync(marker, { force: true })
     }
     console.log(`[global-setup] Lauf-Marker der eigenen Slots entfernt: ${markers.join(' ')}`)
+
+    /*
+     * **The server's file cache is state that SURVIVES the run — and it poisoned runs.**
+     *
+     * `ProfileCache` (`GET /nostr/profiles`) writes a miss record for every pubkey it could not
+     * resolve, and the retry interval DOUBLES with each miss: 60 s, 2 min, 4 min … capped at 24 h
+     * (`MISS_TTL_FIRST` / `missBackoffSeconds`). The six `serve` processes use `CACHE_STORE=file`
+     * (`serverEnv.ts`), the files live in `storage/framework/cache/data`, and the worker ports —
+     * which are part of the cache key via the space URL — are the same in every run. So every
+     * run inherited the misses of all earlier runs and added its own: measured on 2026-10-25
+     * there were records with `attempts: 9` and `retry_after` four hours ahead for the fixed
+     * test identities' relays. A request for such a pubkey is not even sent.
+     *
+     * Effect on the suite: `person-mute.spec.ts` failed 2 of 3 on that cache and passed 3 of 3 a
+     * minute after `rm -rf storage/framework/cache/data` (1.2 min vs 16 s), and the same cause
+     * shows up as „@npub1cra…" instead of a name in `room.spec.ts` and as a missing profile
+     * button — red cases that looked like load, each in a different place, gone once the
+     * directory is empty. The more runs in a day, the worse it got.
+     *
+     * Emptied at the start of every run, before any `serve` exists. It is a cache: the dev app
+     * on the same machine refills it. (Another suite on a different `E2E_SLOT_OFFSET` that is
+     * mid-login at this very moment loses one NIP-98 challenge; the window is the few
+     * milliseconds of this call.)
+     */
+    // Everything BUT the tracked `.gitignore` of that directory (it keeps the folder in git).
+    const cacheDir = 'storage/framework/cache/data'
+    if (existsSync(cacheDir)) {
+        for (const eintrag of readdirSync(cacheDir)) {
+            if (eintrag !== '.gitignore') {
+                rmSync(`${cacheDir}/${eintrag}`, { recursive: true, force: true })
+            }
+        }
+    }
+    console.log(`[global-setup] Server-Dateicache (${cacheDir}) geleert`)
 
     if (relayMode() === 'buzz') {
         // Nichts zu tun: der Buzz-Stack entsteht seit der Parallelisierung PRO WORKER

@@ -205,6 +205,13 @@ export async function startSilentRelay(): Promise<{ url: string; label: string; 
     const server = createServer()
     server.on('upgrade', (req, socket) => {
         open.push(socket)
+        // The browser abandons this socket on purpose (the read is aborted after its 6 s bound,
+        // the page reloads in the positive control) — and a peer that goes away with unread data
+        // raises ECONNRESET on OUR end. An `error` event without a listener is an uncaught
+        // exception in the worker, which failed the whole case with „read ECONNRESET" while the
+        // thing under test had behaved (full run under load, 2026-10-25). A reset on a socket
+        // whose only job is to stay silent is not news.
+        socket.on('error', () => {})
         const key = String(req.headers['sec-websocket-key'] ?? '')
         const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64')
         socket.write(

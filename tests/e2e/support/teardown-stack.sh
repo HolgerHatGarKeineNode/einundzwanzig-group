@@ -59,6 +59,9 @@ zooid)
     fi
     rm -f "$PIDFILE" "$HBFILE" "/tmp/e2e-zooid-$PORT.run" "/tmp/e2e-zooid-$PORT.alive" "/tmp/e2e-zooid-$PORT.log"
     rm -rf "/home/user/Code/zooid/data-test-$PORT" "/home/user/Code/zooid/config-test-$PORT"
+    # The symlink above points into /dev/shm (see zooid-testserver.sh) — removing the link does
+    # not remove what it points to, and that is RAM.
+    rm -rf "/dev/shm/e2e-zooid-data-$PORT"
     ;;
 buzz)
     PROJECT="buzz-test-$PORT"

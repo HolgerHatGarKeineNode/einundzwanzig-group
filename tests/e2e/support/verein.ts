@@ -1,4 +1,4 @@
-import { type Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 
 /**
  * P6 — Helfer für die Vereins-Onboarding-Specs (`verein-onboarding.spec.ts`).
@@ -266,4 +266,38 @@ export async function seedWallet(page: Page, pubkeyHex: string): Promise<void> {
         const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, enc.encode(wallet))
         await idbPut('data:einundzwanzig:wallet:' + pk, { iv, ct })
     }, pubkeyHex)
+}
+
+/**
+ * Step 1 → step 2 of `/verein/beitritt`: tick the statutes box and get to the application form.
+ *
+ * Not a bare `check()` + `click()` on the "Weiter" button: the flow's phase is a function of
+ * `statutesConfirmed` (`vereinView`, `js/vereinFlow.ts`), so ANY `_recompute()` that lands after
+ * the tick — the boot's wallet lookup is one — advances to step 2 by itself and takes the button
+ * out of the DOM. On an idle machine the click wins that race; with the CPU busy it does not and
+ * the click waits on a detached element until the test timeout (reproduced 2026-10-25: 6 of 24
+ * runs of the F2 and the full-path case with 14 CPU hogs on the machine; a page-state probe showed
+ * `phase: "antrag"` and the step-1 card removed 22 ms after the tick, no click ever sent).
+ * Both orders are legitimate behaviour, so the helper accepts both: click "Weiter" while it
+ * exists and is enabled, stop as soon as the form is there.
+ */
+export async function stimmeStatutenZu(page: Page): Promise<void> {
+    const antrag = page.getByTestId('verein-antrag')
+    const box = page.getByTestId('verein-statuten-zustimmung')
+    const weiter = page.getByTestId('verein-statuten-weiter')
+
+    await expect(async () => {
+        if (await antrag.isVisible()) {
+            return
+        }
+        if (await box.isVisible()) {
+            await box.check({ timeout: 2_000 })
+        }
+        if (await antrag.isVisible()) {
+            return
+        }
+        await weiter.click({ timeout: 2_000 })
+    }).toPass({ timeout: 30_000, intervals: [100, 250, 500] })
+
+    await expect(antrag).toBeVisible({ timeout: 15_000 })
 }

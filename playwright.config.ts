@@ -1,8 +1,22 @@
 import { defineConfig } from '@playwright/test'
 import { chromiumHermetikArgs } from './tests/e2e/support/hermetik'
+import { readFileSync } from 'node:fs'
+import { cpus } from 'node:os'
 
 // Wegwerf-nsec (NOSTR_TEST_NSEC) + APP-Konfig aus der .env in process.env laden.
 process.loadEnvFile('.env')
+
+/**
+ * Every spec reaches the relay through `nak`, and fifty of them carry their own `nak()` helper
+ * around `process.env.NAK`. A `nak req` can come back empty with exit 0 when its NIP-42 round
+ * never ran (measured 2026-10-25: 2 of 120 calls with a busy machine) — so the repair sits at
+ * the binary: `NAK` points to a wrapper that re-asks exactly that case, `NAK_REAL` is the
+ * binary underneath. See `support/nak-resilient.sh`. Workers inherit both from this process.
+ */
+if (!process.env.NAK?.endsWith('nak-resilient.sh')) {
+    process.env.NAK_REAL = process.env.NAK ?? `${process.env.HOME}/go/bin/nak`
+    process.env.NAK = new URL('./tests/e2e/support/nak-resilient.sh', import.meta.url).pathname
+}
 
 /**
  * E2E-Suite mit ECHTER Parallelität. Host-Chromium (kein Playwright-Browser-Download).
@@ -23,6 +37,55 @@ process.loadEnvFile('.env')
  * 753 s Testzeit Buzz gegen 633 s zooid).
  */
 const isBuzz = process.env.E2E_RELAY === 'buzz'
+
+/**
+ * How many workers the machine can carry RIGHT NOW — derived from the CPU that is actually idle,
+ * not from a number that was right on one machine on one day.
+ *
+ * Each worker is a Chromium, a `php artisan serve` with four PHP workers and a zooid; a full run
+ * averaged ~8 busy cores for six workers (measured 2026-10-25: 3100 cpu-s in 390 s) and peaked far
+ * above that. When another job holds half of the box the six workers starve each other and the
+ * product's own bounds (welshman's 3 s load, the 6 s follow read) start to trip: reds that are
+ * not in any test. Idle threads are sampled over one second before the run starts; ~2.5 idle
+ * threads per worker, never fewer than 3 and never more than 6 (`E2E_WORKERS` overrides all of
+ * this; CI keeps 4). On this 24-thread machine: idle ≥ 15 threads → 6 workers, 12 → 5, 9 → 4.
+ * Anything that cannot read `/proc/stat` keeps 6.
+ */
+const workersFromIdleCpu = (): number => {
+    try {
+        const sample = (): { busy: number; total: number } => {
+            const f = readFileSync('/proc/stat', 'utf8').split('\n')[0]!.trim().split(/\s+/).slice(1).map(Number)
+            const idle = (f[3] ?? 0) + (f[4] ?? 0)
+            const total = f.reduce((a, b) => a + b, 0)
+
+            return { busy: total - idle, total }
+        }
+        const a = sample()
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_000)
+        const b = sample()
+        const threads = cpus().length
+        const idleThreads = (1 - (b.busy - a.busy) / Math.max(1, b.total - a.total)) * threads
+
+        return Math.max(3, Math.min(6, Math.round(idleThreads / 2.5)))
+    } catch {
+        return 6
+    }
+}
+
+/**
+ * Decided ONCE, in the process that starts the run, and handed down through the environment:
+ * the config file is evaluated again in every worker, and a worker that sampled the CPU for a
+ * second of its own would both waste that second and could come to another number.
+ */
+const resolveWorkers = (): number => {
+    if (process.env.E2E_WORKERS) {
+        return Number(process.env.E2E_WORKERS)
+    }
+    const n = process.env.CI ? 4 : workersFromIdleCpu()
+    process.env.E2E_WORKERS = String(n)
+
+    return n
+}
 
 /**
  * **Der Buzz-Modus fährt NUR die Buzz-Specs.**
@@ -96,15 +159,32 @@ const hostChromium = {
 export default defineConfig({
     testDir: './tests/e2e',
     fullyParallel: true,
+    /**
+     * The default 30 s is SHORTER than what the specs ask for inside a test: `oeffneForge()` alone
+     * waits up to 30 s for the repo list, `toBeVisible({ timeout: 30_000 })` is on 328 lines, and a
+     * test that opens a page, logs in and waits twice therefore hit "Test timeout of 30000ms
+     * exceeded" while its own conditions were still within their budget (desktop-forge:528,
+     * forge-readme:532, verein-onboarding:41, room.spec x6 — all red under load on 2026-10-25,
+     * all green alone). A test-level bound smaller than the sum of its own waits is a defect, not
+     * a guard. 90 s only moves the point where a genuine hang is reported; tests that need more
+     * still set `test.setTimeout` themselves.
+     */
+    timeout: 90_000,
+    /**
+     * Playwright's default for an `expect` WITHOUT an explicit timeout is 5 s — a number for an
+     * idle machine. The specs set an explicit window wherever they thought of one; the rest
+     * (`toBeVisible()`, `toHaveText(…)`, `toHaveCount(0)` …) inherits this. It is only the upper
+     * bound of a condition that is awaited anyway, so a passing assertion does not get slower;
+     * assertions that expect something NOT to be there pass at once and do not use it.
+     */
+    expect: { timeout: 15_000 },
     // 1 serve + 1 Relay + 1 Chromium je Worker. Auf CI knapper halten.
     // Buzz zieht pro Worker einen eigenen Docker-Stack hoch (4 Container) — deshalb
     // dort weniger Worker als bei zooid, aber eben nicht mehr nur einer.
     // `E2E_BUZZ_WORKERS` überschreibt das, wenn die Maschine mehr oder weniger verträgt.
     workers: isBuzz
         ? Number(process.env.E2E_BUZZ_WORKERS ?? (process.env.CI ? '2' : '4'))
-        : process.env.CI
-          ? 4
-          : 6,
+        : resolveWorkers(),
     reporter: [['list']],
     globalSetup: './tests/e2e/support/global-setup.ts',
     // Räumt am Laufende die EIGENEN Slots vollständig ab (Prozesse, Docker-Container/
