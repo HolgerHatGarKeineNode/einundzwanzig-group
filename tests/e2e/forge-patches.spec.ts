@@ -280,6 +280,16 @@ async function oeffnePatches(page: Page): Promise<void> {
     // Zeile, die das Wort nur enthält (der Grund für das alte `exact`); der
     // ANKER am Zeilenanfang hält genau das fern und lässt nur die Zahl dahinter
     // zu. `getByRole('tab')` schränkt zusätzlich auf Reiter ein.
+    // The tab row belongs to the repo page's own load round (`loadRepoDetail`, 3 s bound); when
+    // that round ends empty the page has no tabs at all (full run 2026-10-25, 90 s in a click
+    // that could not resolve). Reload = the retry the page has — see `support/laden.ts`.
+    await bisDaOderNeuLaden(
+        page,
+        'Repo-Detailseite mit Reiter „Patches"',
+        (fenster) => expect(page.getByRole('tab', { name: /^Patches/ })).toBeVisible({ timeout: fenster }),
+        async () => {},
+        { fenster: 20_000 },
+    )
     await page.getByRole('tab', { name: /^Patches/ }).click()
     await expect(page.locator('[data-forge-patch]').first()).toBeVisible({ timeout: 30_000 })
 }

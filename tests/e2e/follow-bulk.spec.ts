@@ -86,7 +86,16 @@ async function enterSelection(page: Page, targets: readonly string[]): Promise<v
  */
 async function openBulkPreview(page: Page): Promise<Locator> {
     const submit = page.locator('[data-directory-bulk-submit]')
-    await expect(submit).toHaveText('Auswahl prüfen', { timeout: 40_000 })
+    // The arming read is bounded at 6 s (`READ_TIMEOUT_MS`, `follows.ts`); when it overruns, the
+    // bar falls back to „Kontaktliste laden" — F3 added that label for exactly this case, as
+    // the way to ask again. On a busy machine that happened (two full runs, 2026-10-25), so the
+    // helper does what the bar invites: press it, bounded by the attempt window.
+    await expect(async () => {
+        if ((await submit.innerText()).trim() === 'Kontaktliste laden') {
+            await submit.click()
+        }
+        await expect(submit).toHaveText('Auswahl prüfen', { timeout: 10_000 })
+    }).toPass({ timeout: 60_000, intervals: [250, 500, 1_000] })
     await submit.click()
     const modal = page.locator('dialog[data-modal="follow-bulk-preview"]')
     await expect(modal).toBeVisible({ timeout: 15_000 })

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from './support/fixtures'
 import { useZooid } from './support/zooid'
 import { loginNsec } from './support/login'
+import { bisDaOderNeuLaden } from './support/laden'
 
 /**
  * **The way into the encrypted conversations — measured at 390 px and 1280 px.**
@@ -195,32 +196,45 @@ test('the profile card offers writing and following — measured at 375 px and 1
 
     for (const [breite, hoehe] of [[1280, 800], [375, 800]] as const) {
         await page.setViewportSize({ width: breite, height: hoehe })
-        await page.goto('/bereich/chat')
-        await expect(page.locator('[data-modal="profile-card"]'), `${breite}px: the card is not in the document`)
-            .toBeAttached({ timeout: 20_000 })
+        // The settled label comes from the card's arming pass, which reads from the relay once
+        // per page load with the product's own 6 s bound; when that read overruns, the label
+        // stays „Lädt…" for the life of the load (full run 2026-10-25). Reload = the retry the
+        // card has. Each attempt starts from `goto`, so nothing needs repeating after the reload.
+        await bisDaOderNeuLaden(
+            page,
+            `Profilkarte ${breite}px: Folgen-Knopf eingeschwungen`,
+            async (fenster) => {
+                await page.goto('/bereich/chat')
+                await expect(page.locator('[data-modal="profile-card"]'), `${breite}px: the card is not in the document`)
+                    .toBeAttached({ timeout: fenster })
 
-        await page.evaluate((pk) => {
-            window.dispatchEvent(new CustomEvent('open-profile', { detail: pk }))
-        }, FREMD)
-        // ── Since P3 this button no longer waits for a relay answer ───────────────────
-        // Until P3 it hung on `$store.privateMessages?.canSend`, i.e. on a store that is
-        // not mounted outside the Direkt segment any more — the condition would be
-        // permanently `undefined` and the only way into a conversation from a profile would
-        // have disappeared with the mount. It is a navigation now, so it is there as soon as
-        // the card knows whose card it is.
-        await expect(page.locator('[data-person-dm]'), `${breite}px: the write button never appeared`)
-            .toBeVisible({ timeout: 20_000 })
-        // ── Wait for the follow button to SETTLE, and expect the third state ───────────
-        // This case measured „Folgen" and got „Lädt…" from the day P1 landed. Both were
-        // right at the moment they were taken: the label is a function of the arming pass,
-        // and the arming pass had not come back yet. What the reader of this suite is
-        // (`NOSTR_TEST_NSEC`, no kind 10002 anywhere on the test relay) resolves to
-        // `OutboxKnowledge = 'confirmed-none'`, and for that reader P2/D8 deliberately does
-        // NOT read the contact list on a page load — asking four public relays on every
-        // view is a presence signal for nothing. So the settled label is the one that
-        // invites the read, and it never becomes „Folgen" without a click.
-        await expect(page.locator('[data-person-follow]'), `${breite}px: the follow button never settled`)
-            .toHaveText('Kontaktliste laden', { timeout: 30_000 })
+                await page.evaluate((pk) => {
+                    window.dispatchEvent(new CustomEvent('open-profile', { detail: pk }))
+                }, FREMD)
+                // ── Since P3 this button no longer waits for a relay answer ───────────────────
+                // Until P3 it hung on `$store.privateMessages?.canSend`, i.e. on a store that is
+                // not mounted outside the Direkt segment any more — the condition would be
+                // permanently `undefined` and the only way into a conversation from a profile would
+                // have disappeared with the mount. It is a navigation now, so it is there as soon as
+                // the card knows whose card it is.
+                await expect(page.locator('[data-person-dm]'), `${breite}px: the write button never appeared`)
+                    .toBeVisible({ timeout: fenster })
+                // ── Wait for the follow button to SETTLE, and expect the third state ───────────
+                // This case measured „Folgen" and got „Lädt…" from the day P1 landed. Both were
+                // right at the moment they were taken: the label is a function of the arming pass,
+                // and the arming pass had not come back yet. What the reader of this suite is
+                // (`NOSTR_TEST_NSEC`, no kind 10002 anywhere on the test relay) resolves to
+                // `OutboxKnowledge = 'confirmed-none'`, and for that reader P2/D8 deliberately does
+                // NOT read the contact list on a page load — asking four public relays on every
+                // view is a presence signal for nothing. So the settled label is the one that
+                // invites the read, and it never becomes „Folgen" without a click.
+                await expect(page.locator('[data-person-follow]'), `${breite}px: the follow button never settled`)
+                    .toHaveText('Kontaktliste laden', { timeout: fenster })
+
+            },
+            async () => {},
+            { fenster: 25_000 },
+        )
 
         const karte = await messeKarte()
         // eslint-disable-next-line no-console
