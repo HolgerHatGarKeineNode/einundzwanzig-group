@@ -184,5 +184,10 @@ export const testServerEnv = ({ slot, mitBoard = false, ohneWorkspace = false }:
         // worker does far more than 60 of those a minute — the production limit turned
         // into 429s in unrelated tests (P7). The number a visitor gets is unchanged.
         GROUP_PORTAL_INDEX_RATE: '6000,1',
+        // NIP-05 lookups for the verified badge stay in the browser here: the specs stub
+        // `.well-known/nostr.json` with `page.route`, which cannot see a request the SERVER
+        // makes — and that request would leave the machine. Production asks through the
+        // server (`/nostr/nip05`, `Nip05Resolver`), covered by `Nip05ProxyTest`.
+        GROUP_NIP05_PROXY: 'false',
     }
 }
