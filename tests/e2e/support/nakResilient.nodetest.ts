@@ -44,7 +44,18 @@ PY
 `,
     )
     chmodSync(fake, 0o755)
-    const res = spawnSync(WRAPPER, args, { encoding: 'utf8', env: { ...process.env, NAK_REAL: fake } })
+    // Through the process environment and not an `env:` option: `serverEnv.nodetest.ts` requires
+    // every child process that gets its own `env` to take it from `testServerEnv`, and this
+    // child is a fake `nak` that must not see the run's relay keys at all — it inherits only
+    // what the test runner has, plus the one variable set here.
+    const vorher = process.env.NAK_REAL
+    process.env.NAK_REAL = fake
+    const res = spawnSync(WRAPPER, args, { encoding: 'utf8' })
+    if (vorher === undefined) {
+        delete process.env.NAK_REAL
+    } else {
+        process.env.NAK_REAL = vorher
+    }
 
     return { res, calls: Number(readFileSync(zaehler, 'utf8')), dir }
 }
