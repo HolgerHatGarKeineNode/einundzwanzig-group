@@ -17,11 +17,11 @@
         "allowImportingTsExtensions": true,
         "types": []
     },
-    // `resources/js/app.ts` imports the package and so pulls `bridge.ts` into THIS
-    // project transitively. Its ambient declarations (`qrcode.d.ts`, `url-import.d.ts`)
-    // sit next to it and would be invisible without the second glob — that once gave
-    // errors about modules whose declaration is right there. Only `.d.ts`: the
-    // implementation files have their own project (`packages/*/js/tsconfig.json`) and
-    // are not checked twice. (`css.d.ts` went with cropperjs 2, which ships no CSS.)
+    // `resources/js/app.ts` importiert das Package und zieht `bridge.ts` damit
+    // transitiv in DIESES Projekt. Dessen Ambient-Deklarationen (`qrcode.d.ts`,
+    // `css.d.ts`) liegen aber daneben und wären ohne den zweiten Glob nicht
+    // sichtbar — die Folge waren zwei Fehler über Module, für die genau hier eine
+    // Deklaration bereitliegt. Nur `.d.ts`: die Implementierungsdateien haben ihr
+    // eigenes Projekt (`packages/*/js/tsconfig.json`) und gehören nicht doppelt geprüft.
     "include": ["resources/js/**/*.ts", "packages/*/js/**/*.d.ts"]
 }
