@@ -60,10 +60,10 @@ async function openComposerRoom(page: Page, h = 'welcome'): Promise<void> {
 }
 
 /**
- * C6a Cropper-UI: das Anhängen eines Bildes öffnet EIN sauberes Crop-Overlay —
- * genau eine `.cropper-container` (keine versetzte Doppelanzeige), Original-<img>
- * versteckt, Crop-Box wählbar. Deckt den vom Nutzer gemeldeten Doppelbild-/
- * „nichts wählbar"-Bug ab (Ursache: reaktiver Proxy + Container ohne feste Höhe).
+ * C6a cropper UI: attaching an image opens ONE clean crop overlay — exactly one
+ * `<cropper-canvas>` (cropperjs 2 web components; no offset double image), the
+ * original <img> hidden, a selectable crop box. Covers the reported double-image /
+ * "nothing selectable" bug (cause: reactive proxy + container without a fixed height).
  */
 test('C6a: Bild anhängen öffnet genau EINEN funktionierenden Cropper', async ({ page }) => {
     await openComposerRoom(page)
@@ -88,11 +88,11 @@ test('C6a: Bild anhängen öffnet genau EINEN funktionierenden Cropper', async (
     await expect(overlay).toBeVisible()
 
     // … cropperjs baut GENAU EINE Container-Instanz (kein Doppelbild) …
-    await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.locator('cropper-canvas')).toHaveCount(1, { timeout: 10_000 })
     // … das Original-<img> ist versteckt (sonst läge es sichtbar über dem Cropper) …
-    await expect(page.locator('img.cropper-hidden')).toHaveCount(1)
+    await expect(page.locator('img[x-ref="cropImg"]')).toBeHidden()
     // … und es gibt eine wählbare Crop-Box.
-    await expect(page.locator('.cropper-crop-box')).toBeVisible()
+    await expect(page.locator('cropper-selection')).toBeVisible()
 
     // Ratio-Umschalten funktioniert (aria-pressed spiegelt den Zustand).
     const oneToOne = overlay.getByRole('button', { name: '1:1', exact: true })
@@ -104,7 +104,7 @@ test('C6a: Bild anhängen öffnet genau EINEN funktionierenden Cropper', async (
     // Schließen räumt auf: Overlay weg, keine Cropper-DOM-Reste.
     await overlay.getByRole('button', { name: 'Abbrechen' }).click()
     await expect(overlay).toBeHidden()
-    await expect(page.locator('.cropper-container')).toHaveCount(0)
+    await expect(page.locator('cropper-canvas')).toHaveCount(0)
 })
 
 /**
@@ -123,8 +123,8 @@ test('C6a: Bild in den Composer einfügen (Paste) öffnet den Cropper', async ({
 
     const overlay = page.getByRole('dialog', { name: 'Bild zuschneiden' })
     await expect(overlay).toBeVisible()
-    await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
-    await expect(page.locator('.cropper-crop-box')).toBeVisible()
+    await expect(page.locator('cropper-canvas')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.locator('cropper-selection')).toBeVisible()
 })
 
 /**
@@ -145,7 +145,7 @@ test('C6a: Paste mit Text UND Bild öffnet den Cropper NICHT (Text hat Vorrang)'
 
     // Kein Cropper — der Browser fügt den Text via Default-Paste ein.
     await expect(page.getByRole('dialog', { name: 'Bild zuschneiden' })).toBeHidden()
-    await expect(page.locator('.cropper-container')).toHaveCount(0)
+    await expect(page.locator('cropper-canvas')).toHaveCount(0)
 })
 
 /**
@@ -263,7 +263,7 @@ test('C6b: Cropper aus dem Thread — Escape/Klick-außerhalb schließt NUR den 
     await threadFileInput(page).setInputFiles({ name: 'meme.png', mimeType: 'image/png', buffer: IMAGE })
     const crop = page.getByRole('dialog', { name: 'Bild zuschneiden' })
     await expect(crop).toBeVisible()
-    await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.locator('cropper-canvas')).toHaveCount(1, { timeout: 10_000 })
 
     // ESC → nur der Cropper schließt, der Thread bleibt offen.
     await page.keyboard.press('Escape')
@@ -273,7 +273,7 @@ test('C6b: Cropper aus dem Thread — Escape/Klick-außerhalb schließt NUR den 
     // Erneut öffnen, diesmal per Klick auf den abgedunkelten Bereich neben der Crop-Karte abbrechen.
     await threadFileInput(page).setInputFiles({ name: 'meme2.png', mimeType: 'image/png', buffer: IMAGE })
     await expect(crop).toBeVisible()
-    await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.locator('cropper-canvas')).toHaveCount(1, { timeout: 10_000 })
     await page.mouse.click(8, 8) // linke obere Ecke = Crop-Backdrop, außerhalb beider Karten
     await expect(crop).toBeHidden()
     await expect(thread).toBeVisible() // Thread NICHT mitgeschlossen
@@ -316,7 +316,7 @@ test('C6b: confirmCrop aus dem Thread schreibt threadAttachment, NICHT das Haupt
     await threadFileInput(page).setInputFiles({ name: 'meme.png', mimeType: 'image/png', buffer: IMAGE })
     const crop = page.getByRole('dialog', { name: 'Bild zuschneiden' })
     await expect(crop).toBeVisible()
-    await expect(page.locator('.cropper-container')).toHaveCount(1, { timeout: 10_000 })
+    await expect(page.locator('cropper-canvas')).toHaveCount(1, { timeout: 10_000 })
     await crop.getByRole('button', { name: /Anhängen|Lade hoch/ }).click()
 
     // Routing-Beleg: der Anhang landet im Thread-Composer, NICHT im Haupt-Composer.
