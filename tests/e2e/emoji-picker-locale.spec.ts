@@ -40,9 +40,9 @@ async function openPicker(page: Page, appLocale: string): Promise<void> {
 }
 
 for (const c of [
-    { appLocale: 'en', firstGroup: 'smileys & emotion', query: 'face' },
+    { appLocale: 'en', firstGroup: 'Smileys & emotion', query: 'face' },
     { appLocale: 'de', firstGroup: 'Smileys & Emotionen', query: 'gesicht' },
-    { appLocale: 'lv', firstGroup: 'smileys & emotion', query: 'face' },
+    { appLocale: 'lv', firstGroup: 'Smileys & emotion', query: 'face' },
 ]) {
     test(`emoji picker with app locale ${c.appLocale}: category names and search terms from the matching emojibase data`, async ({ page }) => {
         const dataRequests: string[] = []
