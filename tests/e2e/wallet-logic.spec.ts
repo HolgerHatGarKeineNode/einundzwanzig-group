@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures'
 import { fromMsats, getInvoiceAmount, getLnUrl, getWalletAddress, toMsats, WalletType } from '@welshman/util'
-import { nwc } from '@getalby/sdk'
+import { NWCClient } from '@getalby/sdk/nwc'
 import { Invoice } from '@getalby/lightning-tools/bolt11'
 
 /**
@@ -30,12 +30,15 @@ test('getWalletAddress liefert die lud16 nur bei NWC', () => {
 })
 
 test('NWCClient.parseWalletConnectUrl zerlegt den Verbindungs-String', () => {
+    // sdk 8+ validates pubkey and secret as 64-char hex; sdk 7+ returns a relay LIST.
+    const pk = 'ab'.repeat(32)
+    const secret = 'cd'.repeat(32)
     const url =
-        'nostr+walletconnect://abc123def456?relay=wss%3A%2F%2Frelay.example%2F&secret=deadbeef&lud16=me%40example.com'
-    const o = nwc.NWCClient.parseWalletConnectUrl(url)
-    expect(o.walletPubkey).toBe('abc123def456')
-    expect(o.relayUrl).toBe('wss://relay.example/')
-    expect(o.secret).toBe('deadbeef')
+        `nostr+walletconnect://${pk}?relay=wss%3A%2F%2Frelay.example%2F&secret=${secret}&lud16=me%40example.com`
+    const o = NWCClient.parseWalletConnectUrl(url)
+    expect(o.walletPubkey).toBe(pk)
+    expect(o.relayUrls).toEqual(['wss://relay.example/'])
+    expect(o.secret).toBe(secret)
     expect(o.lud16).toBe('me@example.com')
 })
 
