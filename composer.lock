@@ -737,7 +737,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/einundzwanzig-group",
-                "reference": "b8d35b15bc9147aae207768cd733d3a8a55e06d6"
+                "reference": "19370f918f3baab3aa1545c951e9350acce5ac9c"
             },
             "require": {
                 "illuminate/console": "^13.0",
