@@ -713,7 +713,7 @@ test.describe('Buzz-Workspace: Forge lesen (E2E, nur E2E_RELAY=buzz)', () => {
             const w = window as unknown as { __reqFilterCounts: number[] }
             w.__reqFilterCounts = []
             const send = WebSocket.prototype.send
-            WebSocket.prototype.send = function (data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+            WebSocket.prototype.send = function (data: Parameters<WebSocket['send']>[0]) {
                 if (typeof data === 'string' && data.startsWith('["REQ"')) {
                     try {
                         w.__reqFilterCounts.push((JSON.parse(data) as unknown[]).length - 2)
